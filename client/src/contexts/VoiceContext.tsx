@@ -133,6 +133,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const isScreenSharingRef = useRef<boolean>(false);
   const isLocalSpeakingRef = useRef<boolean>(false);
   const masterVolumeRef = useRef<number>(initialSettings.masterOutputVolume);
+  const screenQualityRef = useRef<ScreenQualityOptions>({
+    resolution: initialSettings.screenResolution,
+    fps: initialSettings.screenFps,
+    includeAudio: initialSettings.screenIncludeAudio,
+  });
 
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteParticipantsRef = useRef<Map<string, RemotePeerData>>(new Map());
@@ -302,6 +307,92 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, []);
 
+  // Otimiza o SDP de vídeo para garantir alto bitrate e partida rápida sem compressão excessiva
+  const boostVideoBitrateSdp = useCallback((sdp?: string): string | undefined => {
+    if (!sdp) return sdp;
+    const lines = sdp.split('\r\n');
+    let inVideoSection = false;
+    const result: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith('m=video ')) {
+        inVideoSection = true;
+        result.push(line);
+        continue;
+      } else if (line.startsWith('m=')) {
+        inVideoSection = false;
+      }
+
+      if (
+        inVideoSection &&
+        line.startsWith('a=fmtp:') &&
+        !line.includes('apt=') &&
+        !line.includes('x-google-max-bitrate')
+      ) {
+        result.push(
+          `${line};x-google-min-bitrate=2500;x-google-start-bitrate=5000;x-google-max-bitrate=8000`
+        );
+      } else {
+        result.push(line);
+      }
+    }
+
+    return result.join('\r\n');
+  }, []);
+
+  // Configura o RTCRtpSender de vídeo para priorizar codificação por GPU (H.264) e manter 60 FPS constantes
+  const configureScreenVideoSender = useCallback(
+    async (pc: RTCPeerConnection, sender: RTCRtpSender, quality: ScreenQualityOptions) => {
+      try {
+        if (
+          typeof RTCRtpSender !== 'undefined' &&
+          typeof RTCRtpSender.getCapabilities === 'function'
+        ) {
+          const capabilities = RTCRtpSender.getCapabilities('video');
+          const transceiver = pc.getTransceivers().find((t) => t.sender === sender);
+          if (
+            capabilities?.codecs &&
+            transceiver &&
+            typeof transceiver.setCodecPreferences === 'function'
+          ) {
+            const h264Codecs = capabilities.codecs.filter(
+              (c) => c.mimeType.toLowerCase() === 'video/h264'
+            );
+            const otherCodecs = capabilities.codecs.filter(
+              (c) => c.mimeType.toLowerCase() !== 'video/h264'
+            );
+            if (h264Codecs.length > 0) {
+              transceiver.setCodecPreferences([...h264Codecs, ...otherCodecs]);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Não foi possível priorizar codec H264 no transceiver:', err);
+      }
+
+      try {
+        const params = sender.getParameters();
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}];
+        }
+        const targetBitrate = quality.resolution === '1080p' ? 8_000_000 : 5_000_000;
+        const targetFps = quality.fps || 60;
+
+        (params as any).degradationPreference = 'maintain-framerate';
+        params.encodings[0].maxBitrate = targetBitrate;
+        params.encodings[0].maxFramerate = targetFps;
+        params.encodings[0].scaleResolutionDownBy = 1.0;
+        (params.encodings[0] as any).priority = 'high';
+        (params.encodings[0] as any).networkPriority = 'high';
+
+        await sender.setParameters(params);
+      } catch (err) {
+        console.warn('Não foi possível aplicar parâmetros de alto bitrate no RTCRtpSender:', err);
+      }
+    },
+    []
+  );
+
   // Envia oferta SDP para um peer específico
   const sendOffer = useCallback(
     async (remoteUserId: string, channelId: string) => {
@@ -312,7 +403,21 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         makingOfferRef.current.set(remoteUserId, true);
         const offer = await pc.createOffer();
         if (pc.signalingState !== 'stable') return;
-        await pc.setLocalDescription(offer);
+        try {
+          const boostedSdp = boostVideoBitrateSdp(offer.sdp);
+          await pc.setLocalDescription({ type: offer.type, sdp: boostedSdp });
+        } catch {
+          await pc.setLocalDescription(offer);
+        }
+
+        // Reaplicar parâmetros de bitrate/framerate após negociação local
+        const senders = screenSendersRef.current.get(remoteUserId) || [];
+        senders.forEach((s) => {
+          if (s.track?.kind === 'video') {
+            configureScreenVideoSender(pc, s, screenQualityRef.current);
+          }
+        });
+
         socket.emit('webrtc-offer', {
           channelId,
           toUserId: remoteUserId,
@@ -326,7 +431,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         makingOfferRef.current.set(remoteUserId, false);
       }
     },
-    [socket]
+    [socket, boostVideoBitrateSdp, configureScreenVideoSender]
   );
 
   // Cria ou retorna a RTCPeerConnection para um participante remoto
@@ -352,6 +457,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const senders: RTCRtpSender[] = [];
         screenStreamRef.current.getTracks().forEach((track) => {
           const sender = pc.addTrack(track, screenStreamRef.current!);
+          if (track.kind === 'video') {
+            configureScreenVideoSender(pc, sender, screenQualityRef.current);
+          }
           senders.push(sender);
         });
         screenSendersRef.current.set(remoteUserId, senders);
@@ -409,6 +517,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             attachRemoteAudio(remoteUserId, track, incomingStream || new MediaStream([track]));
           }
         } else if (track.kind === 'video') {
+          try {
+            // Minimizar jitter buffer de recepção para reprodução ultra-fluida em tempo real
+            (event.receiver as any).playoutDelayHint = 0.02;
+          } catch {}
+
           peerData.screenTrack = track;
           peerData.isScreenSharing = true;
 
@@ -448,7 +561,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       return { pc, isNew: true };
     },
-    [socket, attachRemoteAudio, syncVoiceState, sendOffer]
+    [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender]
   );
 
   // Configura detector de atividade de voz (VAD) para o microfone local
@@ -656,14 +769,43 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     saveUserSetting('micInputGain', clamped);
   }, []);
 
-  const updateScreenQualityPreset = useCallback((opts: ScreenQualityOptions) => {
-    setScreenQuality(opts);
-    saveUserSetting('screenResolution', opts.resolution);
-    saveUserSetting('screenFps', opts.fps);
-    if (opts.includeAudio !== undefined) {
-      saveUserSetting('screenIncludeAudio', opts.includeAudio);
-    }
-  }, []);
+  const updateScreenQualityPreset = useCallback(
+    (opts: ScreenQualityOptions) => {
+      screenQualityRef.current = opts;
+      setScreenQuality(opts);
+      saveUserSetting('screenResolution', opts.resolution);
+      saveUserSetting('screenFps', opts.fps);
+      if (opts.includeAudio !== undefined) {
+        saveUserSetting('screenIncludeAudio', opts.includeAudio);
+      }
+
+      // Atualizar em tempo real se já houver uma transmissão ativa
+      if (screenStreamRef.current) {
+        const is1080 = opts.resolution === '1080p';
+        const width = is1080 ? 1920 : 1280;
+        const height = is1080 ? 1080 : 720;
+        const videoTrack = screenStreamRef.current.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack
+            .applyConstraints({
+              width: { max: width },
+              height: { max: height },
+              frameRate: { ideal: opts.fps, max: opts.fps },
+            })
+            .catch(() => {});
+        }
+        peersRef.current.forEach((pc, peerId) => {
+          const senders = screenSendersRef.current.get(peerId) || [];
+          senders.forEach((s) => {
+            if (s.track?.kind === 'video') {
+              configureScreenVideoSender(pc, s, opts);
+            }
+          });
+        });
+      }
+    },
+    [configureScreenVideoSender]
+  );
 
   useEffect(() => {
     const unsubscribe = subscribeToSettingsChange((settings: UserAudioSettings) => {
@@ -671,11 +813,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       masterVolumeRef.current = settings.masterOutputVolume;
       setMasterVolumeState(settings.masterOutputVolume);
       setMicInputGainState(settings.micInputGain);
-      setScreenQuality({
+      const updatedQuality: ScreenQualityOptions = {
         resolution: settings.screenResolution,
         fps: settings.screenFps,
         includeAudio: settings.screenIncludeAudio,
-      });
+      };
+      screenQualityRef.current = updatedQuality;
+      setScreenQuality(updatedQuality);
     });
     return unsubscribe;
   }, []);
@@ -919,7 +1063,19 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         pendingCandidatesRef.current.delete(fromUserId);
 
         const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
+        try {
+          const boostedSdp = boostVideoBitrateSdp(answer.sdp);
+          await pc.setLocalDescription({ type: answer.type, sdp: boostedSdp });
+        } catch {
+          await pc.setLocalDescription(answer);
+        }
+
+        const senders = screenSendersRef.current.get(fromUserId) || [];
+        senders.forEach((s) => {
+          if (s.track?.kind === 'video') {
+            configureScreenVideoSender(pc, s, screenQualityRef.current);
+          }
+        });
 
         socket.emit('webrtc-answer', {
           channelId,
@@ -964,6 +1120,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
           }
           pendingCandidatesRef.current.delete(fromUserId);
+
+          const senders = screenSendersRef.current.get(fromUserId) || [];
+          senders.forEach((s) => {
+            if (s.track?.kind === 'video') {
+              configureScreenVideoSender(pc, s, screenQualityRef.current);
+            }
+          });
         }
       } catch (err) {
         console.warn(`Erro ao aplicar resposta WebRTC de ${fromUserId}:`, err);
@@ -1369,6 +1532,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     async (sourceId?: string, quality?: ScreenQualityOptions) => {
       try {
         const activeQuality = quality || { resolution: '1080p', fps: 60, includeAudio: true };
+        screenQualityRef.current = activeQuality;
         setScreenQuality(activeQuality);
 
         const is1080 = activeQuality.resolution === '1080p';
@@ -1407,7 +1571,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               audio: false,
               video: {
                 mandatory: videoMandatory,
-                optional: isWindow ? [{ maxWidth: width }, { maxHeight: height }] : [],
+                optional: isWindow
+                  ? [{ maxWidth: width }, { maxHeight: height }, { googCpuOveruseDetection: false }]
+                  : [{ googCpuOveruseDetection: false }],
               },
             });
           } catch (errWindow) {
@@ -1419,7 +1585,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   chromeMediaSource: 'desktop',
                   chromeMediaSourceId: sourceId,
                 },
-                optional: [{ maxWidth: width }, { maxHeight: height }],
+                optional: [
+                  { maxWidth: width },
+                  { maxHeight: height },
+                  { googCpuOveruseDetection: false },
+                ],
               },
             });
           }
@@ -1451,6 +1621,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         const videoTrack = stream.getVideoTracks()[0];
         if (videoTrack) {
+          try {
+            // Priorizar fluidez de movimento (60 FPS constantes em jogos 3D) em vez de travar frames
+            (videoTrack as any).contentHint = 'motion';
+          } catch {}
+          videoTrack
+            .applyConstraints({
+              width: { max: width },
+              height: { max: height },
+              frameRate: { ideal: fps, max: fps },
+            })
+            .catch(() => {});
           videoTrack.onended = () => {
             stopScreenShare();
           };
@@ -1481,6 +1662,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const newSenders: RTCRtpSender[] = [];
             stream.getTracks().forEach((track) => {
               const sender = pc.addTrack(track, stream);
+              if (track.kind === 'video') {
+                configureScreenVideoSender(pc, sender, activeQuality);
+              }
               newSenders.push(sender);
             });
             screenSendersRef.current.set(peerId, newSenders);
@@ -1492,7 +1676,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         console.error('Falha ao iniciar compartilhamento de tela:', error);
       }
     },
-    [stopScreenShare, createIsolatedProcessAudioTrack, syncVoiceState, emitLocalVoiceState, sendOffer]
+    [
+      stopScreenShare,
+      createIsolatedProcessAudioTrack,
+      syncVoiceState,
+      emitLocalVoiceState,
+      sendOffer,
+      configureScreenVideoSender,
+    ]
   );
 
   const watchScreenShare = useCallback((shareId: string) => {

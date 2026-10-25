@@ -8,6 +8,20 @@ import { autoUpdater } from 'electron-updater';
 // Permitir reprodução automática de áudio e vídeo WebRTC sem bloqueio de gesto
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+// Desativar throttling de segundo plano para manter 60 FPS constantes na transmissão quando o usuário estiver com o jogo em tela cheia
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+
+// Ativar aceleração por hardware GPU (NVENC / AMD AMF / Intel QuickSync) e captura DXGI zero-copy
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch(
+  'enable-features',
+  'MediaFoundationD3D11VideoCapture,VaapiVideoEncoder,VaapiVideoDecoder,PlatformHEVCDecoderSupport'
+);
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -88,8 +102,11 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
+
+  mainWindow.webContents.setBackgroundThrottling(false);
 
   // Ocultar barra de menu padrão do Windows para estilo limpo de app desktop
   mainWindow.setMenuBarVisibility(false);

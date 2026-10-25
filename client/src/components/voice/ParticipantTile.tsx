@@ -47,18 +47,42 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
       if (el.srcObject !== stream) {
         el.srcObject = stream;
       }
-      el.play().catch(() => {});
+      if (!(isLocal && isScreenShare && document.hidden)) {
+        el.play().catch(() => {});
+      }
     } else if (videoTrack) {
       const currentObj = el.srcObject as MediaStream | null;
       const existingTrack = currentObj?.getVideoTracks()[0];
       if (existingTrack !== videoTrack) {
         el.srcObject = new MediaStream([videoTrack]);
       }
-      el.play().catch(() => {});
+      if (!(isLocal && isScreenShare && document.hidden)) {
+        el.play().catch(() => {});
+      }
     } else {
       el.srcObject = null;
     }
-  }, [stream, videoTrack, audioTrackCount, isLocal, volume]);
+  }, [stream, videoTrack, audioTrackCount, isLocal, isScreenShare, volume]);
+
+  // Economizar GPU do transmissor pausando a pintura do preview local quando o Xolas estiver minimizado/em segundo plano
+  React.useEffect(() => {
+    if (!isLocal || !isScreenShare) return;
+
+    const handleVisibilityChange = () => {
+      const el = videoRef.current;
+      if (!el) return;
+      if (document.hidden) {
+        el.pause();
+      } else {
+        el.play().catch(() => {});
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isLocal, isScreenShare]);
 
   const hasVideo = stream ? stream.getVideoTracks().length > 0 : Boolean(videoTrack);
 
@@ -98,11 +122,14 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
           ref={videoRef}
           autoPlay
           playsInline
+          disablePictureInPicture
           muted={isLocal || volume === 0}
           onLoadedMetadata={(e) => {
-            e.currentTarget.play().catch(() => {});
+            if (!(isLocal && isScreenShare && document.hidden)) {
+              e.currentTarget.play().catch(() => {});
+            }
           }}
-          className="w-full h-full object-contain bg-black"
+          className="w-full h-full object-contain bg-black transform-gpu will-change-transform"
         />
       ) : (
         <div className="flex flex-col items-center justify-center p-4">
