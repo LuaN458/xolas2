@@ -1190,13 +1190,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
 
           try {
-            // Tentar capturar vídeo (tela ou janela) + áudio desktop loopback diretamente
+            // Tentar capturar vídeo (tela ou janela) + áudio desktop loopback com filtro inteligente de vozes do Xolas
             stream = await (navigator.mediaDevices as any).getUserMedia({
               audio: includeAudio
                 ? {
                     mandatory: {
                       chromeMediaSource: 'desktop',
                     },
+                    optional: [
+                      { echoCancellation: true },
+                      { googEchoCancellation: true },
+                      { googExperimentalEchoCancellation: true },
+                      { googAutoGainControl: false },
+                      { googNoiseSuppression: false },
+                    ],
                   }
                 : false,
               video: {
@@ -1239,6 +1246,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   mandatory: {
                     chromeMediaSource: 'desktop',
                   },
+                  optional: [
+                    { echoCancellation: true },
+                    { googEchoCancellation: true },
+                    { googExperimentalEchoCancellation: true },
+                    { googAutoGainControl: false },
+                    { googNoiseSuppression: false },
+                  ],
                 },
                 video: {
                   mandatory: {
@@ -1270,11 +1284,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
         }
 
-        // Garantir fidelidade máxima de som para músicas/vídeos de abas e janelas (desativar filtros de voz na faixa da tela)
+        // Garantir fidelidade máxima de som para vídeos/jogos e isolamento das vozes da chamada do Xolas
         stream.getAudioTracks().forEach((at) => {
           at.enabled = true;
           at.applyConstraints({
-            echoCancellation: false,
+            echoCancellation: true,
             noiseSuppression: false,
             autoGainControl: false,
           }).catch(() => {});
