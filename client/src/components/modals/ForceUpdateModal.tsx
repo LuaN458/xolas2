@@ -33,10 +33,7 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
       setUpdateInfo(info);
       setIsDownloading(false);
       setIsReady(true);
-      // Se o usuário não estiver logado, inicia contagem regressiva para reiniciar automaticamente
-      if (!isLoggedIn) {
-        setCountdown(5);
-      }
+      setCountdown(5);
     });
 
     return () => {
@@ -66,9 +63,9 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
     return null;
   }
 
-  // Se o usuário já estiver logado, deixamos o UpdateNotificationBanner lidar de forma não intrusiva.
-  // Se o usuário NÃO estiver logado, forçamos o modal em tela cheia porque a versão antiga não consegue conectar.
-  if (isLoggedIn) {
+  // Se estiver apenas baixando e o usuário já estiver logado, o banner inferior exibe o progresso;
+  // assim que terminar o download (isReady === true), exibe o modal com contagem de 5s para garantir que todos os clientes na call atualizem!
+  if (isLoggedIn && !isReady) {
     return null;
   }
 

@@ -205,11 +205,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const shares: ActiveScreenShareInfo[] = [];
 
     if (currentScreen && currentScreen.getVideoTracks().length > 0) {
+      // Importante: O preview local NUNCA deve incluir a faixa de áudio para evitar auto-reprodução/loop
+      const videoOnlyLocalStream = new MediaStream(currentScreen.getVideoTracks());
       shares.push({
         id: 'local-screen',
         participantName: user?.username || 'Você',
         isLocal: true,
-        stream: currentScreen,
+        stream: videoOnlyLocalStream,
         track: currentScreen.getVideoTracks()[0],
       });
     }
@@ -935,14 +937,24 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       channelId,
       fromUserId,
       sdp,
+      screenStreamId,
     }: {
       channelId: string;
       fromUserId: string;
       sdp: RTCSessionDescriptionInit;
+      screenStreamId?: string | null;
     }) => {
       if (!currentChannelRef.current || currentChannelRef.current.id !== channelId) return;
       const pc = peersRef.current.get(fromUserId);
       if (!pc) return;
+
+      const peerEntry = remoteParticipantsRef.current.get(fromUserId);
+      if (peerEntry && screenStreamId !== undefined) {
+        peerEntry.screenStreamId = screenStreamId;
+        if (screenStreamId) {
+          peerEntry.isScreenSharing = true;
+        }
+      }
 
       try {
         if (pc.signalingState === 'have-local-offer') {
@@ -1271,17 +1283,41 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const silentOutGain = audioCtx.createGain();
         silentOutGain.gain.value = 0;
 
+        let lastRemoteSpeechTime = 0;
+
         scriptNode.onaudioprocess = (e: AudioProcessingEvent) => {
           const outL = e.outputBuffer.getChannelData(0);
           const outR = e.outputBuffer.getChannelData(1);
           const framesNeeded = outL.length;
 
+          // Verificar se algum participante remoto na chamada do Xolas está falando neste instante
+          let remoteSpeakingNow = false;
+          remoteParticipantsRef.current.forEach((p) => {
+            if (!p.isMuted && p.isSpeaking) {
+              remoteSpeakingNow = true;
+            }
+          });
+          const now = performance.now();
+          if (remoteSpeakingNow) {
+            lastRemoteSpeechTime = now;
+          }
+          // Se o modo caiu para fallback ou se houver cauda acústica de voz da chamada (280ms), bloquear retorno
+          const suppressCallEcho =
+            res.mode === 'exclude-xolas-tree' && now - lastRemoteSpeechTime < 280;
+
           for (let i = 0; i < framesNeeded; i++) {
             if (availableFrames > 0) {
-              outL[i] = ringLeft[readIdx];
-              outR[i] = ringRight[readIdx];
+              const sampleL = ringLeft[readIdx];
+              const sampleR = ringRight[readIdx];
               readIdx = (readIdx + 1) % RING_SIZE;
               availableFrames--;
+              if (suppressCallEcho) {
+                outL[i] = 0;
+                outR[i] = 0;
+              } else {
+                outL[i] = sampleL;
+                outR[i] = sampleR;
+              }
             } else {
               outL[i] = 0;
               outR[i] = 0;

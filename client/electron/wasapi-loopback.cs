@@ -184,14 +184,13 @@ namespace XolasAudioLoopback
         const uint AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY = 0x08000000;
         const uint AUDCLNT_BUFFERFLAGS_SILENT = 0x2;
 
-        static uint FindRootProcessId(uint startPid)
+        static void LoadProcessTables(out Dictionary<uint, uint> parentMap, out Dictionary<uint, string> nameMap)
         {
-            if (startPid == 0) return 0;
-            var parentMap = new Dictionary<uint, uint>();
-            var nameMap = new Dictionary<uint, string>();
+            parentMap = new Dictionary<uint, uint>();
+            nameMap = new Dictionary<uint, string>();
 
             IntPtr snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return startPid;
+            if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return;
 
             try
             {
@@ -210,8 +209,11 @@ namespace XolasAudioLoopback
             {
                 CloseHandle(snap);
             }
+        }
 
-            if (!nameMap.ContainsKey(startPid)) return startPid;
+        static uint FindRootProcessId(uint startPid, Dictionary<uint, uint> parentMap, Dictionary<uint, string> nameMap)
+        {
+            if (startPid == 0 || !nameMap.ContainsKey(startPid)) return startPid;
             string targetName = nameMap[startPid];
             uint current = startPid;
             var visited = new HashSet<uint>();
@@ -234,80 +236,49 @@ namespace XolasAudioLoopback
             return current;
         }
 
-        static int Main(string[] args)
+        static bool IsAncestorOrUnsafeTarget(uint xolasPid, uint targetPid, Dictionary<uint, uint> parentMap, Dictionary<uint, string> nameMap)
         {
-            uint targetPid = 0;
-            uint fallbackExcludePid = 0;
-            int loopbackMode = 0; // 0 = INCLUDE, 1 = EXCLUDE
-            bool testOnly = false;
+            if (targetPid == 0) return true;
+            if (xolasPid != 0 && targetPid == xolasPid) return true;
 
-            for (int i = 0; i < args.Length; i++)
+            if (nameMap.ContainsKey(targetPid))
             {
-                if (args[i] == "--hwnd" && i + 1 < args.Length)
+                string tName = nameMap[targetPid];
+                if (tName.Contains("xolas") || tName == "explorer.exe")
                 {
-                    long hwndVal;
-                    if (long.TryParse(args[++i], out hwndVal) && hwndVal != 0)
-                    {
-                        uint winPid;
-                        GetWindowThreadProcessId(new IntPtr(hwndVal), out winPid);
-                        if (winPid != 0)
-                        {
-                            targetPid = FindRootProcessId(winPid);
-                            loopbackMode = 0; // INCLUDE_TARGET_PROCESS_TREE
-                        }
-                    }
-                }
-                else if (args[i] == "--fallback-exclude-pid" && i + 1 < args.Length)
-                {
-                    uint pidVal;
-                    if (uint.TryParse(args[++i], out pidVal) && pidVal != 0)
-                    {
-                        fallbackExcludePid = FindRootProcessId(pidVal);
-                    }
-                }
-                else if (args[i] == "--include-pid" && i + 1 < args.Length)
-                {
-                    uint pidVal;
-                    if (uint.TryParse(args[++i], out pidVal))
-                    {
-                        targetPid = FindRootProcessId(pidVal);
-                        loopbackMode = 0;
-                    }
-                }
-                else if (args[i] == "--exclude-pid" && i + 1 < args.Length)
-                {
-                    uint pidVal;
-                    if (uint.TryParse(args[++i], out pidVal))
-                    {
-                        targetPid = FindRootProcessId(pidVal);
-                        loopbackMode = 1; // EXCLUDE_TARGET_PROCESS_TREE
-                    }
-                }
-                else if (args[i] == "--test")
-                {
-                    testOnly = true;
+                    return true;
                 }
             }
 
-            // Se o HWND for invalido ou apontar para o proprio Xolas, usar EXCLUDE_TREE no Xolas para nunca vazar a call
-            if (fallbackExcludePid != 0 && (targetPid == 0 || (loopbackMode == 0 && targetPid == fallbackExcludePid)))
+            if (xolasPid != 0)
             {
-                targetPid = fallbackExcludePid;
-                loopbackMode = 1; // EXCLUDE_TARGET_PROCESS_TREE
+                uint cur = xolasPid;
+                var visited = new HashSet<uint>();
+                while (parentMap.ContainsKey(cur))
+                {
+                    visited.Add(cur);
+                    uint p = parentMap[cur];
+                    if (p == 0 || visited.Contains(p)) break;
+                    if (p == targetPid) return true;
+                    cur = p;
+                }
             }
 
-            if (targetPid == 0)
-            {
-                Console.Error.WriteLine("Invalid target PID.");
-                return 1;
-            }
+            return false;
+        }
 
-            Console.Error.WriteLine(string.Format("[WASAPI] TargetPID={0} Mode={1}", targetPid, loopbackMode == 0 ? "INCLUDE_TREE" : "EXCLUDE_TREE"));
-
+        static IAudioCaptureClient ActivateLoopbackCapture(
+            uint pid,
+            int mode,
+            ref WAVEFORMATEX fmt,
+            EventWaitHandle sampleEvent,
+            out IAudioClient outClient)
+        {
+            outClient = null;
             AUDIOCLIENT_ACTIVATION_PARAMS actParams = new AUDIOCLIENT_ACTIVATION_PARAMS();
             actParams.ActivationType = 1; // AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
-            actParams.ProcessLoopbackParams.TargetProcessId = targetPid;
-            actParams.ProcessLoopbackParams.ProcessLoopbackMode = loopbackMode;
+            actParams.ProcessLoopbackParams.TargetProcessId = pid;
+            actParams.ProcessLoopbackParams.ProcessLoopbackMode = mode;
 
             int paramsSize = Marshal.SizeOf(typeof(AUDIOCLIENT_ACTIVATION_PARAMS));
             IntPtr paramsPtr = Marshal.AllocCoTaskMem(paramsSize);
@@ -333,12 +304,128 @@ namespace XolasAudioLoopback
 
                 if (!handler.DoneEvent.WaitOne(5000) || handler.AudioClient == null)
                 {
-                    Console.Error.WriteLine(string.Format("[WASAPI] Activation failed or timed out. HRESULT=0x{0:X8}", handler.HResult));
-                    return 2;
+                    return null;
                 }
 
                 IAudioClient audioClient = handler.AudioClient;
+                uint flags = AUDCLNT_STREAMFLAGS_LOOPBACK |
+                             AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
+                             AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+                if (sampleEvent != null)
+                {
+                    flags |= AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+                }
 
+                int hr = audioClient.Initialize(
+                    AUDCLNT_SHAREMODE_SHARED,
+                    flags,
+                    200000,
+                    0,
+                    ref fmt,
+                    IntPtr.Zero);
+
+                if (hr < 0) return null;
+
+                if (sampleEvent != null)
+                {
+                    audioClient.SetEventHandle(sampleEvent.SafeWaitHandle.DangerousGetHandle());
+                }
+
+                object capObj;
+                hr = audioClient.GetService(typeof(IAudioCaptureClient).GUID, out capObj);
+                if (hr < 0 || capObj == null) return null;
+
+                hr = audioClient.Start();
+                if (hr < 0) return null;
+
+                outClient = audioClient;
+                return (IAudioCaptureClient)capObj;
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(paramsPtr);
+            }
+        }
+
+        static int Main(string[] args)
+        {
+            uint targetPid = 0;
+            uint fallbackExcludePid = 0;
+            int loopbackMode = 0; // 0 = INCLUDE, 1 = EXCLUDE
+            bool testOnly = false;
+
+            Dictionary<uint, uint> parentMap;
+            Dictionary<uint, string> nameMap;
+            LoadProcessTables(out parentMap, out nameMap);
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--hwnd" && i + 1 < args.Length)
+                {
+                    long hwndVal;
+                    if (long.TryParse(args[++i], out hwndVal) && hwndVal != 0)
+                    {
+                        uint winPid;
+                        GetWindowThreadProcessId(new IntPtr(hwndVal), out winPid);
+                        if (winPid != 0)
+                        {
+                            targetPid = FindRootProcessId(winPid, parentMap, nameMap);
+                            loopbackMode = 0; // INCLUDE_TARGET_PROCESS_TREE
+                        }
+                    }
+                }
+                else if (args[i] == "--fallback-exclude-pid" && i + 1 < args.Length)
+                {
+                    uint pidVal;
+                    if (uint.TryParse(args[++i], out pidVal) && pidVal != 0)
+                    {
+                        // Usar diretamente o PID principal do Electron (sem subir para instaladores/navegadores pais)
+                        fallbackExcludePid = pidVal;
+                    }
+                }
+                else if (args[i] == "--include-pid" && i + 1 < args.Length)
+                {
+                    uint pidVal;
+                    if (uint.TryParse(args[++i], out pidVal))
+                    {
+                        targetPid = FindRootProcessId(pidVal, parentMap, nameMap);
+                        loopbackMode = 0;
+                    }
+                }
+                else if (args[i] == "--exclude-pid" && i + 1 < args.Length)
+                {
+                    uint pidVal;
+                    if (uint.TryParse(args[++i], out pidVal))
+                    {
+                        // Usar diretamente o PID principal do Electron
+                        targetPid = pidVal;
+                        loopbackMode = 1; // EXCLUDE_TARGET_PROCESS_TREE
+                    }
+                }
+                else if (args[i] == "--test")
+                {
+                    testOnly = true;
+                }
+            }
+
+            // Se o HWND for invalido, apontar para o Xolas/Explorer, ou for ancestral do Xolas,
+            // usar EXCLUDE_TREE diretamente no Xolas para garantir 0% de vazamento da chamada
+            if (fallbackExcludePid != 0 && (targetPid == 0 || (loopbackMode == 0 && IsAncestorOrUnsafeTarget(fallbackExcludePid, targetPid, parentMap, nameMap))))
+            {
+                targetPid = fallbackExcludePid;
+                loopbackMode = 1; // EXCLUDE_TARGET_PROCESS_TREE
+            }
+
+            if (targetPid == 0)
+            {
+                Console.Error.WriteLine("Invalid target PID.");
+                return 1;
+            }
+
+            Console.Error.WriteLine(string.Format("[WASAPI] TargetPID={0} Mode={1}", targetPid, loopbackMode == 0 ? "INCLUDE_TREE" : "EXCLUDE_TREE"));
+
+            try
+            {
                 // Formato padrao 48000 Hz, 2 canais (Estereo), 16-bit PCM
                 WAVEFORMATEX fmt = new WAVEFORMATEX();
                 fmt.wFormatTag = 1; // WAVE_FORMAT_PCM
@@ -350,42 +437,18 @@ namespace XolasAudioLoopback
                 fmt.cbSize = 0;
 
                 EventWaitHandle sampleEvent = new EventWaitHandle(false, EventResetMode.AutoReset);
-
-                uint flags = AUDCLNT_STREAMFLAGS_LOOPBACK |
-                             AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
-                             AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM |
-                             AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
-
-                int hr = audioClient.Initialize(
-                    AUDCLNT_SHAREMODE_SHARED,
-                    flags,
-                    200000, // 20ms buffer
-                    0,
+                IAudioClient audioClient;
+                IAudioCaptureClient captureClient = ActivateLoopbackCapture(
+                    targetPid,
+                    loopbackMode,
                     ref fmt,
-                    IntPtr.Zero);
+                    sampleEvent,
+                    out audioClient);
 
-                if (hr < 0)
+                if (captureClient == null || audioClient == null)
                 {
-                    Console.Error.WriteLine(string.Format("[WASAPI] IAudioClient::Initialize failed: 0x{0:X8}", hr));
-                    return 3;
-                }
-
-                audioClient.SetEventHandle(sampleEvent.SafeWaitHandle.DangerousGetHandle());
-
-                object capObj;
-                hr = audioClient.GetService(typeof(IAudioCaptureClient).GUID, out capObj);
-                if (hr < 0 || capObj == null)
-                {
-                    Console.Error.WriteLine(string.Format("[WASAPI] GetService(IAudioCaptureClient) failed: 0x{0:X8}", hr));
-                    return 4;
-                }
-
-                IAudioCaptureClient captureClient = (IAudioCaptureClient)capObj;
-                hr = audioClient.Start();
-                if (hr < 0)
-                {
-                    Console.Error.WriteLine(string.Format("[WASAPI] IAudioClient::Start failed: 0x{0:X8}", hr));
-                    return 5;
+                    Console.Error.WriteLine("[WASAPI] Activation or initialization failed.");
+                    return 2;
                 }
 
                 Console.Error.WriteLine("[WASAPI] Capture started successfully (48kHz, Stereo, 16-bit PCM).");
@@ -393,6 +456,24 @@ namespace XolasAudioLoopback
                 {
                     audioClient.Stop();
                     return 0;
+                }
+
+                // Se estivermos em modo INCLUDE_TREE (janela especifica) e tivermos o PID do Xolas,
+                // abrimos tambem um monitor de referencia do Xolas para detectar e suprimir qualquer vazamento
+                IAudioClient xolasRefAudioClient = null;
+                IAudioCaptureClient xolasRefCapture = null;
+                if (loopbackMode == 0 && fallbackExcludePid != 0 && fallbackExcludePid != targetPid)
+                {
+                    try
+                    {
+                        xolasRefCapture = ActivateLoopbackCapture(
+                            fallbackExcludePid,
+                            0, // INCLUDE_TARGET_PROCESS_TREE no Xolas
+                            ref fmt,
+                            null,
+                            out xolasRefAudioClient);
+                    }
+                    catch { }
                 }
 
                 // Watchdog thread: encerra automaticamente se o processo pai (Electron) fechar o pipe stdin
@@ -411,11 +492,48 @@ namespace XolasAudioLoopback
 
                 Stream stdout = Console.OpenStandardOutput();
                 byte[] tempBuf = new byte[48000 * 4];
+                byte[] refBuf = new byte[48000 * 4];
                 byte[] silenceBuf = new byte[480 * 4]; // 10ms of silence
 
                 while (true)
                 {
                     sampleEvent.WaitOne(20);
+
+                    // Drenar o monitor de referencia do Xolas (se ativo) e medir se o Xolas esta emitindo voz neste exato frame
+                    int xolasPeak = 0;
+                    if (xolasRefCapture != null)
+                    {
+                        uint refPacket = 0;
+                        if (xolasRefCapture.GetNextPacketSize(out refPacket) >= 0)
+                        {
+                            while (refPacket > 0)
+                            {
+                                IntPtr refPtr;
+                                uint refFrames;
+                                uint refFlags;
+                                ulong rDevPos;
+                                ulong rQpcPos;
+                                if (xolasRefCapture.GetBuffer(out refPtr, out refFrames, out refFlags, out rDevPos, out rQpcPos) < 0)
+                                    break;
+
+                                int refBytes = (int)(refFrames * fmt.nBlockAlign);
+                                if (refBytes > 0 && (refFlags & AUDCLNT_BUFFERFLAGS_SILENT) == 0)
+                                {
+                                    if (refBuf.Length < refBytes) refBuf = new byte[refBytes];
+                                    Marshal.Copy(refPtr, refBuf, 0, refBytes);
+                                    for (int k = 0; k + 1 < refBytes; k += 2)
+                                    {
+                                        short sample = (short)(refBuf[k] | (refBuf[k + 1] << 8));
+                                        int abs = sample == short.MinValue ? 32767 : Math.Abs((int)sample);
+                                        if (abs > xolasPeak) xolasPeak = abs;
+                                    }
+                                }
+
+                                xolasRefCapture.ReleaseBuffer(refFrames);
+                                if (xolasRefCapture.GetNextPacketSize(out refPacket) < 0) break;
+                            }
+                        }
+                    }
 
                     uint nextPacketSize = 0;
                     int pHr = captureClient.GetNextPacketSize(out nextPacketSize);
@@ -450,6 +568,24 @@ namespace XolasAudioLoopback
                                     tempBuf = new byte[bytesToWrite];
                                 }
                                 Marshal.Copy(dataPtr, tempBuf, 0, bytesToWrite);
+
+                                // Se o monitor do Xolas detectou voz forte na chamada e o pacote da janela tem amplitude quase identica
+                                // (indicando que a janela compartilhada herdou o AudioService do Xolas), suprimir o vazamento!
+                                if (xolasPeak > 250)
+                                {
+                                    int winPeak = 0;
+                                    for (int k = 0; k + 1 < bytesToWrite; k += 2)
+                                    {
+                                        short s = (short)(tempBuf[k] | (tempBuf[k + 1] << 8));
+                                        int a = s == short.MinValue ? 32767 : Math.Abs((int)s);
+                                        if (a > winPeak) winPeak = a;
+                                    }
+                                    if (winPeak > 0 && Math.Abs(winPeak - xolasPeak) < (xolasPeak / 4))
+                                    {
+                                        Array.Clear(tempBuf, 0, bytesToWrite);
+                                    }
+                                }
+
                                 stdout.Write(tempBuf, 0, bytesToWrite);
                             }
                             stdout.Flush();
@@ -465,10 +601,6 @@ namespace XolasAudioLoopback
             {
                 Console.Error.WriteLine("[WASAPI] Fatal error: " + ex.Message);
                 return 9;
-            }
-            finally
-            {
-                Marshal.FreeCoTaskMem(paramsPtr);
             }
 
             return 0;

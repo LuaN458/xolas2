@@ -120,12 +120,12 @@ function createWindow() {
 // Configurar ouvintes de auto-atualização
 setupAutoUpdater();
 
-// Checar atualizações periodicamente em segundo plano (a cada 2 horas)
+// Checar atualizações periodicamente em segundo plano (a cada 2 minutos para sincronizar participantes rapidamente)
 setInterval(() => {
   if (app.isPackaged) {
     autoUpdater.checkForUpdatesAndNotify().catch(() => {});
   }
-}, 2 * 60 * 60 * 1000);
+}, 2 * 60 * 1000);
 
 // Handlers IPC para controle de atualizações
 ipcMain.handle('check-for-updates', async () => {

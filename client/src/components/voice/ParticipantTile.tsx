@@ -98,6 +98,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
           ref={videoRef}
           autoPlay
           playsInline
+          muted={isLocal || volume === 0}
           onLoadedMetadata={(e) => {
             e.currentTarget.play().catch(() => {});
           }}
