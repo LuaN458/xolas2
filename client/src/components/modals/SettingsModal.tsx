@@ -24,7 +24,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setMicInputGain,
   } = useVoice();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'audio'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'audio' | 'updates'>('profile');
   const [newNickname, setNewNickname] = useState(user?.username || '');
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -280,6 +280,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <Mic className="w-4 h-4 text-emerald-400" />
             <span>Voz & Microfone</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('updates')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
+              activeTab === 'updates'
+                ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
+                : 'text-obsidian-text-secondary border-transparent hover:text-white hover:bg-obsidian-card/60'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <span>Atualizações</span>
+          </button>
         </div>
 
         {/* Conteúdo da Aba */}
@@ -301,7 +313,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </div>
           )}
 
-          {activeTab === 'profile' ? (
+          {activeTab === 'profile' && (
             <div className="space-y-6">
               {/* Aba de Perfil */}
               <form onSubmit={handleSaveNickname} className="space-y-5">
@@ -421,7 +433,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </form>
             </div>
           </div>
-          ) : (
+          )}
+
+          {activeTab === 'audio' && (
             /* Aba de Áudio & Microfone */
             <div className="space-y-6">
               <div>
@@ -524,31 +538,79 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   Suas preferências de volumes, ganho e microfone são gravadas localmente neste dispositivo e mantidas mesmo após fechar o aplicativo.
                 </span>
               </div>
+            </div>
+          )}
 
-              {/* Informações da Versão e Atualizações */}
-              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border flex items-center justify-between">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <Sparkles className="w-4 h-4 text-indigo-400" />
-                    <span className="text-xs font-semibold text-white">Xolas Desktop</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-obsidian-surface text-indigo-300 border border-obsidian-border font-bold">
-                      v{appVersion}
-                    </span>
+          {activeTab === 'updates' && (
+            /* Nova Aba Exclusiva de Atualizações */
+            <div className="space-y-5">
+              {/* Card de Destaque da Versão */}
+              <div className="p-5 bg-obsidian-card rounded-2xl border border-obsidian-border space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 shadow-inner">
+                      <Sparkles className="w-5 h-5 text-indigo-400" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <h3 className="text-sm font-bold text-white tracking-wide">Xolas Desktop</h3>
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-obsidian-surface text-indigo-300 border border-obsidian-border shadow-sm">
+                          v{appVersion}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                        Aplicativo de Comunicação e Transmissão Studio Obsidian
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-obsidian-text-muted mt-1">
-                    {updateStatus || 'Atualizações automáticas ativas em segundo plano.'}
-                  </p>
+
+                  <button
+                    type="button"
+                    onClick={handleManualCheckUpdate}
+                    disabled={isCheckingUpdate}
+                    className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-semibold transition-all flex items-center space-x-2 shadow-lg shadow-indigo-500/25 disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+                    <span>{isCheckingUpdate ? 'Verificando...' : 'Verificar Atualização'}</span>
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleManualCheckUpdate}
-                  disabled={isCheckingUpdate}
-                  className="px-3 py-1.5 bg-obsidian-surface hover:bg-obsidian-card-hover border border-obsidian-border hover:border-indigo-500/40 text-white rounded-xl text-xs font-medium transition-all flex items-center space-x-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 text-indigo-400 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
-                  <span>{isCheckingUpdate ? 'Verificando...' : 'Verificar Atualização'}</span>
-                </button>
+                {/* Status do Sistema */}
+                <div className="p-3.5 bg-obsidian-surface rounded-xl border border-obsidian-border flex items-center space-x-2.5 text-xs">
+                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isCheckingUpdate ? 'bg-indigo-400 animate-ping' : 'bg-emerald-400 animate-pulse'}`} />
+                  <span className="text-obsidian-text-secondary font-medium">Status do Sistema:</span>
+                  <span className="text-white font-medium text-[11px] truncate flex-1">
+                    {updateStatus || 'Você está utilizando a versão mais recente.'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Informações do Canal e Distribuição */}
+              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3">
+                <h4 className="text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider">
+                  Canal de Distribuição
+                </h4>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border">
+                    <span className="text-[10px] text-obsidian-text-muted block mb-0.5">Provedor Oficial</span>
+                    <span className="font-semibold text-white">GitHub Releases</span>
+                  </div>
+                  <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border">
+                    <span className="text-[10px] text-obsidian-text-muted block mb-0.5">Repositório</span>
+                    <span className="font-semibold text-indigo-400 font-mono">LuaN458/xolas2</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informações sobre Atualizações em Segundo Plano */}
+              <div className="p-3.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-start space-x-3 text-xs text-emerald-400">
+                <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-semibold text-emerald-300 block">Atualizações Automáticas Ativas</span>
+                  <p className="text-[11px] text-emerald-300/80 leading-relaxed">
+                    O Xolas verifica o repositório silenciosamente a cada 2 horas. Quando houver uma nova versão, ela será baixada automaticamente em segundo plano e você receberá uma notificação na tela para reiniciar o aplicativo.
+                  </p>
+                </div>
               </div>
             </div>
           )}
