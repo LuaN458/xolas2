@@ -31,6 +31,7 @@ export const App: React.FC = () => {
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [activeServerDetails, setActiveServerDetails] = useState<Server | null>(null);
   const [voiceParticipants, setVoiceParticipants] = useState<Record<string, VoiceParticipantInfo[]>>({});
+  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
 
   // Modais
   const [isCreateServerOpen, setIsCreateServerOpen] = useState(false);
@@ -150,6 +151,48 @@ export const App: React.FC = () => {
     socket.on('user-profile-updated', handleProfileUpdated);
     return () => {
       socket.off('user-profile-updated', handleProfileUpdated);
+    };
+  }, [socket]);
+
+  // Sincronizar usuários online e novos membros em tempo real via WebSocket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleOnlineList = (ids: string[]) => {
+      setOnlineUserIds(new Set(ids));
+    };
+
+    const handleStatusChanged = (data: { userId: string; status: 'online' | 'offline' }) => {
+      setOnlineUserIds((prev) => {
+        const next = new Set(prev);
+        if (data.status === 'online') {
+          next.add(data.userId);
+        } else {
+          next.delete(data.userId);
+        }
+        return next;
+      });
+    };
+
+    const handleMemberJoined = (data: { serverId: string; member: any }) => {
+      setActiveServerDetails((prev) => {
+        if (!prev || prev.id !== data.serverId) return prev;
+        if (prev.members.some((m) => m.userId === data.member.userId)) return prev;
+        return {
+          ...prev,
+          members: [...prev.members, data.member],
+        };
+      });
+    };
+
+    socket.on('online-users-list', handleOnlineList);
+    socket.on('user-status-changed', handleStatusChanged);
+    socket.on('member-joined', handleMemberJoined);
+
+    return () => {
+      socket.off('online-users-list', handleOnlineList);
+      socket.off('user-status-changed', handleStatusChanged);
+      socket.off('member-joined', handleMemberJoined);
     };
   }, [socket]);
 
@@ -279,7 +322,10 @@ export const App: React.FC = () => {
 
           {/* 4. Barra Lateral de Participantes (apenas em canais de texto) */}
           {activeServerDetails && activeChannel?.type === 'TEXT' && (
-            <MemberList members={activeServerDetails.members || []} />
+            <MemberList
+              members={activeServerDetails.members || []}
+              onlineUserIds={onlineUserIds}
+            />
           )}
 
           {/* Modais */}

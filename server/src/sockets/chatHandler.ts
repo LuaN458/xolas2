@@ -11,6 +11,17 @@ export interface VoiceParticipant {
 // Map<channelId, Map<userId, VoiceParticipant>>
 export const voiceRooms = new Map<string, Map<string, VoiceParticipant>>();
 
+// Rastreamento de usuários online conectados: Map<userId, Set<socketId>>
+export const userSockets = new Map<string, Set<string>>();
+
+export function isUserOnline(userId: string): boolean {
+  return (userSockets.get(userId)?.size || 0) > 0;
+}
+
+export function getOnlineUserIds(): string[] {
+  return Array.from(userSockets.keys()).filter((id) => (userSockets.get(id)?.size || 0) > 0);
+}
+
 export function getChannelVoiceParticipants(channelId: string): VoiceParticipant[] {
   const room = voiceRooms.get(channelId);
   return room ? Array.from(room.values()) : [];
@@ -61,6 +72,21 @@ export function setupSocketHandlers(io: Server): void {
   io.on('connection', (socket: AuthenticatedSocket) => {
     const user = socket.user;
     if (!user) return;
+
+    const userId = user.userId;
+    const isFirstConnection = !userSockets.has(userId) || userSockets.get(userId)!.size === 0;
+
+    if (!userSockets.has(userId)) {
+      userSockets.set(userId, new Set());
+    }
+    userSockets.get(userId)!.add(socket.id);
+
+    if (isFirstConnection) {
+      io.emit('user-status-changed', { userId, status: 'online' });
+    }
+
+    // Enviar lista de usuários online imediatamente para quem acabou de conectar
+    socket.emit('online-users-list', getOnlineUserIds());
 
     // Entrar em uma sala de canal de texto
     socket.on('join-channel', (channelId: string) => {
@@ -191,7 +217,8 @@ export function setupSocketHandlers(io: Server): void {
     // Entrar na sala do servidor para receber eventos globais (canais, presenças)
     socket.on('join-server', (serverId: string) => {
       socket.join(`server:${serverId}`);
-      // Enviar estado de voz atual para o usuário que acabou de carregar o servidor
+      // Enviar lista atual de usuários online e estado de voz
+      socket.emit('online-users-list', getOnlineUserIds());
       socket.emit('voice-state-sync', getAllVoiceState());
     });
 
@@ -200,6 +227,16 @@ export function setupSocketHandlers(io: Server): void {
       if (socket.currentVoice) {
         removeUserFromVoice(socket.currentVoice.channelId, socket.currentVoice.serverId);
         socket.currentVoice = undefined;
+      }
+
+      // Atualizar lista de sockets do usuário e notificar offline se desconectou todos
+      const sockets = userSockets.get(userId);
+      if (sockets) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          userSockets.delete(userId);
+          io.emit('user-status-changed', { userId, status: 'offline' });
+        }
       }
     });
   });

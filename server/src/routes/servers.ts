@@ -9,7 +9,7 @@ const router = Router();
 router.get('/', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const servers = await prisma.server.findMany({
+    let servers = await prisma.server.findMany({
       where: {
         members: {
           some: { userId },
@@ -23,6 +23,54 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response): Promise
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    // Se o usuário não estiver em nenhum servidor, insere no servidor padrão ("Olá")
+    if (servers.length === 0) {
+      try {
+        const defaultServer =
+          (await prisma.server.findFirst({
+            where: { name: 'Olá' },
+            orderBy: { createdAt: 'asc' },
+          })) ||
+          (await prisma.server.findFirst({
+            orderBy: { createdAt: 'asc' },
+          }));
+
+        if (defaultServer) {
+          await prisma.member.upsert({
+            where: {
+              userId_serverId: {
+                userId,
+                serverId: defaultServer.id,
+              },
+            },
+            create: {
+              userId,
+              serverId: defaultServer.id,
+              role: 'MEMBER',
+            },
+            update: {},
+          });
+
+          servers = await prisma.server.findMany({
+            where: {
+              members: {
+                some: { userId },
+              },
+            },
+            include: {
+              channels: true,
+              _count: {
+                select: { members: true },
+              },
+            },
+            orderBy: { createdAt: 'asc' },
+          });
+        }
+      } catch (err) {
+        console.warn('Aviso: falha na auto-inclusão ao servidor padrão:', err);
+      }
+    }
 
     res.json({ servers });
   } catch (error) {

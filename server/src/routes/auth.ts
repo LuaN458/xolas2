@@ -53,6 +53,30 @@ router.post('/register', async (req, res): Promise<void> => {
       },
     });
 
+    // Inserir o novo usuário automaticamente no servidor principal ("Olá" ou primeiro servidor existente)
+    try {
+      const defaultServer =
+        (await prisma.server.findFirst({
+          where: { name: 'Olá' },
+          orderBy: { createdAt: 'asc' },
+        })) ||
+        (await prisma.server.findFirst({
+          orderBy: { createdAt: 'asc' },
+        }));
+
+      if (defaultServer) {
+        await prisma.member.create({
+          data: {
+            userId: user.id,
+            serverId: defaultServer.id,
+            role: 'MEMBER',
+          },
+        });
+      }
+    } catch (err) {
+      console.warn('Aviso: falha ao vincular usuário ao servidor padrão:', err);
+    }
+
     const secret = process.env.JWT_SECRET || 'discord_clone_super_secret_jwt_key_2026';
     const token = jwt.sign(
       { userId: user.id, username: user.username, email: user.email },
