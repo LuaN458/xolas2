@@ -27,10 +27,23 @@ jobs:
       - name: Instalar dependências
         run: npm install
 
-      - name: Compilar e Publicar Release
+      - name: Compilar Aplicativo Desktop
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_API_URL: https://xolas-server.onrender.com
         run: |
           npm --prefix client run build
-          npx electron-builder --projectDir client --win --publish always
+          npx electron-builder --projectDir client --win --publish never
+
+      - name: Publicar Release Oficial no GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            client/release/*.exe
+            client/release/*.blockmap
+            client/release/latest.yml
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

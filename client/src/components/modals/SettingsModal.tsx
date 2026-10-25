@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useSocket } from '../../contexts/SocketContext';
 import { api } from '../../lib/api';
-import { X, User, Mic, Check, AlertCircle, Volume2, Lock, Sliders, ShieldCheck, Sparkles, RefreshCw } from 'lucide-react';
+import { X, User, Mic, Check, AlertCircle, Volume2, Lock, Sliders, ShieldCheck, Sparkles, RefreshCw, Download, ArrowUpCircle } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -39,6 +39,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [appVersion, setAppVersion] = useState<string>('1.0.0');
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isUpdateReady, setIsUpdateReady] = useState(false);
+  const [availableVersion, setAvailableVersion] = useState<string | null>(null);
 
   useEffect(() => {
     if (window.electronAPI?.getAppVersion) {
@@ -46,6 +50,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         if (v) setAppVersion(v);
       });
     }
+
+    if (!window.electronAPI) return;
+
+    const unregAvailable = window.electronAPI.onUpdateAvailable?.((info) => {
+      setAvailableVersion(info.version);
+      setIsDownloading(true);
+      setUpdateStatus(`Nova versão v${info.version} encontrada! Baixando em segundo plano...`);
+    });
+
+    const unregProgress = window.electronAPI.onUpdateProgress?.((progress) => {
+      setIsDownloading(true);
+      setDownloadProgress(Math.round(progress.percent || 0));
+    });
+
+    const unregDownloaded = window.electronAPI.onUpdateDownloaded?.((info) => {
+      setAvailableVersion(info.version);
+      setIsDownloading(false);
+      setIsUpdateReady(true);
+      setUpdateStatus(`Versão v${info.version} baixada e pronta para instalação!`);
+    });
+
+    return () => {
+      unregAvailable?.();
+      unregProgress?.();
+      unregDownloaded?.();
+    };
   }, []);
 
   const handleManualCheckUpdate = async () => {
@@ -54,21 +84,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       return;
     }
     setIsCheckingUpdate(true);
-    setUpdateStatus(null);
+    setUpdateStatus('Buscando atualizações no GitHub Releases...');
     try {
       const res = await window.electronAPI.checkForUpdates();
       if (res?.status === 'dev-mode') {
         setUpdateStatus('Modo de desenvolvimento (auto-updater ativo em builds instaladas).');
+      } else if (res?.status === 'success') {
+        const updateVer = res?.result?.updateInfo?.version;
+        if (updateVer && updateVer !== appVersion) {
+          setAvailableVersion(updateVer);
+          setIsDownloading(true);
+          setUpdateStatus(`Nova versão v${updateVer} encontrada! Baixando atualização...`);
+        } else {
+          setUpdateStatus('Você está na versão mais recente!');
+        }
       } else if (res?.status === 'no-release-found') {
-        setUpdateStatus('Você está na versão mais recente (nenhuma atualização pendente no GitHub).');
+        setUpdateStatus('Você está na versão mais recente!');
       } else if (res?.error) {
         if (res.error.includes('404') || res.error.includes('latest') || res.error.includes('Cannot find')) {
           setUpdateStatus('Você está na versão mais recente!');
         } else {
-          setUpdateStatus('Não foi possível conectar ao servidor de atualizações. Verifique sua conexão.');
+          setUpdateStatus('Não foi possível conectar ao GitHub Releases. Verifique sua conexão.');
         }
       } else {
-        setUpdateStatus('Verificação concluída. Você está na versão mais recente!');
+        setUpdateStatus('Você está na versão mais recente!');
       }
     } catch {
       setUpdateStatus('Você está na versão mais recente!');
@@ -583,12 +622,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
                 {/* Status do Sistema */}
                 <div className="p-3.5 bg-obsidian-surface rounded-xl border border-obsidian-border flex items-center space-x-2.5 text-xs">
-                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isCheckingUpdate ? 'bg-indigo-400 animate-ping' : 'bg-emerald-400 animate-pulse'}`} />
+                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isCheckingUpdate || isDownloading ? 'bg-indigo-400 animate-ping' : isUpdateReady ? 'bg-emerald-400 animate-bounce' : 'bg-emerald-400 animate-pulse'}`} />
                   <span className="text-obsidian-text-secondary font-medium">Status do Sistema:</span>
                   <span className="text-white font-medium text-[11px] truncate flex-1">
                     {updateStatus || 'Você está utilizando a versão mais recente.'}
                   </span>
                 </div>
+
+                {/* Barra de Progresso Durante o Download */}
+                {isDownloading && (
+                  <div className="p-3.5 bg-obsidian-surface rounded-xl border border-indigo-500/30 space-y-2 animate-in fade-in duration-200">
+                    <div className="flex justify-between text-xs">
+                      <span className="flex items-center space-x-1.5 text-indigo-400 font-semibold">
+                        <Download className="w-3.5 h-3.5 animate-bounce" />
+                        <span>Baixando atualização {availableVersion ? `v${availableVersion}` : ''}...</span>
+                      </span>
+                      <span className="font-mono font-bold text-indigo-300">{downloadProgress}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-obsidian-card rounded-full overflow-hidden border border-obsidian-border">
+                      <div
+                        className="h-full bg-gradient-to-r from-indigo-500 via-indigo-400 to-emerald-400 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.max(5, downloadProgress)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Botão de Reiniciar Quando Baixada */}
+                {isUpdateReady && (
+                  <div className="p-4 bg-gradient-to-r from-emerald-500/10 to-indigo-500/10 border border-emerald-500/40 rounded-xl flex items-center justify-between animate-in fade-in duration-300 shadow-lg shadow-emerald-500/10">
+                    <div>
+                      <h4 className="text-xs font-bold text-white flex items-center space-x-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                        <span>Nova versão pronta para instalação!</span>
+                      </h4>
+                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                        A versão {availableVersion ? `v${availableVersion}` : ''} foi baixada. Reinicie o Xolas para aplicar.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => window.electronAPI?.restartAndInstall?.()}
+                      className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shadow-lg shadow-emerald-500/25 cursor-pointer shrink-0 ml-3"
+                    >
+                      <ArrowUpCircle className="w-4 h-4" />
+                      <span>Reiniciar e Aplicar</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Informações do Canal e Distribuição */}
