@@ -4,6 +4,9 @@ export interface User {
   email: string;
   avatarUrl?: string;
   status?: string;
+  role?: 'ADMIN' | 'USER';
+  approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  isApproved?: boolean;
   createdAt?: string;
 }
 

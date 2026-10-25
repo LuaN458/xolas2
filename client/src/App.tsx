@@ -17,6 +17,7 @@ import { CreateServerModal } from './components/modals/CreateServerModal';
 import { CreateChannelModal } from './components/modals/CreateChannelModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { AuthModal } from './components/modals/AuthModal';
+import { AdminModal } from './components/modals/AdminModal';
 import { ForceUpdateModal } from './components/modals/ForceUpdateModal';
 import { UpdateNotificationBanner } from './components/layout/UpdateNotificationBanner';
 import { MessageSquareText } from 'lucide-react';
@@ -37,7 +38,27 @@ export const App: React.FC = () => {
   const [isCreateServerOpen, setIsCreateServerOpen] = useState(false);
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [createChannelType, setCreateChannelType] = useState<'TEXT' | 'VOICE'>('TEXT');
+
+  // Escutar atualizações de pendências do painel de administração via WebSocket
+  useEffect(() => {
+    if (!socket || user?.role !== 'ADMIN') return;
+
+    socket.emit('admin:get-pending-count');
+
+    const handlePendingCount = (data: { pendingCount?: number }) => {
+      if (typeof data?.pendingCount === 'number') {
+        setPendingApprovalsCount(data.pendingCount);
+      }
+    };
+
+    socket.on('admin-pending-count', handlePendingCount);
+    return () => {
+      socket.off('admin-pending-count', handlePendingCount);
+    };
+  }, [socket, user?.role]);
 
   // Carregar servidores do usuário
   useEffect(() => {
@@ -284,6 +305,9 @@ export const App: React.FC = () => {
             activeServerId={activeServerId}
             onSelectServer={(id) => setActiveServerId(id)}
             onOpenCreateModal={() => setIsCreateServerOpen(true)}
+            isAdmin={user?.role === 'ADMIN'}
+            pendingApprovalsCount={pendingApprovalsCount}
+            onOpenAdminModal={() => setIsAdminModalOpen(true)}
           />
 
           {/* 2. Barra Lateral de Canais + Perfil de Usuário Ancorado na Base */}
@@ -380,6 +404,13 @@ export const App: React.FC = () => {
           <SettingsModal
             isOpen={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
+          />
+
+          {/* Modal de Administração (Aprovação / Recusa / Moderação) */}
+          <AdminModal
+            isOpen={isAdminModalOpen}
+            onClose={() => setIsAdminModalOpen(false)}
+            onPendingCountChange={setPendingApprovalsCount}
           />
         </div>
       )}

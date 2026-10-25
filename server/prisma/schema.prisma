@@ -9,16 +9,19 @@ datasource db {
 }
 
 model User {
-  id           String       @id @default(uuid())
-  username     String       @unique
-  email        String       @unique
-  password     String
-  avatarUrl    String?
-  status       String       @default("online")
-  createdAt    DateTime     @default(now())
-  memberships  Member[]
-  messages     Message[]
-  ownedServers Server[]     @relation("ServerOwner")
+  id             String       @id @default(uuid())
+  username       String       @unique
+  email          String       @unique
+  password       String
+  avatarUrl      String?
+  status         String       @default("online")
+  role           String       @default("USER") // "USER" | "ADMIN"
+  approvalStatus String       @default("PENDING") // "PENDING" | "APPROVED" | "REJECTED"
+  isApproved     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  memberships    Member[]
+  messages       Message[]
+  ownedServers   Server[]     @relation("ServerOwner")
 }
 
 model Server {

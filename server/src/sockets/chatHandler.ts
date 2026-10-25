@@ -45,11 +45,40 @@ export function getAllVoiceState(): Record<string, VoiceParticipant[]> {
   return result;
 }
 
+let globalIO: Server | null = null;
+
+export function getGlobalIO(): Server | null {
+  return globalIO;
+}
+
+export async function notifyAdminsPendingUpdate(): Promise<void> {
+  if (!globalIO) return;
+  try {
+    const pendingCount = await prisma.user.count({
+      where: { approvalStatus: 'PENDING' },
+    });
+    globalIO.to('admin-room').emit('admin-pending-count', { pendingCount });
+  } catch (err) {
+    console.warn('Erro ao notificar administradores sobre pendências:', err);
+  }
+}
+
+export function notifyUserApprovalStatus(userId: string, payload: { status: string; user?: any }): void {
+  if (!globalIO) return;
+  const targetSocketIds = userSockets.get(userId);
+  if (targetSocketIds) {
+    targetSocketIds.forEach((sid) => {
+      globalIO!.to(sid).emit('user-approval-status', payload);
+    });
+  }
+}
+
 interface AuthenticatedSocket extends Socket {
   user?: {
     userId: string;
     username: string;
     email: string;
+    role?: string;
   };
   currentVoice?: {
     serverId: string;
@@ -58,8 +87,10 @@ interface AuthenticatedSocket extends Socket {
 }
 
 export function setupSocketHandlers(io: Server): void {
+  globalIO = io;
+
   // Middleware de autenticação Socket.io com validação estrita de algoritmo JWT (HS256)
-  io.use((socket: AuthenticatedSocket, next) => {
+  io.use(async (socket: AuthenticatedSocket, next) => {
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
     if (!token || typeof token !== 'string' || token.length > 2048) {
       return next(new Error('Autenticação necessária para WebSocket'));
@@ -71,16 +102,24 @@ export function setupSocketHandlers(io: Server): void {
         userId: string;
         username: string;
         email: string;
+        role?: string;
       };
 
       if (!decoded || !isValidIdentifier(decoded.userId) || typeof decoded.username !== 'string') {
         return next(new Error('Token de sessão inválido'));
       }
 
+      // Buscar papel atualizado no banco
+      const dbUser = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+        select: { role: true, isApproved: true },
+      });
+
       socket.user = {
         userId: decoded.userId,
         username: sanitizeText(decoded.username, 32) || 'Usuário',
         email: typeof decoded.email === 'string' ? decoded.email : '',
+        role: dbUser?.role || decoded.role || 'USER',
       };
       next();
     } catch {
@@ -116,6 +155,24 @@ export function setupSocketHandlers(io: Server): void {
 
     if (isFirstConnection) {
       io.emit('user-status-changed', { userId, status: 'online' });
+    }
+
+    // Se o usuário for administrador, insere na sala de administradores e envia contador de pendências
+    if (user.role === 'ADMIN') {
+      socket.join('admin-room');
+      prisma.user
+        .count({ where: { approvalStatus: 'PENDING' } })
+        .then((pendingCount) => {
+          socket.emit('admin-pending-count', { pendingCount });
+        })
+        .catch(() => {});
+
+      socket.on('admin:get-pending-count', async () => {
+        try {
+          const pendingCount = await prisma.user.count({ where: { approvalStatus: 'PENDING' } });
+          socket.emit('admin-pending-count', { pendingCount });
+        } catch {}
+      });
     }
 
     // Enviar lista de usuários online imediatamente para quem acabou de conectar

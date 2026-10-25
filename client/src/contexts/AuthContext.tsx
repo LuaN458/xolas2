@@ -6,10 +6,16 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string, email?: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<{ status: 'APPROVED' | 'PENDING'; user?: User }>;
+  register: (
+    username: string,
+    password: string,
+    email?: string
+  ) => Promise<{ status: 'APPROVED' | 'PENDING'; user?: User }>;
   updateUsername: (newUsername: string) => Promise<void>;
   logout: () => void;
+  setUser: React.Dispatch<React.SetStateAction<User | null>>;
+  setToken: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -29,7 +35,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       try {
         const response = await api.get('/api/auth/me');
-        setUser(response.data.user);
+        const loadedUser: User = response.data.user;
+        if (loadedUser.approvalStatus === 'PENDING' || !loadedUser.isApproved) {
+          localStorage.removeItem('discord_token');
+          setToken(null);
+          setUser(null);
+        } else {
+          setUser(loadedUser);
+        }
       } catch (err: any) {
         console.error('Falha ao autenticar com token salvo:', err);
         // Só limpa o token se for erro explícito de autenticação inválida (401 / 403)
@@ -48,18 +61,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (username: string, password: string) => {
     const response = await api.post('/api/auth/login', { username, password });
-    const { user, token } = response.data;
-    localStorage.setItem('discord_token', token);
-    setToken(token);
-    setUser(user);
+    const { user: loggedUser, token: authToken, approvalStatus } = response.data;
+
+    if (approvalStatus === 'PENDING' || loggedUser?.approvalStatus === 'PENDING') {
+      return { status: 'PENDING' as const, user: loggedUser };
+    }
+
+    localStorage.setItem('discord_token', authToken);
+    setToken(authToken);
+    setUser(loggedUser);
+    return { status: 'APPROVED' as const, user: loggedUser };
   };
 
   const register = async (username: string, password: string, email?: string) => {
     const response = await api.post('/api/auth/register', { username, password, email });
-    const { user, token } = response.data;
-    localStorage.setItem('discord_token', token);
-    setToken(token);
-    setUser(user);
+    const { user: registeredUser, token: authToken, approvalStatus } = response.data;
+
+    if (approvalStatus === 'PENDING' || registeredUser?.approvalStatus === 'PENDING') {
+      return { status: 'PENDING' as const, user: registeredUser };
+    }
+
+    localStorage.setItem('discord_token', authToken);
+    setToken(authToken);
+    setUser(registeredUser);
+    return { status: 'APPROVED' as const, user: registeredUser };
   };
 
   const updateUsername = async (newUsername: string) => {
@@ -75,7 +100,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, updateUsername, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        loading,
+        login,
+        register,
+        updateUsername,
+        logout,
+        setUser,
+        setToken,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

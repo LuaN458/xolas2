@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, LayoutGrid } from 'lucide-react';
+import { Plus, LayoutGrid, Shield } from 'lucide-react';
 import { Server } from '../../types';
 
 interface ServerSidebarProps {
@@ -7,6 +7,9 @@ interface ServerSidebarProps {
   activeServerId: string | null;
   onSelectServer: (serverId: string | null) => void;
   onOpenCreateModal: () => void;
+  isAdmin?: boolean;
+  pendingApprovalsCount?: number;
+  onOpenAdminModal?: () => void;
 }
 
 export const ServerSidebar: React.FC<ServerSidebarProps> = ({
@@ -14,6 +17,9 @@ export const ServerSidebar: React.FC<ServerSidebarProps> = ({
   activeServerId,
   onSelectServer,
   onOpenCreateModal,
+  isAdmin = false,
+  pendingApprovalsCount = 0,
+  onOpenAdminModal,
 }) => {
   return (
     <aside className="w-16 bg-obsidian-bg flex flex-col items-center py-4 space-y-3 select-none z-20 shrink-0 border-r border-obsidian-border">
@@ -31,6 +37,24 @@ export const ServerSidebar: React.FC<ServerSidebarProps> = ({
           <LayoutGrid className="w-5 h-5" />
         </button>
       </div>
+
+      {/* Botão do Painel de Administração (visível apenas para ADMIN) */}
+      {isAdmin && (
+        <div className="relative group flex items-center justify-center w-full">
+          <button
+            onClick={onOpenAdminModal}
+            className="w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-400 hover:text-indigo-300 border border-indigo-500/40 hover:border-indigo-400 transition-all shadow-md shadow-indigo-600/10 relative"
+            title="Painel de Administração"
+          >
+            <Shield className="w-5 h-5" />
+            {pendingApprovalsCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-extrabold flex items-center justify-center shadow-md shadow-rose-600/50 border border-white/20 animate-pulse">
+                {pendingApprovalsCount > 9 ? '9+' : pendingApprovalsCount}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Divisor minimalista */}
       <div className="w-6 h-[1px] bg-obsidian-border" />

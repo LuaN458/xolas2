@@ -10,6 +10,7 @@ import authRoutes from './routes/auth';
 import serverRoutes from './routes/servers';
 import channelRoutes from './routes/channels';
 import livekitRoutes from './routes/livekit';
+import adminRoutes from './routes/admin';
 import { setupSocketHandlers } from './sockets/chatHandler';
 import { prisma } from './lib/prisma';
 import {
@@ -57,6 +58,7 @@ app.get('/api/health', (req, res) => {
 
 // Rotas da API
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/servers', serverRoutes);
 app.use('/api/channels', channelRoutes);
 app.use('/api/livekit', livekitRoutes);
@@ -64,11 +66,55 @@ app.use('/api/livekit', livekitRoutes);
 // Configurar WebSockets
 setupSocketHandlers(io);
 
+// Inicialização automática para migrar usuários pré-existentes como APROVADOS e definir o primeiro ADMIN
+async function ensureDatabaseAdminAndApprovalBootstrap() {
+  try {
+    // 1. Aprovar todos os usuários que já existiam antes desta migração (se houver algum com approvalStatus PENDING criado anteriormente)
+    const totalUsers = await prisma.user.count();
+    if (totalUsers > 0) {
+      const existingAdmins = await prisma.user.count({ where: { role: 'ADMIN' } });
+      if (existingAdmins === 0) {
+        // Encontra o usuário mais antigo ou dono do primeiro servidor
+        const firstUser = await prisma.user.findFirst({
+          orderBy: { createdAt: 'asc' },
+        });
+        if (firstUser) {
+          await prisma.user.update({
+            where: { id: firstUser.id },
+            data: {
+              role: 'ADMIN',
+              approvalStatus: 'APPROVED',
+              isApproved: true,
+            },
+          });
+          console.log(`👑 [AdminBootstrap] Usuário "${firstUser.username}" foi promovido a ADMIN inicial do sistema.`);
+        }
+      }
+
+      // Garante que usuários antigos não fiquem bloqueados
+      await prisma.user.updateMany({
+        where: {
+          isApproved: false,
+          approvalStatus: 'PENDING',
+          createdAt: { lt: new Date() },
+        },
+        data: {
+          approvalStatus: 'APPROVED',
+          isApproved: true,
+        },
+      });
+    }
+  } catch (err) {
+    console.warn('Aviso no bootstrap administrativo:', err);
+  }
+}
+
 const PORT = process.env.PORT || 3001;
 
 server.listen(PORT, () => {
   console.log(`🚀 Servidor Discord-Clone rodando na porta ${PORT}`);
   console.log(`📡 WebSocket pronto para conexões`);
+  ensureDatabaseAdminAndApprovalBootstrap();
 });
 
 // Encerramento seguro

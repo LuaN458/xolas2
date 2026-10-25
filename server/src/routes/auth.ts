@@ -9,6 +9,7 @@ import {
   hasSqlInjectionSignature,
   sanitizeText,
 } from '../middlewares/security';
+import { notifyAdminsPendingUpdate } from '../sockets/chatHandler';
 
 const router = Router();
 
@@ -73,6 +74,9 @@ router.post('/register', authRateLimiter, async (req, res): Promise<void> => {
         email: userEmail,
         password: hashedPassword,
         avatarUrl,
+        role: 'USER',
+        approvalStatus: 'PENDING',
+        isApproved: false,
       },
       select: {
         id: true,
@@ -80,42 +84,29 @@ router.post('/register', authRateLimiter, async (req, res): Promise<void> => {
         email: true,
         avatarUrl: true,
         status: true,
+        role: true,
+        approvalStatus: true,
+        isApproved: true,
         createdAt: true,
       },
     });
 
-    // Inserir o novo usuário automaticamente no servidor principal ("Olá" ou primeiro servidor existente)
-    try {
-      const defaultServer =
-        (await prisma.server.findFirst({
-          where: { name: 'Olá' },
-          orderBy: { createdAt: 'asc' },
-        })) ||
-        (await prisma.server.findFirst({
-          orderBy: { createdAt: 'asc' },
-        }));
-
-      if (defaultServer) {
-        await prisma.member.create({
-          data: {
-            userId: user.id,
-            serverId: defaultServer.id,
-            role: 'MEMBER',
-          },
-        });
-      }
-    } catch (err) {
-      console.warn('Aviso: falha ao vincular usuário ao servidor padrão:', err);
-    }
+    // Notificar administradores conectados via WebSocket sobre o novo usuário pendente
+    notifyAdminsPendingUpdate().catch(() => {});
 
     const secret = process.env.JWT_SECRET || 'discord_clone_super_secret_jwt_key_2026';
     const token = jwt.sign(
-      { userId: user.id, username: user.username, email: user.email },
+      { userId: user.id, username: user.username, email: user.email, role: user.role },
       secret,
       { algorithm: 'HS256', expiresIn: '7d' }
     );
 
-    res.status(201).json({ user, token });
+    res.status(201).json({
+      user,
+      token,
+      approvalStatus: user.approvalStatus,
+      isApproved: user.isApproved,
+    });
   } catch (error) {
     console.error('Erro no registro:', error);
     res.status(500).json({ error: 'Erro interno ao cadastrar usuário.' });
@@ -163,9 +154,34 @@ router.post('/login', authRateLimiter, async (req, res): Promise<void> => {
       return;
     }
 
+    // Verificar se o usuário está aguardando aprovação ou se foi recusado
+    if (user.approvalStatus === 'PENDING' || !user.isApproved) {
+      res.status(403).json({
+        error: 'PENDING_APPROVAL',
+        message: 'Sua conta foi criada e está aguardando aprovação de um administrador.',
+        status: 'PENDING',
+        user: {
+          id: user.id,
+          username: user.username,
+          approvalStatus: 'PENDING',
+          isApproved: false,
+        },
+      });
+      return;
+    }
+
+    if (user.approvalStatus === 'REJECTED') {
+      res.status(403).json({
+        error: 'REJECTED',
+        message: 'Sua solicitação de cadastro foi recusada pela administração.',
+        status: 'REJECTED',
+      });
+      return;
+    }
+
     const secret = process.env.JWT_SECRET || 'discord_clone_super_secret_jwt_key_2026';
     const token = jwt.sign(
-      { userId: user.id, username: user.username, email: user.email },
+      { userId: user.id, username: user.username, email: user.email, role: user.role },
       secret,
       { algorithm: 'HS256', expiresIn: '7d' }
     );
@@ -177,6 +193,9 @@ router.post('/login', authRateLimiter, async (req, res): Promise<void> => {
         email: user.email,
         avatarUrl: user.avatarUrl,
         status: user.status,
+        role: user.role,
+        approvalStatus: user.approvalStatus,
+        isApproved: user.isApproved,
         createdAt: user.createdAt,
       },
       token,
@@ -197,6 +216,9 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response): Promi
         email: true,
         avatarUrl: true,
         status: true,
+        role: true,
+        approvalStatus: true,
+        isApproved: true,
         createdAt: true,
       },
     });
