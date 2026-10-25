@@ -164,6 +164,7 @@ export function setupSocketHandlers(io: Server): void {
       io.to(`server:${serverId}`).emit('voice-channel-updated', {
         channelId,
         users: updatedUsers,
+        participants: updatedUsers,
       });
     };
 
@@ -208,6 +209,7 @@ export function setupSocketHandlers(io: Server): void {
       // Notificar demais participantes da sala de voz para iniciar negociação WebRTC
       socket.to(`voice:${channelId}`).emit('voice-peer-joined', {
         channelId,
+        peer: participant,
         participant,
       });
 
@@ -215,6 +217,7 @@ export function setupSocketHandlers(io: Server): void {
       io.to(`server:${serverId}`).emit('voice-channel-updated', {
         channelId,
         users: updatedUsers,
+        participants: updatedUsers,
       });
     });
 
@@ -228,9 +231,10 @@ export function setupSocketHandlers(io: Server): void {
     // Sinalização WebRTC Ponto-a-Ponto (Voz + Transmissão de Tela)
     socket.on(
       'webrtc-offer',
-      (data: { toUserId: string; channelId: string; sdp: any; screenStreamId?: string | null }) => {
-        if (!data?.toUserId || !data?.sdp) return;
-        sendToUser(data.toUserId, 'webrtc-offer', {
+      (data: { toUserId?: string; targetUserId?: string; channelId: string; sdp: any; screenStreamId?: string | null }) => {
+        const targetId = data?.toUserId || data?.targetUserId;
+        if (!targetId || !data?.sdp) return;
+        sendToUser(targetId, 'webrtc-offer', {
           fromUserId: user.userId,
           fromUsername: user.username,
           channelId: data.channelId,
@@ -242,9 +246,10 @@ export function setupSocketHandlers(io: Server): void {
 
     socket.on(
       'webrtc-answer',
-      (data: { toUserId: string; channelId: string; sdp: any; screenStreamId?: string | null }) => {
-        if (!data?.toUserId || !data?.sdp) return;
-        sendToUser(data.toUserId, 'webrtc-answer', {
+      (data: { toUserId?: string; targetUserId?: string; channelId: string; sdp: any; screenStreamId?: string | null }) => {
+        const targetId = data?.toUserId || data?.targetUserId;
+        if (!targetId || !data?.sdp) return;
+        sendToUser(targetId, 'webrtc-answer', {
           fromUserId: user.userId,
           fromUsername: user.username,
           channelId: data.channelId,
@@ -256,9 +261,10 @@ export function setupSocketHandlers(io: Server): void {
 
     socket.on(
       'webrtc-ice-candidate',
-      (data: { toUserId: string; channelId: string; candidate: any }) => {
-        if (!data?.toUserId || !data?.candidate) return;
-        sendToUser(data.toUserId, 'webrtc-ice-candidate', {
+      (data: { toUserId?: string; targetUserId?: string; channelId: string; candidate: any }) => {
+        const targetId = data?.toUserId || data?.targetUserId;
+        if (!targetId || !data?.candidate) return;
+        sendToUser(targetId, 'webrtc-ice-candidate', {
           fromUserId: user.userId,
           channelId: data.channelId,
           candidate: data.candidate,
@@ -285,17 +291,23 @@ export function setupSocketHandlers(io: Server): void {
           if (data.isScreenSharing !== undefined) p.isScreenSharing = data.isScreenSharing;
           if (data.screenStreamId !== undefined) p.screenStreamId = data.screenStreamId;
         }
+
+        const statePayload = {
+          channelId: data.channelId,
+          userId: user.userId,
+          username: user.username,
+          isMuted: data.isMuted,
+          isSpeaking: data.isSpeaking,
+          isScreenSharing: data.isScreenSharing,
+          screenStreamId: data.screenStreamId,
+        };
+
+        // Notificar tanto os membros no canal de voz quanto no servidor
+        socket.to(`voice:${data.channelId}`).emit('voice-user-state-updated', statePayload);
+
         const targetServerId = data.serverId || socket.currentVoice?.serverId;
         if (targetServerId) {
-          io.to(`server:${targetServerId}`).emit('voice-user-state-updated', {
-            channelId: data.channelId,
-            userId: user.userId,
-            username: user.username,
-            isMuted: data.isMuted,
-            isSpeaking: data.isSpeaking,
-            isScreenSharing: data.isScreenSharing,
-            screenStreamId: data.screenStreamId,
-          });
+          io.to(`server:${targetServerId}`).emit('voice-user-state-updated', statePayload);
         }
       }
     );

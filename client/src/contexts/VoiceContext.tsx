@@ -80,6 +80,8 @@ interface VoiceContextType {
   activeScreenShares: ActiveScreenShareInfo[];
   selectedScreenShareId: string | null;
   setSelectedScreenShareId: (id: string | null) => void;
+  watchScreenShare: (shareId: string) => void;
+  stopWatchingScreenShare: () => void;
 }
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -231,11 +233,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     setActiveScreenShares(shares);
     setSelectedScreenShareId((prev) => {
+      // Se a tela assistida anteriormente ainda existir na lista de transmissões ativas, mantém
       if (prev && shares.some((s) => s.id === prev)) return prev;
-      // Priorizar tela remota se houver ou a primeira disponível
-      const remoteShare = shares.find((s) => !s.isLocal);
-      if (remoteShare) return remoteShare.id;
-      return shares.length > 0 ? shares[0].id : null;
+      // Se o próprio usuário estiver transmitindo a tela dele, mantém selecionada a tela local
+      if (currentScreen && currentScreen.getVideoTracks().length > 0) return 'local-screen';
+      // Para espectadores remotos: não auto-seleciona, permitindo que cliquem em "Assistir Transmissão"
+      return null;
     });
   }, [user]);
 
@@ -308,6 +311,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await pc.setLocalDescription(offer);
         socket.emit('webrtc-offer', {
           channelId,
+          toUserId: remoteUserId,
           targetUserId: remoteUserId,
           sdp: pc.localDescription,
         });
@@ -352,6 +356,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (event.candidate && socket) {
           socket.emit('webrtc-ice-candidate', {
             channelId,
+            toUserId: remoteUserId,
             targetUserId: remoteUserId,
             candidate: event.candidate.toJSON(),
           });
@@ -651,12 +656,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     if (!socket) return;
 
-    const handleVoiceChannelUpdated = ({
-      channelId,
-      participants,
-    }: {
+    const handleVoiceChannelUpdated = (data: {
       channelId: string;
-      participants: Array<{
+      participants?: Array<{
+        id: string;
+        username: string;
+        avatarUrl?: string;
+        isMuted?: boolean;
+        isSpeaking?: boolean;
+        isScreenSharing?: boolean;
+        screenStreamId?: string | null;
+      }>;
+      users?: Array<{
         id: string;
         username: string;
         avatarUrl?: string;
@@ -666,9 +677,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         screenStreamId?: string | null;
       }>;
     }) => {
+      const channelId = data?.channelId;
       if (!currentChannelRef.current || currentChannelRef.current.id !== channelId) return;
 
-      const activeIds = new Set(participants.map((p) => p.id));
+      const participantsList = data.participants || data.users || [];
+      const activeIds = new Set(participantsList.map((p) => p.id));
 
       // Remover peers que saíram do canal
       Array.from(remoteParticipantsRef.current.keys()).forEach((peerId) => {
@@ -678,7 +691,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
 
       // Atualizar ou criar conexões para os participantes presentes
-      participants.forEach((p) => {
+      participantsList.forEach((p) => {
         if (p.id === user?.id) return;
 
         const existing = remoteParticipantsRef.current.get(p.id);
@@ -704,12 +717,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       syncVoiceState();
     };
 
-    const handleVoicePeerJoined = ({
-      channelId,
-      peer,
-    }: {
+    const handleVoicePeerJoined = (data: {
       channelId: string;
-      peer: {
+      peer?: {
+        id: string;
+        username: string;
+        avatarUrl?: string;
+        isMuted?: boolean;
+        isSpeaking?: boolean;
+        isScreenSharing?: boolean;
+        screenStreamId?: string | null;
+      };
+      participant?: {
         id: string;
         username: string;
         avatarUrl?: string;
@@ -719,6 +738,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         screenStreamId?: string | null;
       };
     }) => {
+      const channelId = data?.channelId;
+      const peer = data?.peer || data?.participant;
+      if (!peer || !peer.id) return;
       if (!currentChannelRef.current || currentChannelRef.current.id !== channelId) return;
       if (peer.id === user?.id) return;
 
@@ -772,20 +794,29 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!currentChannelRef.current || currentChannelRef.current.id !== channelId) return;
       if (userId === user?.id) return;
 
-      const peer = remoteParticipantsRef.current.get(userId);
-      if (peer) {
-        if (typeof peerMuted === 'boolean') peer.isMuted = peerMuted;
-        if (typeof peerSpeaking === 'boolean') peer.isSpeaking = peerSpeaking;
-        if (typeof peerSharing === 'boolean') {
-          peer.isScreenSharing = peerSharing;
-          if (!peerSharing) {
-            peer.screenTrack = undefined;
-            peer.screenStream = undefined;
-          }
-        }
-        if (screenStreamId !== undefined) peer.screenStreamId = screenStreamId;
-        syncVoiceState();
+      let peer = remoteParticipantsRef.current.get(userId);
+      if (!peer) {
+        peer = {
+          id: userId,
+          username: 'Usuário',
+          isMuted: false,
+          isSpeaking: false,
+          isScreenSharing: false,
+        };
+        remoteParticipantsRef.current.set(userId, peer);
       }
+
+      if (typeof peerMuted === 'boolean') peer.isMuted = peerMuted;
+      if (typeof peerSpeaking === 'boolean') peer.isSpeaking = peerSpeaking;
+      if (typeof peerSharing === 'boolean') {
+        peer.isScreenSharing = peerSharing;
+        if (!peerSharing) {
+          peer.screenTrack = undefined;
+          peer.screenStream = undefined;
+        }
+      }
+      if (screenStreamId !== undefined) peer.screenStreamId = screenStreamId;
+      syncVoiceState();
     };
 
     const handleWebRTCOffer = async ({
@@ -819,8 +850,15 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const offerCollision = isMakingOffer || pc.signalingState !== 'stable';
         const isPolite = String(user?.id || '') > String(fromUserId);
 
-        if (offerCollision && !isPolite) {
-          return;
+        if (offerCollision) {
+          if (!isPolite) {
+            return;
+          }
+          if (pc.signalingState === 'have-local-offer') {
+            try {
+              await pc.setLocalDescription({ type: 'rollback' });
+            } catch {}
+          }
         }
 
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
@@ -837,6 +875,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         socket.emit('webrtc-answer', {
           channelId,
+          toUserId: fromUserId,
           targetUserId: fromUserId,
           sdp: pc.localDescription,
         });
@@ -1221,6 +1260,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [stopScreenShare, syncVoiceState, emitLocalVoiceState, sendOffer]
   );
 
+  const watchScreenShare = useCallback((shareId: string) => {
+    setSelectedScreenShareId(shareId);
+  }, []);
+
+  const stopWatchingScreenShare = useCallback(() => {
+    setSelectedScreenShareId(null);
+  }, []);
+
   return (
     <VoiceContext.Provider
       value={{
@@ -1253,6 +1300,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         activeScreenShares,
         selectedScreenShareId,
         setSelectedScreenShareId,
+        watchScreenShare,
+        stopWatchingScreenShare,
       }}
     >
       {children}

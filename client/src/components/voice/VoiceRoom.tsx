@@ -27,6 +27,7 @@ import {
   Volume1,
   VolumeX,
   Users,
+  LayoutGrid,
 } from 'lucide-react';
 
 interface VoiceRoomProps {
@@ -141,11 +142,13 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
       isSpeaking: boolean;
       isMuted: boolean;
       isLocal: boolean;
+      hasScreenShare: boolean;
       cameraTrack?: MediaStreamTrack;
     }>();
 
     // 1. Participante Local
     const localVp = voiceParticipants.find((vp) => vp.isLocal);
+    const localHasScreenShare = isScreenSharing || Boolean(screenStream);
     map.set(user?.id || 'local-user', {
       id: user?.id || 'local-user',
       username: user?.username || 'Você',
@@ -153,6 +156,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
       isSpeaking: localVp ? localVp.isSpeaking : false,
       isMuted,
       isLocal: true,
+      hasScreenShare: localHasScreenShare,
       cameraTrack: cameraStream ? cameraStream.getVideoTracks()[0] : undefined,
     });
 
@@ -167,12 +171,17 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           isSpeaking: false,
           isMuted: false,
           isLocal,
+          hasScreenShare: Boolean(sp.isScreenSharing),
         });
       }
     });
 
-    // 3. Participantes reais da sala WebRTC do LiveKit
+    // 3. Participantes reais da sala WebRTC
     voiceParticipants.forEach((vp) => {
+      const hasScreen = Boolean(
+        vp.screenTrack ||
+        activeScreenShares.some((s) => !s.isLocal && s.id.includes(vp.id))
+      );
       map.set(vp.id, {
         id: vp.id,
         username: vp.username,
@@ -180,21 +189,18 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
         isSpeaking: vp.isSpeaking,
         isMuted: vp.isMuted,
         isLocal: vp.isLocal,
+        hasScreenShare: vp.isLocal ? localHasScreenShare : hasScreen,
         cameraTrack: vp.isLocal && cameraStream ? cameraStream.getVideoTracks()[0] : vp.cameraTrack,
       });
     });
 
     return Array.from(map.values());
-  }, [user, isMuted, cameraStream, socketParticipants, voiceParticipants]);
+  }, [user, isMuted, cameraStream, socketParticipants, voiceParticipants, isScreenSharing, screenStream, activeScreenShares]);
 
   // Transmissão de tela atualmente em foco
   const activeShare = useMemo(() => {
-    if (activeScreenShares.length === 0) return null;
-    if (selectedScreenShareId) {
-      const found = activeScreenShares.find((s) => s.id === selectedScreenShareId);
-      if (found) return found;
-    }
-    return activeScreenShares[0];
+    if (!selectedScreenShareId || activeScreenShares.length === 0) return null;
+    return activeScreenShares.find((s) => s.id === selectedScreenShareId) || null;
   }, [activeScreenShares, selectedScreenShareId]);
 
   return (
@@ -297,6 +303,15 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                   )}
 
                   <button
+                    onClick={() => setSelectedScreenShareId(null)}
+                    className="p-1.5 px-3 rounded-xl bg-black/75 hover:bg-black/90 backdrop-blur-md border border-white/10 text-white text-xs flex items-center space-x-1.5 transition-all shadow-lg hover:border-indigo-500/40 font-medium"
+                    title="Voltar para a grade de membros"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Grade</span>
+                  </button>
+
+                  <button
                     onClick={toggleFullscreen}
                     className="p-1.5 px-2 rounded-xl bg-black/75 hover:bg-black/90 backdrop-blur-md border border-white/10 text-white transition-all shadow-lg hover:border-indigo-500/40"
                     title={isFullscreen ? 'Sair da Tela Cheia (ESC)' : 'Tela Cheia'}
@@ -336,17 +351,30 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                 : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 max-w-5xl'
             }`}
           >
-            {displayedParticipants.map((p) => (
-              <ParticipantTile
-                key={p.id}
-                name={p.isLocal ? `${p.username} (Você)` : p.username}
-                avatarUrl={p.avatarUrl}
-                isSpeaking={p.isSpeaking}
-                isMuted={p.isMuted}
-                videoTrack={p.cameraTrack}
-                isLocal={p.isLocal}
-              />
-            ))}
+            {displayedParticipants.map((p) => {
+              const remoteShare = activeScreenShares.find(
+                (s) => !s.isLocal && s.id.includes(p.id)
+              );
+              return (
+                <ParticipantTile
+                  key={p.id}
+                  name={p.isLocal ? `${p.username} (Você)` : p.username}
+                  avatarUrl={p.avatarUrl}
+                  isSpeaking={p.isSpeaking}
+                  isMuted={p.isMuted}
+                  hasScreenShare={p.hasScreenShare}
+                  onWatchScreenShare={
+                    remoteShare
+                      ? () => setSelectedScreenShareId(remoteShare.id)
+                      : p.isLocal && screenStream
+                      ? () => setSelectedScreenShareId('local-screen')
+                      : undefined
+                  }
+                  videoTrack={p.cameraTrack}
+                  isLocal={p.isLocal}
+                />
+              );
+            })}
           </div>
         )}
       </div>

@@ -8,6 +8,10 @@ export interface VoiceParticipantInfo {
   id: string;
   username: string;
   avatarUrl?: string;
+  isScreenSharing?: boolean;
+  isMuted?: boolean;
+  isSpeaking?: boolean;
+  screenStreamId?: string | null;
 }
 
 interface ChannelSidebarProps {
@@ -34,6 +38,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
     isScreenSharing,
     isMuted,
     voiceParticipants: livekitParticipants,
+    activeScreenShares,
   } = useVoice();
 
   if (!server) {
@@ -203,6 +208,14 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                                 {isMe && (
                                   <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono font-bold tracking-tight">
                                     Você
+                                  </span>
+                                )}
+                                {((isMe && isScreenSharing) ||
+                                  activeScreenShares.some((s) => !s.isLocal && s.id.includes(p.id)) ||
+                                  livekitParticipants.some((lp) => lp.id === p.id && lp.screenTrack)) && (
+                                  <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-[9px] font-bold tracking-wider flex items-center space-x-1 animate-pulse">
+                                    <Monitor className="w-2.5 h-2.5" />
+                                    <span>AO VIVO</span>
                                   </span>
                                 )}
                               </div>
