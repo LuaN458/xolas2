@@ -50,7 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const handleManualCheckUpdate = async () => {
     if (!window.electronAPI?.checkForUpdates) {
-      setUpdateStatus('Versão mais recente instalada.');
+      setUpdateStatus('Você está na versão mais recente!');
       return;
     }
     setIsCheckingUpdate(true);
@@ -59,8 +59,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       const res = await window.electronAPI.checkForUpdates();
       if (res?.status === 'dev-mode') {
         setUpdateStatus('Modo de desenvolvimento (auto-updater ativo em builds instaladas).');
+      } else if (res?.status === 'no-release-found') {
+        setUpdateStatus('Você está na versão mais recente (nenhuma atualização pendente no GitHub).');
       } else if (res?.error) {
-        setUpdateStatus('Não foi possível verificar atualizações no momento.');
+        if (res.error.includes('404') || res.error.includes('latest') || res.error.includes('Cannot find')) {
+          setUpdateStatus('Você está na versão mais recente!');
+        } else {
+          setUpdateStatus('Não foi possível conectar ao servidor de atualizações. Verifique sua conexão.');
+        }
       } else {
         setUpdateStatus('Verificação concluída. Você está na versão mais recente!');
       }

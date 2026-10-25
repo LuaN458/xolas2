@@ -102,7 +102,13 @@ ipcMain.handle('check-for-updates', async () => {
     const result = await autoUpdater.checkForUpdates();
     return { status: 'success', result, version: app.getVersion() };
   } catch (err: any) {
-    return { status: 'error', error: err?.message || String(err), version: app.getVersion() };
+    const errMsg = err?.message || String(err);
+    console.warn('[AutoUpdater] Erro ao checar atualizações:', errMsg);
+    // Se o GitHub retornar 404 (sem releases publicadas ainda), não é um erro de falha do app
+    if (errMsg.includes('404') || errMsg.includes('latest') || errMsg.includes('Cannot find')) {
+      return { status: 'no-release-found', error: errMsg, version: app.getVersion() };
+    }
+    return { status: 'error', error: errMsg, version: app.getVersion() };
   }
 });
 
