@@ -2,17 +2,18 @@ import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middlewares/auth';
 import { createLiveKitToken } from '../lib/livekit';
+import { isValidIdentifier } from '../middlewares/security';
 
 const router = Router();
 
 router.post('/token', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { channelId } = req.body;
+    const channelId = req.body?.channelId;
     const userId = req.user!.userId;
     const username = req.user!.username;
 
-    if (!channelId) {
-      res.status(400).json({ error: 'channelId é obrigatório.' });
+    if (!isValidIdentifier(channelId)) {
+      res.status(400).json({ error: 'channelId válido é obrigatório.' });
       return;
     }
 

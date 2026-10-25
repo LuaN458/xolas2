@@ -2,6 +2,12 @@ import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middlewares/auth';
 import { getAllVoiceState } from '../sockets/chatHandler';
+import {
+  ensureScalarString,
+  isValidIdentifier,
+  sanitizeSafeUrl,
+  sanitizeText,
+} from '../middlewares/security';
 
 const router = Router();
 
@@ -83,17 +89,19 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response): Promise
 router.post('/', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const { name, iconUrl } = req.body;
+    const rawName = ensureScalarString(req.body?.name, 60);
+    const cleanName = sanitizeText(rawName || '', 60);
+    const safeIconUrl = sanitizeSafeUrl(req.body?.iconUrl);
 
-    if (!name || name.trim().length === 0) {
+    if (!cleanName) {
       res.status(400).json({ error: 'Nome do servidor é obrigatório.' });
       return;
     }
 
     const server = await prisma.server.create({
       data: {
-        name: name.trim(),
-        iconUrl: iconUrl || null,
+        name: cleanName,
+        iconUrl: safeIconUrl,
         ownerId: userId,
         members: {
           create: {
@@ -131,6 +139,11 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response): Promis
 router.get('/:id', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!isValidIdentifier(id)) {
+      res.status(400).json({ error: 'ID de servidor inválido.' });
+      return;
+    }
+
     const userId = req.user!.userId;
 
     const server = await prisma.server.findUnique({
@@ -196,6 +209,11 @@ router.get('/:id', authMiddleware, async (req: AuthRequest, res: Response): Prom
 // Obter estado de voz atual (participantes em cada canal de voz)
 router.get('/:id/voice-state', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!isValidIdentifier(id)) {
+      res.status(400).json({ error: 'ID de servidor inválido.' });
+      return;
+    }
     const voiceState = getAllVoiceState();
     res.json({ voiceState });
   } catch (error) {
@@ -208,16 +226,23 @@ router.get('/:id/voice-state', authMiddleware, async (req: AuthRequest, res: Res
 router.post('/:id/channels', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const { name, type } = req.body;
+    if (!isValidIdentifier(id)) {
+      res.status(400).json({ error: 'ID de servidor inválido.' });
+      return;
+    }
 
-    if (!name || name.trim().length === 0) {
+    const rawName = ensureScalarString(req.body?.name, 60);
+    const cleanName = sanitizeText(rawName || '', 60);
+    const type = req.body?.type;
+
+    if (!cleanName) {
       res.status(400).json({ error: 'Nome do canal é obrigatório.' });
       return;
     }
 
     const channel = await prisma.channel.create({
       data: {
-        name: name.trim().toLowerCase().replace(/\s+/g, '-'),
+        name: cleanName.toLowerCase().replace(/\s+/g, '-'),
         type: type === 'VOICE' ? 'VOICE' : 'TEXT',
         serverId: id,
       },

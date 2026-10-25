@@ -15,13 +15,16 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
     }
   };
 
+  const safeAvatarUrl =
+    message.user.avatarUrl &&
+    (message.user.avatarUrl.startsWith('https://') || message.user.avatarUrl.startsWith('http://'))
+      ? message.user.avatarUrl
+      : `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(message.user.username)}`;
+
   return (
     <div className="flex space-x-3 px-4 py-2 hover:bg-obsidian-card/40 transition-colors group rounded-xl">
       <img
-        src={
-          message.user.avatarUrl ||
-          `https://api.dicebear.com/7.x/bottts/svg?seed=${message.user.username}`
-        }
+        src={safeAvatarUrl}
         alt={message.user.username}
         className="w-8 h-8 rounded-lg bg-obsidian-card border border-obsidian-border shrink-0 cursor-pointer mt-0.5"
       />

@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middlewares/auth';
+import { ensureScalarString, isValidIdentifier, sanitizeText } from '../middlewares/security';
 
 const router = Router();
 
@@ -8,6 +9,20 @@ const router = Router();
 router.get('/:id/messages', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!isValidIdentifier(id)) {
+      res.status(400).json({ error: 'ID de canal inválido.' });
+      return;
+    }
+
+    const channel = await prisma.channel.findUnique({
+      where: { id },
+      select: { id: true, serverId: true },
+    });
+
+    if (!channel) {
+      res.status(404).json({ error: 'Canal não encontrado.' });
+      return;
+    }
 
     const messages = await prisma.message.findMany({
       where: { channelId: id },
@@ -31,17 +46,33 @@ router.get('/:id/messages', authMiddleware, async (req: AuthRequest, res: Respon
 router.post('/:id/messages', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-    const { content } = req.body;
+    if (!isValidIdentifier(id)) {
+      res.status(400).json({ error: 'ID de canal inválido.' });
+      return;
+    }
+
+    const rawContent = ensureScalarString(req.body?.content, 4000);
     const userId = req.user!.userId;
 
-    if (!content || content.trim().length === 0) {
+    const cleanContent = sanitizeText(rawContent || '', 4000);
+    if (!cleanContent) {
       res.status(400).json({ error: 'Mensagem vazia não é permitida.' });
+      return;
+    }
+
+    const channel = await prisma.channel.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!channel) {
+      res.status(404).json({ error: 'Canal não encontrado.' });
       return;
     }
 
     const message = await prisma.message.create({
       data: {
-        content: content.trim(),
+        content: cleanContent,
         channelId: id,
         userId,
       },

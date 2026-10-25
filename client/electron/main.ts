@@ -90,6 +90,21 @@ function setupAutoUpdater() {
   });
 }
 
+function isSafeExternalUrl(rawUrl: unknown): string | null {
+  if (typeof rawUrl !== 'string' || !rawUrl.trim() || rawUrl.length > 2048) {
+    return null;
+  }
+  try {
+    const parsed = new URL(rawUrl.trim());
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.toString();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -103,10 +118,37 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
     },
   });
 
   mainWindow.webContents.setBackgroundThrottling(false);
+
+  // Bloquear criação de janelas pop-up não autorizadas e redirecionar links HTTP(S) seguros para o navegador do sistema
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const safeUrl = isSafeExternalUrl(url);
+    if (safeUrl) {
+      shell.openExternal(safeUrl).catch(() => {});
+    }
+    return { action: 'deny' };
+  });
+
+  // Impedir navegação da janela principal do Electron para páginas externas maliciosas (Anti-Phishing / RCE)
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    const allowedDevOrigin = process.env.VITE_DEV_SERVER_URL;
+    if (allowedDevOrigin && navigationUrl.startsWith(allowedDevOrigin)) {
+      return;
+    }
+    if (navigationUrl.startsWith('file://')) {
+      return;
+    }
+    event.preventDefault();
+    const safeUrl = isSafeExternalUrl(navigationUrl);
+    if (safeUrl) {
+      shell.openExternal(safeUrl).catch(() => {});
+    }
+  });
 
   // Ocultar barra de menu padrão do Windows para estilo limpo de app desktop
   mainWindow.setMenuBarVisibility(false);
@@ -171,9 +213,10 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
-ipcMain.handle('open-external', async (_event, url: string) => {
-  if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
-    await shell.openExternal(url);
+ipcMain.handle('open-external', async (_event, url: unknown) => {
+  const safeUrl = isSafeExternalUrl(url);
+  if (safeUrl) {
+    await shell.openExternal(safeUrl);
   }
 });
 
@@ -231,10 +274,10 @@ ipcMain.handle('start-process-audio-capture', async (_event, sourceId?: string) 
   }
 
   const args: string[] = [];
-  if (sourceId && sourceId.startsWith('window:')) {
+  if (typeof sourceId === 'string' && sourceId.length <= 128 && sourceId.startsWith('window:')) {
     const parts = sourceId.split(':');
     const hwndStr = parts[1];
-    if (hwndStr && /^\d+$/.test(hwndStr)) {
+    if (hwndStr && /^\d{1,20}$/.test(hwndStr)) {
       args.push('--hwnd', hwndStr, '--fallback-exclude-pid', String(process.pid));
     } else {
       args.push('--exclude-pid', String(process.pid));

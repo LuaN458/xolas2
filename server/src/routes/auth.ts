@@ -3,22 +3,54 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
 import { authMiddleware, AuthRequest } from '../middlewares/auth';
+import {
+  createRateLimiter,
+  ensureScalarString,
+  hasSqlInjectionSignature,
+  sanitizeText,
+} from '../middlewares/security';
 
 const router = Router();
 
-router.post('/register', async (req, res): Promise<void> => {
-  try {
-    const { username, email, password } = req.body;
+// Hash dummy para comparação em tempo constante contra ataques de enumeração de usuários (Timing Attack)
+const DUMMY_BCRYPT_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
-    if (!username || !password) {
+const authRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  maxRequests: 25,
+  message: 'Muitas tentativas de autenticação. Aguarde alguns minutos antes de tentar novamente.',
+});
+
+router.post('/register', authRateLimiter, async (req, res): Promise<void> => {
+  try {
+    const rawUsername = ensureScalarString(req.body?.username, 64);
+    const rawEmail = ensureScalarString(req.body?.email, 128);
+    const rawPassword = ensureScalarString(req.body?.password, 128);
+
+    if (!rawUsername || !rawPassword) {
       res.status(400).json({ error: 'Nickname e senha são obrigatórios.' });
       return;
     }
 
-    const cleanUsername = username.trim();
+    const cleanUsername = sanitizeText(rawUsername, 32);
+    if (cleanUsername.length < 2 || cleanUsername.length > 32) {
+      res.status(400).json({ error: 'O nickname deve ter entre 2 e 32 caracteres.' });
+      return;
+    }
+
+    if (hasSqlInjectionSignature(cleanUsername) || (rawEmail && hasSqlInjectionSignature(rawEmail))) {
+      res.status(400).json({ error: 'Caracteres ou padrões inválidos no cadastro.' });
+      return;
+    }
+
+    if (rawPassword.length < 4 || rawPassword.length > 128) {
+      res.status(400).json({ error: 'A senha deve ter entre 4 e 128 caracteres.' });
+      return;
+    }
+
     const userEmail =
-      email && email.trim()
-        ? email.trim()
+      rawEmail && rawEmail.length > 0
+        ? sanitizeText(rawEmail.toLowerCase(), 128)
         : `${cleanUsername.toLowerCase().replace(/[^a-z0-9_]/g, '') || 'user'}@xolas.local`;
 
     const existingUser = await prisma.user.findFirst({
@@ -32,8 +64,7 @@ router.post('/register', async (req, res): Promise<void> => {
       return;
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    // Gerar avatar com cor agradável baseada no nome
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
     const avatarUrl = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanUsername)}`;
 
     const user = await prisma.user.create({
@@ -81,7 +112,7 @@ router.post('/register', async (req, res): Promise<void> => {
     const token = jwt.sign(
       { userId: user.id, username: user.username, email: user.email },
       secret,
-      { expiresIn: '7d' }
+      { algorithm: 'HS256', expiresIn: '7d' }
     );
 
     res.status(201).json({ user, token });
@@ -91,13 +122,21 @@ router.post('/register', async (req, res): Promise<void> => {
   }
 });
 
-router.post('/login', async (req, res): Promise<void> => {
+router.post('/login', authRateLimiter, async (req, res): Promise<void> => {
   try {
-    const { username, email, password } = req.body;
-    const identifier = (username || email || '').trim();
+    const rawUsername = ensureScalarString(req.body?.username, 128);
+    const rawEmail = ensureScalarString(req.body?.email, 128);
+    const rawPassword = ensureScalarString(req.body?.password, 128);
 
-    if (!identifier || !password) {
+    const identifier = sanitizeText(rawUsername || rawEmail || '', 128);
+
+    if (!identifier || !rawPassword) {
       res.status(400).json({ error: 'Nickname e senha são obrigatórios.' });
+      return;
+    }
+
+    if (hasSqlInjectionSignature(identifier)) {
+      res.status(401).json({ error: 'Nickname ou senha incorretos.' });
       return;
     }
 
@@ -112,11 +151,13 @@ router.post('/login', async (req, res): Promise<void> => {
     });
 
     if (!user) {
+      // Executar bcrypt dummy para manter tempo constante e impedir enumeração de contas
+      await bcrypt.compare(rawPassword, DUMMY_BCRYPT_HASH);
       res.status(401).json({ error: 'Nickname ou senha incorretos.' });
       return;
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = await bcrypt.compare(rawPassword, user.password);
     if (!isMatch) {
       res.status(401).json({ error: 'Nickname ou senha incorretos.' });
       return;
@@ -126,7 +167,7 @@ router.post('/login', async (req, res): Promise<void> => {
     const token = jwt.sign(
       { userId: user.id, username: user.username, email: user.email },
       secret,
-      { expiresIn: '7d' }
+      { algorithm: 'HS256', expiresIn: '7d' }
     );
 
     res.json({
@@ -175,14 +216,18 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response): Promi
 router.patch('/profile', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const { username } = req.body;
+    const rawUsername = ensureScalarString(req.body?.username, 64);
 
-    if (!username || username.trim().length === 0) {
+    if (!rawUsername) {
       res.status(400).json({ error: 'O apelido não pode estar em branco.' });
       return;
     }
 
-    const trimmed = username.trim();
+    const trimmed = sanitizeText(rawUsername, 32);
+    if (trimmed.length < 2 || trimmed.length > 32 || hasSqlInjectionSignature(trimmed)) {
+      res.status(400).json({ error: 'O apelido deve ter entre 2 e 32 caracteres válidos.' });
+      return;
+    }
 
     const existing = await prisma.user.findFirst({
       where: {
@@ -219,18 +264,19 @@ router.patch('/profile', authMiddleware, async (req: AuthRequest, res: Response)
   }
 });
 
-router.patch('/password', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+router.patch('/password', authMiddleware, authRateLimiter, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const { currentPassword, newPassword } = req.body;
+    const currentPassword = ensureScalarString(req.body?.currentPassword, 128);
+    const newPassword = ensureScalarString(req.body?.newPassword, 128);
 
     if (!currentPassword || !newPassword) {
       res.status(400).json({ error: 'A senha atual e a nova senha são obrigatórias.' });
       return;
     }
 
-    if (newPassword.length < 4) {
-      res.status(400).json({ error: 'A nova senha deve ter no mínimo 4 caracteres.' });
+    if (newPassword.length < 4 || newPassword.length > 128) {
+      res.status(400).json({ error: 'A nova senha deve ter entre 4 e 128 caracteres.' });
       return;
     }
 
