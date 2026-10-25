@@ -580,16 +580,29 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
 
       try {
+        const micTrack = stream.getAudioTracks()[0];
+        if (!micTrack) return;
+
+        // Criar um clone da faixa exclusivamente para o analisador de VAD.
+        // O clone compartilha o hardware de captura, mas possui estado .enabled independente,
+        // garantindo que mutar o micTrack na transmissão NUNCA ensurdeça o analisador de voz!
+        const analysisTrack = micTrack.clone();
+        analysisTrack.enabled = true;
+        const analysisStream = new MediaStream([analysisTrack]);
+
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         const audioCtx: AudioContext = new AudioCtx();
-        const source = audioCtx.createMediaStreamSource(stream);
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+
+        const source = audioCtx.createMediaStreamSource(analysisStream);
         const analyser = audioCtx.createAnalyser();
         analyser.fftSize = 512;
         source.connect(analyser);
 
         const samples = new Float32Array(analyser.fftSize);
         let hangoverTimeout: number | null = null;
-        const micTrack = stream.getAudioTracks()[0];
 
         const interval = window.setInterval(() => {
           if (isMutedRef.current || !currentChannelRef.current) {
@@ -602,6 +615,25 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
             if (isLocalSpeakingRef.current) {
               isLocalSpeakingRef.current = false;
+              syncVoiceState();
+              emitLocalVoiceState();
+            }
+            return;
+          }
+
+          const threshold = voiceActivationThresholdRef.current;
+
+          // Se o limiar for 0%, modo de transmissão contínua sem nenhum corte
+          if (threshold === 0) {
+            if (hangoverTimeout) {
+              window.clearTimeout(hangoverTimeout);
+              hangoverTimeout = null;
+            }
+            if (micTrack && !micTrack.enabled) {
+              micTrack.enabled = true;
+            }
+            if (!isLocalSpeakingRef.current) {
+              isLocalSpeakingRef.current = true;
               syncVoiceState();
               emitLocalVoiceState();
             }
@@ -631,7 +663,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             0,
             Math.min(100, Math.round(normalized * (micInputGainRef.current / 100)))
           );
-          const threshold = voiceActivationThresholdRef.current;
 
           const isAboveThreshold = currentLevel >= threshold;
 
@@ -649,7 +680,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               emitLocalVoiceState();
             }
           } else {
-            // Se caiu abaixo do limiar, aplica cauda de fala de 280ms antes de fechar o microfone
+            // Cauda de fala suave de 500ms (padrão Discord) para pausas naturais entre palavras
             if (isLocalSpeakingRef.current && hangoverTimeout === null) {
               hangoverTimeout = window.setTimeout(() => {
                 hangoverTimeout = null;
@@ -659,7 +690,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 isLocalSpeakingRef.current = false;
                 syncVoiceState();
                 emitLocalVoiceState();
-              }, 280);
+              }, 500);
             }
           }
         }, 40);
@@ -667,6 +698,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         vadCleanupRef.current = () => {
           clearInterval(interval);
           if (hangoverTimeout) window.clearTimeout(hangoverTimeout);
+          try {
+            analysisTrack.stop();
+          } catch {}
           source.disconnect();
           audioCtx.close().catch(() => {});
         };

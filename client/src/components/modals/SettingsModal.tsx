@@ -226,10 +226,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     try {
       let stream: MediaStream;
 
-      // Se o usuário já estiver em chamada de voz, reutilizar o track do LiveKit para não conflitar no Windows
+      // Se o usuário já estiver em chamada de voz, reutilizar uma cópia ativa da faixa para o teste não conflitar nem depender do corte
       if (currentVoiceChannel && localAudioTrack && localAudioTrack.readyState === 'live') {
         isReusingCallTrackRef.current = true;
-        stream = new MediaStream([localAudioTrack]);
+        const testTrack = localAudioTrack.clone();
+        testTrack.enabled = true;
+        stream = new MediaStream([testTrack]);
       } else {
         isReusingCallTrackRef.current = false;
         const constraints: MediaStreamConstraints = {
@@ -246,6 +248,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       const audioContext = new AudioCtx();
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+      }
       audioContextRef.current = audioContext;
 
       const analyser = audioContext.createAnalyser();
@@ -954,36 +959,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   <span className="text-[10px] text-obsidian-text-muted font-medium">Calibração Rápida:</span>
                   <button
                     type="button"
-                    onClick={() => setVoiceActivationThreshold(25)}
+                    onClick={() => setVoiceActivationThreshold(0)}
                     className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
-                      voiceActivationThreshold === 25
-                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
+                      voiceActivationThreshold === 0
+                        ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300 font-bold shadow-sm shadow-indigo-500/20'
                         : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
                     }`}
+                    title="Mantém o microfone 100% aberto sem nenhum corte (transmissão contínua)"
                   >
-                    Silencioso (25%)
+                    Sempre Ativo (0%)
                   </button>
                   <button
                     type="button"
-                    onClick={() => setVoiceActivationThreshold(35)}
+                    onClick={() => setVoiceActivationThreshold(15)}
                     className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
-                      voiceActivationThreshold === 35
+                      voiceActivationThreshold === 15
                         ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
                         : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
                     }`}
                   >
-                    Padrão / Discord (35%) ⭐
+                    Sensível (15%)
                   </button>
                   <button
                     type="button"
-                    onClick={() => setVoiceActivationThreshold(50)}
+                    onClick={() => setVoiceActivationThreshold(20)}
                     className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
-                      voiceActivationThreshold === 50
+                      voiceActivationThreshold === 20
                         ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
                         : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
                     }`}
                   >
-                    Ambiente Barulhento (50%)
+                    Padrão / Discord (20%) ⭐
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVoiceActivationThreshold(40)}
+                    className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
+                      voiceActivationThreshold === 40
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
+                        : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                    }`}
+                  >
+                    Ambiente Barulhento (40%)
                   </button>
                 </div>
 
