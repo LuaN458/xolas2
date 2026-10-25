@@ -51,11 +51,32 @@ export interface ScreenSource {
   appIcon: string | null;
 }
 
+export interface UpdateInfo {
+  version: string;
+  releaseDate?: string;
+  releaseNotes?: string | Array<{ note: string }>;
+}
+
+export interface UpdateProgress {
+  bytesPerSecond: number;
+  percent: number;
+  transferred: number;
+  total: number;
+}
+
 declare global {
   interface Window {
     electronAPI?: {
       getScreenSources: () => Promise<ScreenSource[]>;
       isElectron?: boolean;
+      getAppVersion?: () => Promise<string>;
+      checkForUpdates?: () => Promise<{ status: string; version: string; error?: string; result?: any }>;
+      restartAndInstall?: () => Promise<void>;
+      onUpdateAvailable?: (callback: (info: UpdateInfo) => void) => () => void;
+      onUpdateProgress?: (callback: (progress: UpdateProgress) => void) => () => void;
+      onUpdateDownloaded?: (callback: (info: UpdateInfo) => void) => () => void;
+      onUpdateNotAvailable?: (callback: (info: UpdateInfo) => void) => () => void;
+      onUpdateError?: (callback: (error: string) => void) => () => void;
     };
   }
 }

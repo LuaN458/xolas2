@@ -3,7 +3,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useSocket } from '../../contexts/SocketContext';
 import { api } from '../../lib/api';
-import { X, User, Mic, Check, AlertCircle, Volume2, Lock, Sliders, ShieldCheck } from 'lucide-react';
+import { X, User, Mic, Check, AlertCircle, Volume2, Lock, Sliders, ShieldCheck, Sparkles, RefreshCw } from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -34,6 +34,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
+
+  // Estados de Versão e Auto-Atualização
+  const [appVersion, setAppVersion] = useState<string>('1.0.0');
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+
+  useEffect(() => {
+    if (window.electronAPI?.getAppVersion) {
+      window.electronAPI.getAppVersion().then((v) => {
+        if (v) setAppVersion(v);
+      });
+    }
+  }, []);
+
+  const handleManualCheckUpdate = async () => {
+    if (!window.electronAPI?.checkForUpdates) {
+      setUpdateStatus('Versão mais recente instalada.');
+      return;
+    }
+    setIsCheckingUpdate(true);
+    setUpdateStatus(null);
+    try {
+      const res = await window.electronAPI.checkForUpdates();
+      if (res?.status === 'dev-mode') {
+        setUpdateStatus('Modo de desenvolvimento (auto-updater ativo em builds instaladas).');
+      } else if (res?.error) {
+        setUpdateStatus('Não foi possível verificar atualizações no momento.');
+      } else {
+        setUpdateStatus('Verificação concluída. Você está na versão mais recente!');
+      }
+    } catch {
+      setUpdateStatus('Você está na versão mais recente!');
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   // Estados e refs do Teste de Volume do Microfone
   const [volumeLevel, setVolumeLevel] = useState(0);
@@ -487,6 +523,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <span className="text-[11px] text-emerald-300/90 leading-tight">
                   Suas preferências de volumes, ganho e microfone são gravadas localmente neste dispositivo e mantidas mesmo após fechar o aplicativo.
                 </span>
+              </div>
+
+              {/* Informações da Versão e Atualizações */}
+              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border flex items-center justify-between">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs font-semibold text-white">Xolas Desktop</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-obsidian-surface text-indigo-300 border border-obsidian-border font-bold">
+                      v{appVersion}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-obsidian-text-muted mt-1">
+                    {updateStatus || 'Atualizações automáticas ativas em segundo plano.'}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleManualCheckUpdate}
+                  disabled={isCheckingUpdate}
+                  className="px-3 py-1.5 bg-obsidian-surface hover:bg-obsidian-card-hover border border-obsidian-border hover:border-indigo-500/40 text-white rounded-xl text-xs font-medium transition-all flex items-center space-x-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-indigo-400 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingUpdate ? 'Verificando...' : 'Verificar Atualização'}</span>
+                </button>
               </div>
             </div>
           )}

@@ -24,6 +24,11 @@
       "dist/**/*",
       "dist-electron/**/*"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "LuaN458",
+      "repo": "xolas2"
+    },
     "win": {
       "target": [
         "nsis",
@@ -43,6 +48,7 @@
     "@livekit/components-react": "^2.6.9",
     "axios": "^1.7.9",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.11",
     "livekit-client": "^2.7.2",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

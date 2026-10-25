@@ -17,6 +17,7 @@ import { CreateServerModal } from './components/modals/CreateServerModal';
 import { CreateChannelModal } from './components/modals/CreateChannelModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { AuthModal } from './components/modals/AuthModal';
+import { UpdateNotificationBanner } from './components/layout/UpdateNotificationBanner';
 import { MessageSquareText } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -317,6 +318,9 @@ export const App: React.FC = () => {
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
+
+      {/* Banner Flutuante de Atualização Automática */}
+      <UpdateNotificationBanner />
     </div>
   );
 };
