@@ -1,7 +1,10 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, desktopCapturer, shell, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { autoUpdater } from 'electron-updater';
+
+// Permitir reprodução automática de áudio e vídeo WebRTC sem bloqueio de gesto
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,7 +166,29 @@ ipcMain.handle('get-screen-sources', async () => {
   }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Habilitar captura de áudio loopback nativa para getDisplayMedia no Windows
+  try {
+    session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+      desktopCapturer
+        .getSources({ types: ['screen', 'window'] })
+        .then((sources) => {
+          if (sources && sources.length > 0) {
+            callback({ video: sources[0], audio: 'loopback' });
+          } else {
+            callback({});
+          }
+        })
+        .catch(() => {
+          callback({});
+        });
+    });
+  } catch (err) {
+    console.warn('Aviso ao configurar DisplayMediaRequestHandler:', err);
+  }
+
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

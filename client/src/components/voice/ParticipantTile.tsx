@@ -30,9 +30,18 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
 }) => {
   const videoRef = React.useRef<HTMLVideoElement>(null);
 
+  const audioTrackCount = stream ? stream.getAudioTracks().length : 0;
+
   React.useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
+
+    if (isLocal) {
+      el.muted = true;
+    } else {
+      el.muted = volume === 0;
+      el.volume = Math.max(0, Math.min(1, volume / 100));
+    }
 
     if (stream) {
       if (el.srcObject !== stream) {
@@ -49,19 +58,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
     } else {
       el.srcObject = null;
     }
-  }, [stream, videoTrack]);
-
-  React.useEffect(() => {
-    if (videoRef.current) {
-      if (isLocal) {
-        // Se for transmissão local, mutar a reprodução do próprio elemento para evitar eco acústico
-        videoRef.current.muted = true;
-      } else {
-        videoRef.current.muted = volume === 0;
-        videoRef.current.volume = Math.max(0, Math.min(1, volume / 100));
-      }
-    }
-  }, [volume, isLocal]);
+  }, [stream, videoTrack, audioTrackCount, isLocal, volume]);
 
   const hasVideo = stream ? stream.getVideoTracks().length > 0 : Boolean(videoTrack);
 

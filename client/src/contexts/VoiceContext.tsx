@@ -46,6 +46,7 @@ interface RemotePeerData {
   screenStreamId?: string | null;
   audioTrack?: MediaStreamTrack;
   screenTrack?: MediaStreamTrack;
+  screenAudioTrack?: MediaStreamTrack;
   screenStream?: MediaStream;
 }
 
@@ -314,6 +315,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           toUserId: remoteUserId,
           targetUserId: remoteUserId,
           sdp: pc.localDescription,
+          screenStreamId: screenStreamRef.current?.id || null,
         });
       } catch (err) {
         console.warn(`Erro ao enviar oferta WebRTC para ${remoteUserId}:`, err);
@@ -365,7 +367,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       pc.ontrack = (event) => {
         const track = event.track;
-        const stream = event.streams?.[0] || new MediaStream([track]);
+        const incomingStream = event.streams?.[0];
 
         let peerData = remoteParticipantsRef.current.get(remoteUserId);
         if (!peerData) {
@@ -380,17 +382,50 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (track.kind === 'audio') {
-          peerData.audioTrack = track;
-          attachRemoteAudio(remoteUserId, track, stream);
+          const isScreenAudio =
+            (incomingStream &&
+              peerData.screenStreamId &&
+              incomingStream.id === peerData.screenStreamId) ||
+            (incomingStream && incomingStream.getVideoTracks().length > 0) ||
+            (peerData.audioTrack &&
+              peerData.audioTrack.readyState === 'live' &&
+              peerData.audioTrack.id !== track.id);
+
+          if (isScreenAudio) {
+            peerData.screenAudioTrack = track;
+            const tracks: MediaStreamTrack[] = [];
+            if (peerData.screenTrack && peerData.screenTrack.readyState === 'live') {
+              tracks.push(peerData.screenTrack);
+            } else if (incomingStream && incomingStream.getVideoTracks().length > 0) {
+              tracks.push(...incomingStream.getVideoTracks());
+            }
+            tracks.push(track);
+            peerData.screenStream = new MediaStream(tracks);
+          } else {
+            peerData.audioTrack = track;
+            attachRemoteAudio(remoteUserId, track, incomingStream || new MediaStream([track]));
+          }
         } else if (track.kind === 'video') {
           peerData.screenTrack = track;
-          peerData.screenStream = stream;
           peerData.isScreenSharing = true;
+
+          // Verificar se o stream recebido já traz a faixa de áudio da tela junto
+          const streamAudio = incomingStream?.getAudioTracks()[0];
+          if (streamAudio) {
+            peerData.screenAudioTrack = streamAudio;
+          }
+
+          const tracks: MediaStreamTrack[] = [track];
+          if (peerData.screenAudioTrack && peerData.screenAudioTrack.readyState === 'live') {
+            tracks.push(peerData.screenAudioTrack);
+          }
+          peerData.screenStream = new MediaStream(tracks);
 
           track.onended = () => {
             const currentPeer = remoteParticipantsRef.current.get(remoteUserId);
             if (currentPeer && currentPeer.screenTrack?.id === track.id) {
               currentPeer.screenTrack = undefined;
+              currentPeer.screenAudioTrack = undefined;
               currentPeer.screenStream = undefined;
               currentPeer.isScreenSharing = false;
               syncVoiceState();
@@ -824,23 +859,33 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fromUserId,
       fromUsername,
       sdp,
+      screenStreamId,
     }: {
       channelId: string;
       fromUserId: string;
       fromUsername?: string;
       sdp: RTCSessionDescriptionInit;
+      screenStreamId?: string | null;
     }) => {
       if (!currentChannelRef.current || currentChannelRef.current.id !== channelId) return;
       if (fromUserId === user?.id) return;
 
-      if (!remoteParticipantsRef.current.has(fromUserId)) {
-        remoteParticipantsRef.current.set(fromUserId, {
+      let peerEntry = remoteParticipantsRef.current.get(fromUserId);
+      if (!peerEntry) {
+        peerEntry = {
           id: fromUserId,
           username: fromUsername || 'Usuário',
           isMuted: false,
           isSpeaking: false,
-          isScreenSharing: false,
-        });
+          isScreenSharing: Boolean(screenStreamId),
+          screenStreamId: screenStreamId || null,
+        };
+        remoteParticipantsRef.current.set(fromUserId, peerEntry);
+      } else if (screenStreamId !== undefined) {
+        peerEntry.screenStreamId = screenStreamId;
+        if (screenStreamId) {
+          peerEntry.isScreenSharing = true;
+        }
       }
 
       const { pc } = getOrCreatePeerConnection(fromUserId, channelId);
@@ -878,6 +923,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           toUserId: fromUserId,
           targetUserId: fromUserId,
           sdp: pc.localDescription,
+          screenStreamId: screenStreamRef.current?.id || null,
         });
       } catch (err) {
         console.warn(`Erro ao processar oferta WebRTC de ${fromUserId}:`, err);
@@ -1131,7 +1177,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         if (sourceId && window.electronAPI) {
           const isWindow = sourceId.startsWith('window:');
-          const canCaptureAudio = includeAudio && !isWindow;
 
           const videoMandatory: any = {
             chromeMediaSource: 'desktop',
@@ -1145,8 +1190,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
 
           try {
+            // Tentar capturar vídeo (tela ou janela) + áudio desktop loopback diretamente
             stream = await (navigator.mediaDevices as any).getUserMedia({
-              audio: canCaptureAudio
+              audio: includeAudio
                 ? {
                     mandatory: {
                       chromeMediaSource: 'desktop',
@@ -1159,7 +1205,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               },
             });
           } catch (errWindow) {
-            console.warn('Falha na captura com restrições avançadas, tentando fallback seguro:', errWindow);
+            console.warn('Captura combinada falhou na janela, capturando vídeo e anexando áudio do sistema separadamente:', errWindow);
             try {
               stream = await (navigator.mediaDevices as any).getUserMedia({
                 audio: false,
@@ -1168,6 +1214,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     chromeMediaSource: 'desktop',
                     chromeMediaSourceId: sourceId,
                   },
+                  optional: [{ maxWidth: width }, { maxHeight: height }],
                 },
               });
             } catch (errFallback) {
@@ -1178,33 +1225,60 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   height: { ideal: height },
                   frameRate: { ideal: fps, max: fps },
                 },
-                audio: (includeAudio
-                  ? {
-                      systemAudio: 'exclude',
-                      selfBrowserSurface: 'exclude',
-                    }
-                  : false) as any,
+                audio: includeAudio,
               });
             }
           }
-        } else {
-          const audioConstraints: any = includeAudio
-            ? {
-                systemAudio: 'exclude',
-                selfBrowserSurface: 'exclude',
-                suppressLocalAudioPlayback: false,
-              }
-            : false;
 
+          // Se o usuário pediu áudio (ex: selecionou a janela do Google/Opera) e o stream ainda não tem faixa de áudio,
+          // capturamos o loopback de áudio do desktop e injetamos no mesmo MediaStream da janela!
+          if (includeAudio && stream.getAudioTracks().length === 0) {
+            try {
+              const desktopAudioStream: MediaStream = await (navigator.mediaDevices as any).getUserMedia({
+                audio: {
+                  mandatory: {
+                    chromeMediaSource: 'desktop',
+                  },
+                },
+                video: {
+                  mandatory: {
+                    chromeMediaSource: 'desktop',
+                    maxWidth: 16,
+                    maxHeight: 16,
+                    maxFrameRate: 1,
+                  },
+                },
+              });
+              // Descartar imediatamente o vídeo auxiliar 16x16 e manter apenas a faixa de áudio do sistema
+              desktopAudioStream.getVideoTracks().forEach((vt) => vt.stop());
+              const sysAudioTrack = desktopAudioStream.getAudioTracks()[0];
+              if (sysAudioTrack) {
+                stream.addTrack(sysAudioTrack);
+              }
+            } catch (audioLoopbackErr) {
+              console.warn('Não foi possível capturar áudio loopback adicional para a janela:', audioLoopbackErr);
+            }
+          }
+        } else {
           stream = await navigator.mediaDevices.getDisplayMedia({
             video: {
               width: { ideal: width },
               height: { ideal: height },
               frameRate: { ideal: fps, max: fps },
             },
-            audio: audioConstraints,
+            audio: includeAudio,
           });
         }
+
+        // Garantir fidelidade máxima de som para músicas/vídeos de abas e janelas (desativar filtros de voz na faixa da tela)
+        stream.getAudioTracks().forEach((at) => {
+          at.enabled = true;
+          at.applyConstraints({
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          }).catch(() => {});
+        });
 
         // Parar stream anterior se estiver trocando de janela/tela
         if (screenStreamRef.current && screenStreamRef.current.id !== stream.id) {
