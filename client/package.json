@@ -16,6 +16,7 @@
   "build": {
     "appId": "com.xolas.desktop",
     "productName": "Xolas",
+    "copyright": "Copyright © 2026 Xolas. Todos os direitos reservados.",
     "electronVersion": "34.0.0",
     "directories": {
       "output": "release"
@@ -34,14 +35,20 @@
         "nsis",
         "portable"
       ],
-      "artifactName": "Xolas-${version}-${arch}.${ext}"
+      "artifactName": "Xolas-${version}-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker",
+      "legalTrademarks": "Xolas",
+      "publisherName": "Xolas"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Xolas"
+      "shortcutName": "Xolas",
+      "uninstallDisplayName": "Xolas Desktop",
+      "runAfterFinish": true
     }
   },
   "dependencies": {
