@@ -20,7 +20,7 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
@@ -30,6 +30,5 @@ jobs:
       - name: Compilar e Publicar Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm --prefix client run build
-          npx --prefix client electron-builder --win --publish always
+        working-directory: client
+        run: npm run release
