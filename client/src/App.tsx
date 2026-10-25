@@ -296,7 +296,11 @@ export const App: React.FC = () => {
               <>
                 <ChatHeader channel={activeChannel} />
                 {activeChannel.type === 'VOICE' ? (
-                  <VoiceRoom channel={activeChannel} onDisconnect={redirectToGeneralChat} />
+                  <VoiceRoom
+                    channel={activeChannel}
+                    onDisconnect={redirectToGeneralChat}
+                    socketParticipants={voiceParticipants[activeChannel.id] || []}
+                  />
                 ) : (
                   <>
                     <MessageArea channel={activeChannel} />

@@ -1,7 +1,17 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import {
+  Room,
+  RoomEvent,
+  Track,
+  RemoteParticipant,
+  LocalParticipant,
+  RemoteTrackPublication,
+  LocalTrackPublication,
+} from 'livekit-client';
 import { api } from '../lib/api';
 import { Channel } from '../types';
 import { useSocket } from './SocketContext';
+import { useAuth } from './AuthContext';
 import {
   getUserSettings,
   saveUserSetting,
@@ -13,6 +23,26 @@ export interface ScreenQualityOptions {
   resolution: '720p' | '1080p';
   fps: 30 | 60;
   includeAudio?: boolean;
+}
+
+export interface ActiveParticipant {
+  id: string;
+  username: string;
+  avatarUrl?: string;
+  isSpeaking: boolean;
+  isMuted: boolean;
+  isLocal: boolean;
+  cameraTrack?: MediaStreamTrack;
+  screenTrack?: MediaStreamTrack;
+  audioTrack?: MediaStreamTrack;
+}
+
+export interface ActiveScreenShareInfo {
+  id: string;
+  participantName: string;
+  isLocal: boolean;
+  track?: MediaStreamTrack;
+  stream?: MediaStream;
 }
 
 interface VoiceContextType {
@@ -40,12 +70,18 @@ interface VoiceContextType {
   micInputGain: number;
   setMicInputGain: (gain: number) => void;
   updateScreenQualityPreset: (options: ScreenQualityOptions) => void;
+  // Multiusuário e compartilhamento de tela WebRTC
+  voiceParticipants: ActiveParticipant[];
+  activeScreenShares: ActiveScreenShareInfo[];
+  selectedScreenShareId: string | null;
+  setSelectedScreenShareId: (id: string | null) => void;
 }
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { socket } = useSocket();
+  const { user } = useAuth();
   const initialSettings = getUserSettings();
 
   const [currentVoiceChannel, setCurrentVoiceChannel] = useState<Channel | null>(null);
@@ -68,6 +104,15 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [masterVolume, setMasterVolumeState] = useState<number>(initialSettings.masterOutputVolume);
   const [micInputGain, setMicInputGainState] = useState<number>(initialSettings.micInputGain);
 
+  // Estados de participantes multiusuário e telas compartilhadas via WebRTC
+  const [voiceParticipants, setVoiceParticipants] = useState<ActiveParticipant[]>([]);
+  const [activeScreenShares, setActiveScreenShares] = useState<ActiveScreenShareInfo[]>([]);
+  const [selectedScreenShareId, setSelectedScreenShareId] = useState<string | null>(null);
+
+  const roomRef = useRef<Room | null>(null);
+  const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const localScreenPubRef = useRef<LocalTrackPublication | null>(null);
+
   const refreshAudioDevices = useCallback(async () => {
     try {
       if (navigator.mediaDevices?.enumerateDevices) {
@@ -89,6 +134,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const clamped = Math.max(0, Math.min(100, Math.round(val)));
     setMasterVolumeState(clamped);
     saveUserSetting('masterOutputVolume', clamped);
+    // Atualizar volume de todos os elementos de áudio remotos conectados
+    audioElementsRef.current.forEach((el) => {
+      el.volume = clamped / 100;
+    });
   }, []);
 
   const setMicInputGain = useCallback((val: number) => {
@@ -106,7 +155,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, []);
 
-  // Sincronização em tempo real das preferências caso alteradas em outras abas ou componentes
+  // Sincronização em tempo real das preferências
   useEffect(() => {
     const unsubscribe = subscribeToSettingsChange((settings: UserAudioSettings) => {
       setSelectedAudioDeviceIdState(settings.selectedAudioDeviceId);
@@ -131,6 +180,86 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [refreshAudioDevices]);
 
+  // Função para sincronizar participantes e telas ativas da sala WebRTC
+  const syncRoomState = useCallback((currentRoom: Room, currentScreenStream: MediaStream | null, muted: boolean) => {
+    const list: ActiveParticipant[] = [];
+
+    // Participante Local
+    list.push({
+      id: user?.id || 'local-user',
+      username: user?.username || 'Você',
+      avatarUrl: user?.avatarUrl,
+      isSpeaking: currentRoom.localParticipant ? currentRoom.localParticipant.isSpeaking : false,
+      isMuted: muted,
+      isLocal: true,
+      screenTrack: currentScreenStream ? currentScreenStream.getVideoTracks()[0] : undefined,
+    });
+
+    // Participantes Remotos
+    currentRoom.remoteParticipants.forEach((p) => {
+      let cameraTrack: MediaStreamTrack | undefined;
+      let screenTrack: MediaStreamTrack | undefined;
+      let audioTrack: MediaStreamTrack | undefined;
+
+      p.trackPublications.forEach((pub) => {
+        if (pub.track?.mediaStreamTrack) {
+          if (pub.source === Track.Source.Camera) cameraTrack = pub.track.mediaStreamTrack;
+          if (pub.source === Track.Source.ScreenShare) screenTrack = pub.track.mediaStreamTrack;
+          if (pub.source === Track.Source.Microphone) audioTrack = pub.track.mediaStreamTrack;
+        }
+      });
+
+      list.push({
+        id: p.identity,
+        username: p.name || p.identity,
+        avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(p.name || p.identity)}`,
+        isSpeaking: p.isSpeaking,
+        isMuted: !p.isMicrophoneEnabled,
+        isLocal: false,
+        cameraTrack,
+        screenTrack,
+        audioTrack,
+      });
+    });
+
+    setVoiceParticipants(list);
+
+    // Sincronizar Telas Compartilhadas Ativas
+    const shares: ActiveScreenShareInfo[] = [];
+
+    // Tela local
+    if (currentScreenStream && currentScreenStream.getVideoTracks().length > 0) {
+      shares.push({
+        id: 'local-screen',
+        participantName: `${user?.username || 'Você'} (Você)`,
+        isLocal: true,
+        stream: currentScreenStream,
+        track: currentScreenStream.getVideoTracks()[0],
+      });
+    }
+
+    // Telas remotas
+    currentRoom.remoteParticipants.forEach((p) => {
+      p.trackPublications.forEach((pub) => {
+        if (pub.source === Track.Source.ScreenShare && pub.track?.mediaStreamTrack) {
+          shares.push({
+            id: `remote-${p.identity}-${pub.trackSid}`,
+            participantName: p.name || p.identity,
+            isLocal: false,
+            track: pub.track.mediaStreamTrack,
+          });
+        }
+      });
+    });
+
+    setActiveScreenShares(shares);
+    setSelectedScreenShareId((prev) => {
+      if (prev && shares.some((s) => s.id === prev)) return prev;
+      return shares.length > 0 ? shares[0].id : null;
+    });
+  }, [user]);
+
+  // Conectar a um canal de voz com LiveKit WebRTC completo
   const joinVoiceChannel = useCallback(
     async (channel: Channel) => {
       if (currentVoiceChannel?.id === channel.id) return;
@@ -146,7 +275,81 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setLivekitUrl(url);
         setCurrentVoiceChannel(channel);
 
-        // Notificar servidor via WebSocket para presença
+        // Desconectar sala anterior se houver
+        if (roomRef.current) {
+          roomRef.current.disconnect();
+          roomRef.current = null;
+        }
+
+        // Criar e conectar instância real do LiveKit Room
+        const room = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+          audioCaptureDefaults: {
+            deviceId: selectedAudioDeviceId && selectedAudioDeviceId !== 'default' ? selectedAudioDeviceId : undefined,
+            autoGainControl: true,
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+        });
+        roomRef.current = room;
+
+        // Ouvir eventos do WebRTC
+        room.on(RoomEvent.Connected, () => {
+          syncRoomState(room, screenStream, isMuted);
+        });
+
+        room.on(RoomEvent.ParticipantConnected, () => {
+          syncRoomState(room, screenStream, isMuted);
+        });
+
+        room.on(RoomEvent.ParticipantDisconnected, () => {
+          syncRoomState(room, screenStream, isMuted);
+        });
+
+        room.on(RoomEvent.TrackSubscribed, (track, publication) => {
+          if (track.kind === Track.Kind.Audio) {
+            const audioEl = new Audio();
+            audioEl.autoplay = true;
+            audioEl.volume = isDeafened ? 0 : Math.max(0, Math.min(1, masterVolume / 100));
+            track.attach(audioEl);
+            audioElementsRef.current.set(publication.trackSid, audioEl);
+          }
+          syncRoomState(room, screenStream, isMuted);
+        });
+
+        room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
+          if (track.kind === Track.Kind.Audio) {
+            const audioEl = audioElementsRef.current.get(publication.trackSid);
+            if (audioEl) {
+              track.detach(audioEl);
+              audioEl.srcObject = null;
+              audioElementsRef.current.delete(publication.trackSid);
+            }
+          }
+          syncRoomState(room, screenStream, isMuted);
+        });
+
+        room.on(RoomEvent.ActiveSpeakersChanged, () => {
+          syncRoomState(room, screenStream, isMuted);
+        });
+
+        room.on(RoomEvent.TrackMuted, () => syncRoomState(room, screenStream, isMuted));
+        room.on(RoomEvent.TrackUnmuted, () => syncRoomState(room, screenStream, isMuted));
+
+        // Conectar ao cluster LiveKit
+        await room.connect(url, token);
+
+        // Habilitar microfone local respeitando estado de mute
+        try {
+          await room.localParticipant.setMicrophoneEnabled(!isMuted);
+        } catch (micErr) {
+          console.warn('Aviso: falha ao ativar microfone inicial no LiveKit:', micErr);
+        }
+
+        syncRoomState(room, screenStream, isMuted);
+
+        // Notificar servidor via WebSocket para presença de sidebar
         if (socket) {
           socket.emit('join-voice', {
             serverId: channel.serverId,
@@ -154,12 +357,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
         }
       } catch (error) {
-        console.error('Falha ao obter token LiveKit:', error);
+        console.error('Falha ao conectar no LiveKit:', error);
       } finally {
         setIsConnecting(false);
       }
     },
-    [currentVoiceChannel?.id, socket]
+    [currentVoiceChannel?.id, socket, selectedAudioDeviceId, isMuted, isDeafened, masterVolume, screenStream, syncRoomState]
   );
 
   const leaveVoiceChannel = useCallback(() => {
@@ -170,6 +373,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
     }
 
+    if (roomRef.current) {
+      roomRef.current.disconnect();
+      roomRef.current = null;
+    }
+
+    audioElementsRef.current.forEach((el) => {
+      el.pause();
+      el.srcObject = null;
+    });
+    audioElementsRef.current.clear();
+
     if (screenStream) {
       screenStream.getTracks().forEach((track) => track.stop());
       setScreenStream(null);
@@ -179,134 +393,185 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCurrentVoiceChannel(null);
     setLivekitToken(null);
     setLivekitUrl(null);
+    setVoiceParticipants([]);
+    setActiveScreenShares([]);
+    setSelectedScreenShareId(null);
   }, [currentVoiceChannel, socket, screenStream]);
 
-  const toggleMute = () => {
-    setIsMuted((prev) => !prev);
-  };
-
-  const toggleDeafen = () => {
-    setIsDeafened((prev) => {
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
       const next = !prev;
-      if (next) setIsMuted(true);
+      if (roomRef.current) {
+        roomRef.current.localParticipant.setMicrophoneEnabled(!next).catch(() => {});
+        syncRoomState(roomRef.current, screenStream, next);
+      }
       return next;
     });
-  };
+  }, [screenStream, syncRoomState]);
 
-  const startScreenShare = useCallback(async (sourceId?: string, quality?: ScreenQualityOptions) => {
-    try {
-      const activeQuality = quality || { resolution: '1080p', fps: 60, includeAudio: true };
-      setScreenQuality(activeQuality);
-
-      const is1080 = activeQuality.resolution === '1080p';
-      const width = is1080 ? 1920 : 1280;
-      const height = is1080 ? 1080 : 720;
-      const fps = activeQuality.fps;
-      const includeAudio = activeQuality.includeAudio !== false;
-
-      let stream: MediaStream;
-
-      if (sourceId && window.electronAPI) {
-        const isWindow = sourceId.startsWith('window:');
-        // Áudio via chromeMediaSource só é suportado para telas cheias no Electron no Windows; janelas não suportam captura direta de áudio
-        const canCaptureAudio = includeAudio && !isWindow;
-
-        const videoMandatory: any = {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId,
-          maxFrameRate: fps,
-        };
-
-        // Para telas cheias podemos fixar limite; para janelas evitamos OverconstrainedError deixando flexível
-        if (!isWindow) {
-          videoMandatory.maxWidth = width;
-          videoMandatory.maxHeight = height;
+  const toggleDeafen = useCallback(() => {
+    setIsDeafened((prev) => {
+      const next = !prev;
+      if (next) {
+        setIsMuted(true);
+        if (roomRef.current) {
+          roomRef.current.localParticipant.setMicrophoneEnabled(false).catch(() => {});
         }
+      }
+      // Mutar ou restaurar todos os áudios remotos
+      audioElementsRef.current.forEach((el) => {
+        el.volume = next ? 0 : Math.max(0, Math.min(1, masterVolume / 100));
+      });
+      return next;
+    });
+  }, [masterVolume]);
 
-        try {
-          stream = await (navigator.mediaDevices as any).getUserMedia({
-            audio: canCaptureAudio
-              ? {
+  const startScreenShare = useCallback(
+    async (sourceId?: string, quality?: ScreenQualityOptions) => {
+      try {
+        const activeQuality = quality || { resolution: '1080p', fps: 60, includeAudio: true };
+        setScreenQuality(activeQuality);
+
+        const is1080 = activeQuality.resolution === '1080p';
+        const width = is1080 ? 1920 : 1280;
+        const height = is1080 ? 1080 : 720;
+        const fps = activeQuality.fps;
+        const includeAudio = activeQuality.includeAudio !== false;
+
+        let stream: MediaStream;
+
+        if (sourceId && window.electronAPI) {
+          const isWindow = sourceId.startsWith('window:');
+          const canCaptureAudio = includeAudio && !isWindow;
+
+          const videoMandatory: any = {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sourceId,
+            maxFrameRate: fps,
+          };
+
+          if (!isWindow) {
+            videoMandatory.maxWidth = width;
+            videoMandatory.maxHeight = height;
+          }
+
+          try {
+            stream = await (navigator.mediaDevices as any).getUserMedia({
+              audio: canCaptureAudio
+                ? {
+                    mandatory: {
+                      chromeMediaSource: 'desktop',
+                    },
+                  }
+                : false,
+              video: {
+                mandatory: videoMandatory,
+                optional: isWindow ? [{ maxWidth: width }, { maxHeight: height }] : [],
+              },
+            });
+          } catch (errWindow) {
+            console.warn('Falha na captura com restrições avançadas, tentando fallback seguro:', errWindow);
+            try {
+              stream = await (navigator.mediaDevices as any).getUserMedia({
+                audio: false,
+                video: {
                   mandatory: {
                     chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: sourceId,
                   },
-                }
-              : false,
-            video: {
-              mandatory: videoMandatory,
-              optional: isWindow ? [{ maxWidth: width }, { maxHeight: height }] : [],
-            },
-          });
-        } catch (errWindow) {
-          console.warn('Falha na captura com restrições avançadas, tentando fallback seguro:', errWindow);
-          try {
-            // Fallback seguro 1: sem áudio e restrições mínimas
-            stream = await (navigator.mediaDevices as any).getUserMedia({
-              audio: false,
-              video: {
-                mandatory: {
-                  chromeMediaSource: 'desktop',
-                  chromeMediaSourceId: sourceId,
                 },
-              },
+              });
+            } catch (errFallback) {
+              console.warn('Fallback do Electron falhou, usando seletor do sistema:', errFallback);
+              stream = await navigator.mediaDevices.getDisplayMedia({
+                video: {
+                  width: { ideal: width },
+                  height: { ideal: height },
+                  frameRate: { ideal: fps, max: fps },
+                },
+                audio: (includeAudio
+                  ? {
+                      systemAudio: 'exclude',
+                      selfBrowserSurface: 'exclude',
+                    }
+                  : false) as any,
+              });
+            }
+          }
+        } else {
+          const audioConstraints: any = includeAudio
+            ? {
+                systemAudio: 'exclude',
+                selfBrowserSurface: 'exclude',
+                suppressLocalAudioPlayback: false,
+              }
+            : false;
+
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              width: { ideal: width },
+              height: { ideal: height },
+              frameRate: { ideal: fps, max: fps },
+            },
+            audio: audioConstraints,
+          });
+        }
+
+        // Publicar faixa de vídeo no LiveKit se houver sala conectada
+        if (roomRef.current) {
+          const videoTrack = stream.getVideoTracks()[0];
+          try {
+            const pub = await roomRef.current.localParticipant.publishTrack(videoTrack, {
+              name: 'screen-share',
+              source: Track.Source.ScreenShare,
             });
-          } catch (errFallback) {
-            console.warn('Fallback do Electron falhou, usando seletor do sistema:', errFallback);
-            stream = await navigator.mediaDevices.getDisplayMedia({
-              video: {
-                width: { ideal: width },
-                height: { ideal: height },
-                frameRate: { ideal: fps, max: fps },
-              },
-              audio: (includeAudio
-                ? {
-                    systemAudio: 'exclude',
-                    selfBrowserSurface: 'exclude',
-                  }
-                : false) as any,
-            });
+            localScreenPubRef.current = pub;
+
+            const audioTrack = stream.getAudioTracks()[0];
+            if (audioTrack) {
+              await roomRef.current.localParticipant.publishTrack(audioTrack, {
+                name: 'screen-audio',
+                source: Track.Source.ScreenShareAudio,
+              });
+            }
+          } catch (pubErr) {
+            console.warn('Erro ao publicar track de tela no LiveKit:', pubErr);
           }
         }
-      } else {
-        // Web API padrão com isolamento de áudio (ignora outras telas e sons externos)
-        const audioConstraints: any = includeAudio
-          ? {
-              systemAudio: 'exclude', // Ignora áudio de outros monitores/sistema geral
-              selfBrowserSurface: 'exclude', // Ignora o áudio da própria aplicação
-              suppressLocalAudioPlayback: false,
-            }
-          : false;
 
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            width: { ideal: width },
-            height: { ideal: height },
-            frameRate: { ideal: fps, max: fps },
-          },
-          audio: audioConstraints,
-        });
+        stream.getVideoTracks()[0].onended = () => {
+          stopScreenShare();
+        };
+
+        setScreenStream(stream);
+        setIsScreenSharing(true);
+
+        if (roomRef.current) {
+          syncRoomState(roomRef.current, stream, isMuted);
+        }
+      } catch (error) {
+        console.error('Falha ao iniciar compartilhamento de tela:', error);
       }
-
-      // Ao encerrar o compartilhamento pelo próprio sistema operacional
-      stream.getVideoTracks()[0].onended = () => {
-        setScreenStream(null);
-        setIsScreenSharing(false);
-      };
-
-      setScreenStream(stream);
-      setIsScreenSharing(true);
-    } catch (error) {
-      console.error('Falha ao iniciar compartilhamento de tela:', error);
-    }
-  }, []);
+    },
+    [isMuted, syncRoomState]
+  );
 
   const stopScreenShare = useCallback(() => {
+    if (localScreenPubRef.current && roomRef.current) {
+      roomRef.current.localParticipant.unpublishTrack(localScreenPubRef.current.track as any).catch(() => {});
+      localScreenPubRef.current = null;
+    }
+
     if (screenStream) {
       screenStream.getTracks().forEach((track) => track.stop());
       setScreenStream(null);
       setIsScreenSharing(false);
     }
-  }, [screenStream]);
+
+    if (roomRef.current) {
+      syncRoomState(roomRef.current, null, isMuted);
+    }
+  }, [screenStream, isMuted, syncRoomState]);
 
   return (
     <VoiceContext.Provider
@@ -335,6 +600,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         micInputGain,
         setMicInputGain,
         updateScreenQualityPreset,
+        voiceParticipants,
+        activeScreenShares,
+        selectedScreenShareId,
+        setSelectedScreenShareId,
       }}
     >
       {children}

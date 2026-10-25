@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Channel } from '../../types';
 import { useVoice, ScreenQualityOptions } from '../../contexts/VoiceContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { ParticipantTile } from './ParticipantTile';
 import { ScreenShareModal } from './ScreenShareModal';
+import { VoiceParticipantInfo } from '../layout/ChannelSidebar';
 import {
   getUserSettings,
   saveUserSetting,
@@ -25,14 +26,16 @@ import {
   Volume2,
   Volume1,
   VolumeX,
+  Users,
 } from 'lucide-react';
 
 interface VoiceRoomProps {
   channel: Channel;
   onDisconnect?: () => void;
+  socketParticipants?: VoiceParticipantInfo[];
 }
 
-export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) => {
+export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, socketParticipants = [] }) => {
   const { user } = useAuth();
   const {
     isMuted,
@@ -45,6 +48,10 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
     stopScreenShare,
     livekitUrl,
     masterVolume,
+    voiceParticipants,
+    activeScreenShares,
+    selectedScreenShareId,
+    setSelectedScreenShareId,
   } = useVoice();
 
   const [isCameraOn, setIsCameraOn] = useState(false);
@@ -55,7 +62,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
   const [isStreamMuted, setIsStreamMuted] = useState<boolean>(() => getUserSettings().isStreamMuted);
   const screenContainerRef = useRef<HTMLDivElement>(null);
 
-  // Manter volume e mute sincronizados caso alterados por outros componentes
+  // Manter volume e mute sincronizados
   useEffect(() => {
     const unsubscribe = subscribeToSettingsChange((settings) => {
       setStreamVolume(settings.streamVolume);
@@ -125,17 +132,81 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
     };
   }, []);
 
+  // Mesclar participantes do WebRTC com participantes do Socket para renderização instantânea
+  const displayedParticipants = useMemo(() => {
+    const map = new Map<string, {
+      id: string;
+      username: string;
+      avatarUrl?: string;
+      isSpeaking: boolean;
+      isMuted: boolean;
+      isLocal: boolean;
+      cameraTrack?: MediaStreamTrack;
+    }>();
+
+    // 1. Participante Local
+    map.set(user?.id || 'local-user', {
+      id: user?.id || 'local-user',
+      username: user?.username || 'Você',
+      avatarUrl: user?.avatarUrl,
+      isSpeaking: !isMuted,
+      isMuted,
+      isLocal: true,
+      cameraTrack: cameraStream ? cameraStream.getVideoTracks()[0] : undefined,
+    });
+
+    // 2. Participantes recebidos pelo Socket.io (presença rápida)
+    socketParticipants.forEach((sp) => {
+      const isLocal = sp.id === user?.id;
+      if (!map.has(sp.id)) {
+        map.set(sp.id, {
+          id: sp.id,
+          username: sp.username,
+          avatarUrl: sp.avatarUrl,
+          isSpeaking: false,
+          isMuted: false,
+          isLocal,
+        });
+      }
+    });
+
+    // 3. Participantes reais da sala WebRTC do LiveKit
+    voiceParticipants.forEach((vp) => {
+      map.set(vp.id, {
+        id: vp.id,
+        username: vp.username,
+        avatarUrl: vp.avatarUrl,
+        isSpeaking: vp.isSpeaking,
+        isMuted: vp.isMuted,
+        isLocal: vp.isLocal,
+        cameraTrack: vp.isLocal && cameraStream ? cameraStream.getVideoTracks()[0] : vp.cameraTrack,
+      });
+    });
+
+    return Array.from(map.values());
+  }, [user, isMuted, cameraStream, socketParticipants, voiceParticipants]);
+
+  // Transmissão de tela atualmente em foco
+  const activeShare = useMemo(() => {
+    if (activeScreenShares.length === 0) return null;
+    if (selectedScreenShareId) {
+      const found = activeScreenShares.find((s) => s.id === selectedScreenShareId);
+      if (found) return found;
+    }
+    return activeScreenShares[0];
+  }, [activeScreenShares, selectedScreenShareId]);
+
   const isConfigured = livekitUrl && !livekitUrl.includes('your-livekit-url');
 
   return (
     <div className="flex-1 bg-obsidian-bg flex flex-col justify-between overflow-hidden relative">
-      {/* Banner de status minimalista */}
+      {/* Banner informativo minimalista se URL não configurada */}
       {!isConfigured && (
         <div className="bg-obsidian-card border-b border-obsidian-border px-4 py-2 flex items-center justify-between text-xs text-obsidian-text-secondary">
           <div className="flex items-center space-x-2">
             <Info className="w-3.5 h-3.5 text-obsidian-accent shrink-0" />
             <span>
-              <strong>Transmissão Local em Alta Fidelidade:</strong> Seleção e captura de telas e janenas ativas.
+              <strong>Transmissão Local em Alta Fidelidade:</strong> Seleção e captura de telas e janelas ativas.
             </span>
           </div>
         </div>
@@ -143,8 +214,33 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
 
       {/* Área Central Studio */}
       <div className="flex-1 p-5 overflow-y-auto flex flex-col items-center justify-center">
-        {isScreenSharing && screenStream ? (
+        {activeShare ? (
+          /* Modo Destaque: Tela Compartilhada Ativa */
           <div className="w-full flex-1 flex flex-col space-y-3 max-w-5xl">
+            {/* Barra superior de alternância caso haja múltiplas transmissões */}
+            {activeScreenShares.length > 1 && (
+              <div className="flex items-center space-x-2 px-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted mr-1 flex items-center space-x-1">
+                  <Monitor className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Transmissões Ativas:</span>
+                </span>
+                {activeScreenShares.map((share) => (
+                  <button
+                    key={share.id}
+                    onClick={() => setSelectedScreenShareId(share.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center space-x-1.5 ${
+                      activeShare.id === share.id
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 border border-indigo-400/40'
+                        : 'bg-obsidian-card hover:bg-obsidian-card-hover text-obsidian-text-secondary border border-obsidian-border'
+                    }`}
+                  >
+                    <span>{share.participantName}</span>
+                    {share.isLocal && <span className="text-[10px] text-indigo-200">(Você)</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Visualizador da Tela em Destaque (Spotlight) */}
             <div
               ref={screenContainerRef}
@@ -153,12 +249,12 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
               }`}
             >
               <ParticipantTile
-                name={`${user?.username || 'Você'} (Transmitindo)`}
+                name={`${activeShare.participantName} (Transmitindo)`}
                 isScreenShare={true}
-                stream={screenStream}
-                videoTrack={screenStream.getVideoTracks()[0]}
+                stream={activeShare.stream}
+                videoTrack={activeShare.track}
                 volume={isStreamMuted ? 0 : Math.round((streamVolume * masterVolume) / 100)}
-                isLocal={true}
+                isLocal={activeShare.isLocal}
               />
 
               {/* Barra Superior de Controles de Transmissão */}
@@ -169,7 +265,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
                   <span className="font-mono font-semibold">{screenQuality.resolution} {screenQuality.fps}FPS</span>
                 </div>
 
-                {/* Ações: Volume com Porcentagem, Trocar Janela e Tela Cheia */}
+                {/* Ações: Volume com Porcentagem, Trocar Janela (se local) e Tela Cheia */}
                 <div className="flex items-center space-x-2 pointer-events-auto">
                   {/* Seletor de Volume com Slider e Porcentagem */}
                   <div className="bg-black/75 backdrop-blur-md px-3 py-1 rounded-xl border border-white/10 flex items-center space-x-2 text-xs shadow-lg group/vol">
@@ -202,14 +298,16 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
                     </span>
                   </div>
 
-                  <button
-                    onClick={() => setIsScreenModalOpen(true)}
-                    className="p-1.5 px-3 rounded-xl bg-black/75 hover:bg-black/90 backdrop-blur-md border border-white/10 text-white text-xs flex items-center space-x-1.5 transition-all shadow-lg hover:border-indigo-500/40 font-medium"
-                    title="Trocar Janela ou Tela"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Trocar</span>
-                  </button>
+                  {activeShare.isLocal && (
+                    <button
+                      onClick={() => setIsScreenModalOpen(true)}
+                      className="p-1.5 px-3 rounded-xl bg-black/75 hover:bg-black/90 backdrop-blur-md border border-white/10 text-white text-xs flex items-center space-x-1.5 transition-all shadow-lg hover:border-indigo-500/40 font-medium"
+                      title="Trocar Janela ou Tela"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Trocar</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={toggleFullscreen}
@@ -222,33 +320,51 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
               </div>
             </div>
 
-            {/* Faixa Inferior de Participantes */}
+            {/* Faixa Inferior de Participantes (Carrossel Horizontal com todos os membros) */}
             <div className="flex space-x-3 overflow-x-auto py-1">
-              <div className="w-44 shrink-0">
-                <ParticipantTile
-                  name={user?.username || 'Você'}
-                  avatarUrl={user?.avatarUrl}
-                  isSpeaking={!isMuted}
-                  isMuted={isMuted}
-                  videoTrack={cameraStream ? cameraStream.getVideoTracks()[0] : undefined}
-                />
-              </div>
+              {displayedParticipants.map((p) => (
+                <div key={p.id} className="w-44 shrink-0">
+                  <ParticipantTile
+                    name={p.isLocal ? `${p.username} (Você)` : p.username}
+                    avatarUrl={p.avatarUrl}
+                    isSpeaking={p.isSpeaking}
+                    isMuted={p.isMuted}
+                    videoTrack={p.cameraTrack}
+                    isLocal={p.isLocal}
+                  />
+                </div>
+              ))}
             </div>
           </div>
         ) : (
-          <div className="w-full max-w-4xl grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            <ParticipantTile
-              name={`${user?.username || 'Você'} (Você)`}
-              avatarUrl={user?.avatarUrl}
-              isSpeaking={!isMuted}
-              isMuted={isMuted}
-              videoTrack={cameraStream ? cameraStream.getVideoTracks()[0] : undefined}
-            />
+          /* Modo Grade Multiusuário: Sem Transmissão Ativa */
+          <div
+            className={`w-full max-w-5xl grid gap-4 transition-all duration-300 ${
+              displayedParticipants.length <= 1
+                ? 'grid-cols-1 max-w-sm'
+                : displayedParticipants.length === 2
+                ? 'grid-cols-1 sm:grid-cols-2 max-w-2xl'
+                : displayedParticipants.length <= 4
+                ? 'grid-cols-1 sm:grid-cols-2 max-w-3xl'
+                : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 max-w-5xl'
+            }`}
+          >
+            {displayedParticipants.map((p) => (
+              <ParticipantTile
+                key={p.id}
+                name={p.isLocal ? `${p.username} (Você)` : p.username}
+                avatarUrl={p.avatarUrl}
+                isSpeaking={p.isSpeaking}
+                isMuted={p.isMuted}
+                videoTrack={p.cameraTrack}
+                isLocal={p.isLocal}
+              />
+            ))}
           </div>
         )}
       </div>
 
-      {/* Floating Capsule Toolbar (Alto Contraste & Ergonomia) */}
+      {/* Floating Capsule Toolbar */}
       <div className="p-4 flex justify-center shrink-0">
         <div className="bg-obsidian-surface/95 backdrop-blur-2xl border border-obsidian-border px-3.5 py-2.5 rounded-2xl flex items-center space-x-2.5 shadow-2xl shadow-black/80 ring-1 ring-white/5">
           {/* Microfone */}
@@ -303,7 +419,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect }) =
 
           <div className="w-[1px] h-6 bg-obsidian-border mx-1" />
 
-          {/* Desconectar com Alto Contraste e Legenda */}
+          {/* Desconectar */}
           <button
             onClick={() => {
               leaveVoiceChannel();
