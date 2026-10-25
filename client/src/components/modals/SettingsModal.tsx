@@ -16,6 +16,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const {
     selectedAudioDeviceId,
     setSelectedAudioDeviceId,
+    localAudioTrack,
+    currentVoiceChannel,
     audioDevices,
     refreshAudioDevices,
     masterVolume,
@@ -121,6 +123,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  const isReusingCallTrackRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -147,18 +150,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     return () => {
       stopMicTest();
     };
-  }, [isOpen, activeTab, selectedAudioDeviceId]);
+  }, [isOpen, activeTab, selectedAudioDeviceId, localAudioTrack, currentVoiceChannel]);
 
   const startMicTest = async (deviceId: string) => {
     stopMicTest();
 
     try {
-      const constraints: MediaStreamConstraints = {
-        audio: deviceId && deviceId !== 'default' ? { deviceId: { exact: deviceId } } : true,
-        video: false,
-      };
+      let stream: MediaStream;
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Se o usuário já estiver em chamada de voz, reutilizar o track do LiveKit para não conflitar no Windows
+      if (currentVoiceChannel && localAudioTrack && localAudioTrack.readyState === 'live') {
+        isReusingCallTrackRef.current = true;
+        stream = new MediaStream([localAudioTrack]);
+      } else {
+        isReusingCallTrackRef.current = false;
+        const constraints: MediaStreamConstraints = {
+          audio:
+            deviceId && deviceId !== 'default'
+              ? { deviceId: { ideal: deviceId } }
+              : true,
+          video: false,
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      }
+
       micStreamRef.current = stream;
 
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -183,8 +198,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           sum += dataArray[i];
         }
         const avg = sum / dataArray.length;
-        // Normalizar volume de 0 a 100 aplicando o ganho configurado
-        const normalized = Math.min(100, Math.round((avg / 128) * 100 * 2 * (micInputGain / 100)));
+        // Normalizar volume de 0 a 100 aplicando o ganho configurado de forma suave
+        const normalized = Math.min(100, Math.round((avg / 64) * 100 * (micInputGain / 100)));
         setVolumeLevel(normalized);
 
         animationFrameRef.current = requestAnimationFrame(updateMeter);
@@ -202,9 +217,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       animationFrameRef.current = null;
     }
     if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      if (!isReusingCallTrackRef.current) {
+        micStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
       micStreamRef.current = null;
     }
+    isReusingCallTrackRef.current = false;
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
@@ -489,7 +507,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </label>
                 <select
                   value={selectedAudioDeviceId}
-                  onChange={(e) => setSelectedAudioDeviceId(e.target.value)}
+                  onChange={(e) => {
+                    const devId = e.target.value;
+                    const found = audioDevices.find((d) => d.deviceId === devId);
+                    setSelectedAudioDeviceId(devId, found?.label);
+                  }}
                   className="w-full bg-obsidian-card border border-obsidian-border rounded-xl p-2.5 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60 cursor-pointer"
                 >
                   <option value="default">Padrão do Sistema</option>

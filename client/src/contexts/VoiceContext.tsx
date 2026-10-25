@@ -16,6 +16,7 @@ import {
   getUserSettings,
   saveUserSetting,
   subscribeToSettingsChange,
+  resolveAudioDevice,
   UserAudioSettings,
 } from '../lib/userSettings';
 
@@ -56,7 +57,8 @@ interface VoiceContextType {
   screenStream: MediaStream | null;
   screenQuality: ScreenQualityOptions;
   selectedAudioDeviceId: string;
-  setSelectedAudioDeviceId: (id: string) => void;
+  setSelectedAudioDeviceId: (id: string, label?: string) => Promise<void>;
+  localAudioTrack: MediaStreamTrack | null;
   audioDevices: MediaDeviceInfo[];
   refreshAudioDevices: () => Promise<void>;
   joinVoiceChannel: (channel: Channel) => Promise<void>;
@@ -100,6 +102,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [selectedAudioDeviceId, setSelectedAudioDeviceIdState] = useState<string>(
     initialSettings.selectedAudioDeviceId
   );
+  const [localAudioTrack, setLocalAudioTrack] = useState<MediaStreamTrack | null>(null);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [masterVolume, setMasterVolumeState] = useState<number>(initialSettings.masterOutputVolume);
   const [micInputGain, setMicInputGainState] = useState<number>(initialSettings.micInputGain);
@@ -113,22 +116,94 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const localScreenPubRef = useRef<LocalTrackPublication | null>(null);
 
+  const updateLocalAudioTrackRef = useCallback(() => {
+    if (roomRef.current?.localParticipant) {
+      const pub = roomRef.current.localParticipant.getTrackPublication(Track.Source.Microphone);
+      const track = pub?.audioTrack?.mediaStreamTrack || null;
+      setLocalAudioTrack(track);
+    } else {
+      setLocalAudioTrack(null);
+    }
+  }, []);
+
   const refreshAudioDevices = useCallback(async () => {
     try {
       if (navigator.mediaDevices?.enumerateDevices) {
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const inputs = devices.filter((d) => d.kind === 'audioinput');
-        setAudioDevices(inputs);
+        // Filtrar aliases virtuais do Windows ('default' e 'communications')
+        // para que a lista contenha apenas microfones físicos/virtuais reais
+        const inputs = devices.filter(
+          (d) =>
+            d.kind === 'audioinput' &&
+            d.deviceId !== 'default' &&
+            d.deviceId !== 'communications'
+        );
+
+        // Deduplicar caso algum driver registre múltiplos com o mesmo deviceId
+        const uniqueInputs: MediaDeviceInfo[] = [];
+        const seenIds = new Set<string>();
+        inputs.forEach((d) => {
+          if (d.deviceId && !seenIds.has(d.deviceId)) {
+            seenIds.add(d.deviceId);
+            uniqueInputs.push(d);
+          }
+        });
+
+        setAudioDevices(uniqueInputs);
+
+        // Resolver dispositivo ativo se o ID atual não existir mais na lista
+        const settings = getUserSettings();
+        const resolved = resolveAudioDevice(
+          uniqueInputs,
+          settings.selectedAudioDeviceId,
+          settings.selectedAudioDeviceLabel
+        );
+
+        if (resolved.deviceId !== settings.selectedAudioDeviceId) {
+          setSelectedAudioDeviceIdState(resolved.deviceId);
+          saveUserSetting('selectedAudioDeviceId', resolved.deviceId);
+          if (resolved.label) {
+            saveUserSetting('selectedAudioDeviceLabel', resolved.label);
+          }
+        }
       }
     } catch (err) {
       console.error('Falha ao listar microfones:', err);
     }
   }, []);
 
-  const setSelectedAudioDeviceId = useCallback((id: string) => {
-    setSelectedAudioDeviceIdState(id);
-    saveUserSetting('selectedAudioDeviceId', id);
-  }, []);
+  const setSelectedAudioDeviceId = useCallback(
+    async (id: string, label?: string) => {
+      setSelectedAudioDeviceIdState(id);
+      saveUserSetting('selectedAudioDeviceId', id);
+      if (label) {
+        saveUserSetting('selectedAudioDeviceLabel', label);
+      }
+
+      // Se houver uma sala LiveKit conectada, trocar o microfone em tempo real
+      if (roomRef.current) {
+        try {
+          const targetDeviceId = id === 'default' ? '' : id;
+          await roomRef.current.switchActiveDevice('audioinput', targetDeviceId);
+          updateLocalAudioTrackRef();
+        } catch (switchErr) {
+          console.warn('Falha no switchActiveDevice do LiveKit, tentando reativar microfone:', switchErr);
+          try {
+            if (!isMuted) {
+              await roomRef.current.localParticipant.setMicrophoneEnabled(false);
+              await roomRef.current.localParticipant.setMicrophoneEnabled(true, {
+                deviceId: id !== 'default' ? id : undefined,
+              });
+              updateLocalAudioTrackRef();
+            }
+          } catch (reErr) {
+            console.error('Erro ao reconfigurar microfone:', reErr);
+          }
+        }
+      }
+    },
+    [isMuted, updateLocalAudioTrackRef]
+  );
 
   const setMasterVolume = useCallback((val: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(val)));
@@ -309,10 +384,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         room.on(RoomEvent.TrackSubscribed, (track, publication) => {
           if (track.kind === Track.Kind.Audio) {
-            const audioEl = new Audio();
-            audioEl.autoplay = true;
+            let container = document.getElementById('xolas-remote-audio-container');
+            if (!container) {
+              container = document.createElement('div');
+              container.id = 'xolas-remote-audio-container';
+              container.style.display = 'none';
+              document.body.appendChild(container);
+            }
+
+            const audioEl = track.attach();
             audioEl.volume = isDeafened ? 0 : Math.max(0, Math.min(1, masterVolume / 100));
-            track.attach(audioEl);
+            container.appendChild(audioEl);
             audioElementsRef.current.set(publication.trackSid, audioEl);
           }
           syncRoomState(room, screenStream, isMuted);
@@ -324,6 +406,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (audioEl) {
               track.detach(audioEl);
               audioEl.srcObject = null;
+              audioEl.remove();
               audioElementsRef.current.delete(publication.trackSid);
             }
           }
@@ -340,11 +423,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Conectar ao cluster LiveKit
         await room.connect(url, token);
 
-        // Habilitar microfone local respeitando estado de mute
+        // Habilitar microfone local respeitando estado de mute e deviceId configurado
         try {
-          await room.localParticipant.setMicrophoneEnabled(!isMuted);
+          await room.localParticipant.setMicrophoneEnabled(!isMuted, {
+            deviceId: selectedAudioDeviceId && selectedAudioDeviceId !== 'default' ? selectedAudioDeviceId : undefined,
+          });
+          updateLocalAudioTrackRef();
         } catch (micErr) {
-          console.warn('Aviso: falha ao ativar microfone inicial no LiveKit:', micErr);
+          console.warn('Aviso: falha ao ativar microfone com deviceId específico, usando padrão:', micErr);
+          try {
+            await room.localParticipant.setMicrophoneEnabled(!isMuted);
+            updateLocalAudioTrackRef();
+          } catch (fallbackErr) {
+            console.error('Falha ao ativar microfone inicial no LiveKit:', fallbackErr);
+          }
         }
 
         syncRoomState(room, screenStream, isMuted);
@@ -362,7 +454,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsConnecting(false);
       }
     },
-    [currentVoiceChannel?.id, socket, selectedAudioDeviceId, isMuted, isDeafened, masterVolume, screenStream, syncRoomState]
+    [currentVoiceChannel?.id, socket, selectedAudioDeviceId, isMuted, isDeafened, masterVolume, screenStream, syncRoomState, updateLocalAudioTrackRef]
   );
 
   const leaveVoiceChannel = useCallback(() => {
@@ -378,9 +470,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       roomRef.current = null;
     }
 
+    setLocalAudioTrack(null);
+
     audioElementsRef.current.forEach((el) => {
       el.pause();
       el.srcObject = null;
+      el.remove();
     });
     audioElementsRef.current.clear();
 
@@ -404,10 +499,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (roomRef.current) {
         roomRef.current.localParticipant.setMicrophoneEnabled(!next).catch(() => {});
         syncRoomState(roomRef.current, screenStream, next);
+        setTimeout(updateLocalAudioTrackRef, 100);
       }
       return next;
     });
-  }, [screenStream, syncRoomState]);
+  }, [screenStream, syncRoomState, updateLocalAudioTrackRef]);
 
   const toggleDeafen = useCallback(() => {
     setIsDeafened((prev) => {
@@ -587,6 +683,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         screenQuality,
         selectedAudioDeviceId,
         setSelectedAudioDeviceId,
+        localAudioTrack,
         audioDevices,
         refreshAudioDevices,
         joinVoiceChannel,

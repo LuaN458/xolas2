@@ -1,5 +1,6 @@
 export interface UserAudioSettings {
   selectedAudioDeviceId: string;
+  selectedAudioDeviceLabel: string;
   masterOutputVolume: number; // 0 a 100
   streamVolume: number; // 0 a 100
   isStreamMuted: boolean;
@@ -14,6 +15,7 @@ const SETTINGS_EVENT_NAME = 'xolas_settings_updated';
 
 export const DEFAULT_USER_SETTINGS: UserAudioSettings = {
   selectedAudioDeviceId: 'default',
+  selectedAudioDeviceLabel: '',
   masterOutputVolume: 100,
   streamVolume: 100,
   isStreamMuted: false,
@@ -42,6 +44,7 @@ export function getUserSettings(): UserAudioSettings {
 
     return {
       selectedAudioDeviceId: parsed.selectedAudioDeviceId || legacyDevice || DEFAULT_USER_SETTINGS.selectedAudioDeviceId,
+      selectedAudioDeviceLabel: parsed.selectedAudioDeviceLabel || '',
       masterOutputVolume: isNaN(masterOutput) ? 100 : Math.max(0, Math.min(100, masterOutput)),
       streamVolume: isNaN(streamVol) ? 100 : Math.max(0, Math.min(100, streamVol)),
       isStreamMuted: Boolean(parsed.isStreamMuted ?? DEFAULT_USER_SETTINGS.isStreamMuted),
@@ -54,6 +57,41 @@ export function getUserSettings(): UserAudioSettings {
     console.warn('Erro ao carregar configurações do usuário:', err);
     return { ...DEFAULT_USER_SETTINGS };
   }
+}
+
+/**
+ * Resolve o dispositivo de áudio ativo: tenta por ID; se não encontrar, tenta por Label (para contornar
+ * re-hashing de GUIDs do Windows); se nenhum corresponder, retorna 'default'.
+ */
+export function resolveAudioDevice(
+  devices: MediaDeviceInfo[],
+  savedId?: string,
+  savedLabel?: string
+): { deviceId: string; label: string } {
+  if (!devices || devices.length === 0) {
+    return { deviceId: 'default', label: 'Padrão do Sistema' };
+  }
+
+  // 1. Tentar correspondência exata por ID válido (que não seja 'default' ou 'communications')
+  if (savedId && savedId !== 'default' && savedId !== 'communications') {
+    const matchId = devices.find((d) => d.deviceId === savedId);
+    if (matchId) {
+      return { deviceId: matchId.deviceId, label: matchId.label };
+    }
+  }
+
+  // 2. Tentar correspondência por Label se o ID não for encontrado
+  if (savedLabel && savedLabel.trim()) {
+    const cleanSaved = savedLabel.toLowerCase().trim();
+    const matchLabel = devices.find(
+      (d) => d.label && d.label.toLowerCase().trim() === cleanSaved
+    );
+    if (matchLabel) {
+      return { deviceId: matchLabel.deviceId, label: matchLabel.label };
+    }
+  }
+
+  return { deviceId: 'default', label: 'Padrão do Sistema' };
 }
 
 /**
