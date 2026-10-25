@@ -1,7 +1,7 @@
 {
   "name": "xolas",
   "productName": "Xolas",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Xolas - Aplicativo Desktop de Comunicação e Transmissão Studio Obsidian",
   "author": "Xolas",
   "type": "module",
@@ -33,9 +33,12 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        "zip"
       ],
       "artifactName": "Xolas-${version}-${arch}.${ext}",
+      "publisherName": "Xolas",
+      "verifyUpdateCodeSignature": false,
       "requestedExecutionLevel": "asInvoker",
       "legalTrademarks": "Xolas"
     },

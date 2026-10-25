@@ -28,7 +28,13 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
   onOpenCreateChannelModal,
 }) => {
   const { user } = useAuth();
-  const { currentVoiceChannel, leaveVoiceChannel, isScreenSharing, isMuted } = useVoice();
+  const {
+    currentVoiceChannel,
+    leaveVoiceChannel,
+    isScreenSharing,
+    isMuted,
+    voiceParticipants: livekitParticipants,
+  } = useVoice();
 
   if (!server) {
     return (
@@ -106,7 +112,31 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
           <div className="space-y-1.5">
             {voiceChannels.map((channel) => {
               const isConnected = currentVoiceChannel?.id === channel.id;
-              const participants = voiceParticipants[channel.id] || [];
+
+              // Unificar lista de participantes combinando Socket.io + LiveKit WebRTC + Usuário Local
+              const participantMap = new Map<string, VoiceParticipantInfo>();
+              (voiceParticipants[channel.id] || []).forEach((p) => {
+                participantMap.set(p.id, p);
+              });
+
+              if (isConnected) {
+                if (user) {
+                  participantMap.set(user.id, {
+                    id: user.id,
+                    username: user.username,
+                    avatarUrl: user.avatarUrl,
+                  });
+                }
+                livekitParticipants.forEach((lp) => {
+                  participantMap.set(lp.id, {
+                    id: lp.id,
+                    username: lp.username,
+                    avatarUrl: lp.avatarUrl,
+                  });
+                });
+              }
+
+              const participants = Array.from(participantMap.values());
               const count = participants.length;
 
               return (

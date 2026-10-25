@@ -102,7 +102,18 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (!socket || !activeServerId) return;
 
-    socket.emit('join-server', activeServerId);
+    const joinCurrentServer = () => {
+      socket.emit('join-server', activeServerId);
+      if (currentVoiceChannel) {
+        socket.emit('join-voice', {
+          serverId: activeServerId,
+          channelId: currentVoiceChannel.id,
+        });
+      }
+    };
+
+    joinCurrentServer();
+    socket.on('connect', joinCurrentServer);
 
     const handleVoiceSync = (state: Record<string, VoiceParticipantInfo[]>) => {
       setVoiceParticipants(state);
@@ -119,10 +130,11 @@ export const App: React.FC = () => {
     socket.on('voice-channel-updated', handleVoiceChannelUpdated);
 
     return () => {
+      socket.off('connect', joinCurrentServer);
       socket.off('voice-state-sync', handleVoiceSync);
       socket.off('voice-channel-updated', handleVoiceChannelUpdated);
     };
-  }, [socket, activeServerId]);
+  }, [socket, activeServerId, currentVoiceChannel]);
 
   // Sincronizar atualizações de perfil de usuários em tempo real via WebSocket
   useEffect(() => {

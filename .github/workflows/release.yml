@@ -39,6 +39,7 @@ jobs:
         with:
           files: |
             client/release/*.exe
+            client/release/*.zip
             client/release/*.blockmap
             client/release/latest.yml
           name: ${{ github.ref_name }}
