@@ -2,6 +2,7 @@
   "name": "discord-clone-monorepo",
   "version": "1.0.0",
   "private": true,
+  "main": "dist-electron/main.js",
   "workspaces": [
     "server",
     "client"
