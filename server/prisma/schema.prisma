@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String       @id @default(uuid())
+  username     String       @unique
+  email        String       @unique
+  password     String
+  avatarUrl    String?
+  status       String       @default("online")
+  createdAt    DateTime     @default(now())
+  memberships  Member[]
+  messages     Message[]
+  ownedServers Server[]     @relation("ServerOwner")
+}
+
+model Server {
+  id        String    @id @default(uuid())
+  name      String
+  iconUrl   String?
+  ownerId   String
+  owner     User      @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members   Member[]
+  channels  Channel[]
+  createdAt DateTime  @default(now())
+}
+
+model Member {
+  id        String   @id @default(uuid())
+  role      String   @default("MEMBER")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serverId  String
+  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  @@unique([userId, serverId])
+}
+
+model Channel {
+  id        String    @id @default(uuid())
+  name      String
+  type      String    @default("TEXT") // "TEXT" | "VOICE"
+  serverId  String
+  server    Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  createdAt DateTime  @default(now())
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  content   String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}

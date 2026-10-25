@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Production Builds & Binaries
+dist/
+dist-electron/
+release/
+client/release/
+client/dist/
+client/dist-electron/
+server/dist/
+**/release/
+**/dist/
+**/dist-electron/
+
+Xolas/
+*.exe
+build/
+
+# Database & Environment Secrets
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+*.db
+*.db-journal
+
+# Logs & OS artifacts
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,19 @@
+{
+  "name": "discord-clone-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "server:dev": "npm --prefix server run dev",
+    "client:dev": "npm --prefix client run dev",
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "build": "npm --prefix server run build && npm --prefix client run build",
+    "dist:win": "npm --prefix client run dist:win"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5"
+  }
+}
