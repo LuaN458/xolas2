@@ -26,7 +26,7 @@ const server = http.createServer(app);
 
 // Configuração do Socket.io com limite de buffer contra ataques de exaustão de memória
 const io = new SocketIOServer(server, {
-  maxHttpBufferSize: 100 * 1024, // 100 KB máx por pacote WebSocket
+  maxHttpBufferSize: 256 * 1024, // 256 KB máx por pacote WebSocket (permite avatares comprimidos)
   cors: {
     origin: '*',
     methods: ['GET', 'POST'],
@@ -35,8 +35,8 @@ const io = new SocketIOServer(server, {
 
 app.use(securityHeadersMiddleware);
 app.use(cors());
-app.use(express.json({ limit: '64kb' }));
-app.use(express.urlencoded({ extended: false, limit: '64kb' }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: false, limit: '2mb' }));
 app.use(securitySanitizerMiddleware);
 
 const globalRateLimiter = createRateLimiter({

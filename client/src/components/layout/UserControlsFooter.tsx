@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, MicOff, Headphones, Settings, LogOut } from 'lucide-react';
+import { Mic, MicOff, Headphones, Settings, LogOut, Camera } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useVoice } from '../../contexts/VoiceContext';
 
@@ -15,18 +15,25 @@ export const UserControlsFooter: React.FC<UserControlsFooterProps> = ({ onOpenSe
 
   return (
     <footer className="h-16 bg-obsidian-surface px-2 flex items-center justify-between border-t border-obsidian-border select-none shrink-0 w-full gap-1.5">
-      {/* Informações do Usuário (Clique para abrir configurações) */}
+      {/* Informações do Usuário & Atalho para Editar Foto/Perfil */}
       <div
         onClick={onOpenSettings}
-        className="flex items-center space-x-2 min-w-0 flex-1 p-1 rounded-xl cursor-pointer transition-all border border-transparent hover:bg-obsidian-card/60 hover:border-obsidian-border overflow-hidden"
-        title={`Perfil: ${user.username} (Configurações)`}
+        className="flex items-center space-x-2 min-w-0 flex-1 p-1 rounded-xl cursor-pointer transition-all border border-transparent hover:bg-obsidian-card/60 hover:border-obsidian-border overflow-hidden group"
+        title="Clique para editar foto de perfil e configurações"
       >
-        <div className="relative shrink-0">
+        <div className="relative shrink-0 group/avatar">
           <img
             src={user.avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.username}`}
             alt={user.username}
             className="w-8 h-8 rounded-xl bg-obsidian-card border border-obsidian-border shadow-sm object-cover"
           />
+          {/* Overlay de edição com ícone de câmera */}
+          <div
+            className="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center opacity-0 group-hover/avatar:opacity-100 transition-opacity backdrop-blur-[0.5px]"
+            title="Editar foto de perfil"
+          >
+            <Camera className="w-3.5 h-3.5 text-white drop-shadow" />
+          </div>
           <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-obsidian-emerald rounded-full border-2 border-obsidian-surface shadow-sm" />
         </div>
         <div className="min-w-0 flex-1 overflow-hidden flex flex-col justify-center">

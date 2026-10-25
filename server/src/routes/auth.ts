@@ -8,6 +8,7 @@ import {
   ensureScalarString,
   hasSqlInjectionSignature,
   sanitizeText,
+  sanitizeSafeUrl,
 } from '../middlewares/security';
 import { notifyAdminsPendingUpdate } from '../sockets/chatHandler';
 
@@ -238,43 +239,98 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response): Promi
 router.patch('/profile', authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const rawUsername = ensureScalarString(req.body?.username, 64);
+    const hasUsername = req.body?.username !== undefined;
+    const hasAvatar = req.body?.avatarUrl !== undefined;
 
-    if (!rawUsername) {
-      res.status(400).json({ error: 'O apelido não pode estar em branco.' });
+    if (!hasUsername && !hasAvatar) {
+      res.status(400).json({ error: 'Nenhum dado fornecido para atualização.' });
       return;
     }
 
-    const trimmed = sanitizeText(rawUsername, 32);
-    if (trimmed.length < 2 || trimmed.length > 32 || hasSqlInjectionSignature(trimmed)) {
-      res.status(400).json({ error: 'O apelido deve ter entre 2 e 32 caracteres válidos.' });
-      return;
-    }
-
-    const existing = await prisma.user.findFirst({
-      where: {
-        username: trimmed,
-        NOT: { id: userId },
-      },
-    });
-
-    if (existing) {
-      res.status(400).json({ error: 'Este apelido já está em uso por outro usuário.' });
-      return;
-    }
-
-    const updated = await prisma.user.update({
+    const currentUser = await prisma.user.findUnique({
       where: { id: userId },
-      data: {
-        username: trimmed,
-        avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(trimmed)}`,
-      },
       select: {
         id: true,
         username: true,
         email: true,
         avatarUrl: true,
         status: true,
+        role: true,
+        approvalStatus: true,
+        isApproved: true,
+        createdAt: true,
+      },
+    });
+
+    if (!currentUser) {
+      res.status(404).json({ error: 'Usuário não encontrado.' });
+      return;
+    }
+
+    const dataToUpdate: { username?: string; avatarUrl?: string } = {};
+
+    // 1. Atualizar apelido se fornecido
+    if (hasUsername) {
+      const rawUsername = ensureScalarString(req.body.username, 64);
+      if (!rawUsername) {
+        res.status(400).json({ error: 'O apelido não pode estar em branco.' });
+        return;
+      }
+      const trimmed = sanitizeText(rawUsername, 32);
+      if (trimmed.length < 2 || trimmed.length > 32 || hasSqlInjectionSignature(trimmed)) {
+        res.status(400).json({ error: 'O apelido deve ter entre 2 e 32 caracteres válidos.' });
+        return;
+      }
+
+      if (trimmed !== currentUser.username) {
+        const existing = await prisma.user.findFirst({
+          where: {
+            username: trimmed,
+            NOT: { id: userId },
+          },
+        });
+        if (existing) {
+          res.status(400).json({ error: 'Este apelido já está em uso por outro usuário.' });
+          return;
+        }
+        dataToUpdate.username = trimmed;
+      }
+    }
+
+    // 2. Atualizar foto de perfil (avatar) se fornecido
+    if (hasAvatar) {
+      const rawAvatar = req.body.avatarUrl;
+      if (rawAvatar === '' || rawAvatar === null || rawAvatar === 'default') {
+        // Restaurar avatar padrão gerado pelo Dicebear
+        const baseUsername = dataToUpdate.username || currentUser.username;
+        dataToUpdate.avatarUrl = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(baseUsername)}`;
+      } else {
+        const safeAvatar = sanitizeSafeUrl(rawAvatar);
+        if (!safeAvatar) {
+          res.status(400).json({ error: 'Formato de imagem ou URL de foto de perfil inválido.' });
+          return;
+        }
+        dataToUpdate.avatarUrl = safeAvatar;
+      }
+    }
+
+    if (Object.keys(dataToUpdate).length === 0) {
+      res.json({ user: currentUser });
+      return;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: dataToUpdate,
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        avatarUrl: true,
+        status: true,
+        role: true,
+        approvalStatus: true,
+        isApproved: true,
         createdAt: true,
       },
     });
@@ -282,7 +338,7 @@ router.patch('/profile', authMiddleware, async (req: AuthRequest, res: Response)
     res.json({ user: updated });
   } catch (error) {
     console.error('Erro ao atualizar perfil:', error);
-    res.status(500).json({ error: 'Erro ao atualizar apelido.' });
+    res.status(500).json({ error: 'Erro interno ao atualizar perfil.' });
   }
 });
 

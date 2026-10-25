@@ -3,7 +3,26 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useSocket } from '../../contexts/SocketContext';
 import { api } from '../../lib/api';
-import { X, User, Mic, Check, AlertCircle, Volume2, Lock, Sliders, ShieldCheck, Sparkles, RefreshCw, Download, ArrowUpCircle } from 'lucide-react';
+import {
+  X,
+  User,
+  Mic,
+  Check,
+  AlertCircle,
+  Volume2,
+  Lock,
+  Sliders,
+  ShieldCheck,
+  Sparkles,
+  RefreshCw,
+  Download,
+  ArrowUpCircle,
+  Camera,
+  Upload,
+  Shuffle,
+  Link,
+  Trash2,
+} from 'lucide-react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -11,7 +30,7 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
-  const { user, updateUsername } = useAuth();
+  const { user, updateUsername, updateAvatar } = useAuth();
   const { socket } = useSocket();
   const {
     selectedAudioDeviceId,
@@ -32,6 +51,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [newNickname, setNewNickname] = useState(user?.username || '');
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Estados de Foto de Perfil (Avatar Studio)
+  const [previewAvatar, setPreviewAvatar] = useState<string>(user?.avatarUrl || '');
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [avatarUrlInput, setAvatarUrlInput] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (user?.avatarUrl) {
+      setPreviewAvatar(user.avatarUrl);
+    }
+  }, [user?.avatarUrl]);
 
   // Estados de Alteração de Senha
   const [currentPassword, setCurrentPassword] = useState('');
@@ -289,6 +321,118 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setVolumeLevel(0);
   };
 
+  const saveNewAvatar = async (avatarUrlToSave: string) => {
+    setAvatarLoading(true);
+    setStatusMessage(null);
+
+    try {
+      const updated = await updateAvatar(avatarUrlToSave);
+
+      // Notificar outros membros e salas via WebSocket
+      if (socket) {
+        socket.emit('update-profile', {
+          avatarUrl: updated.avatarUrl,
+        });
+      }
+
+      setPreviewAvatar(updated.avatarUrl || '');
+      setStatusMessage({ type: 'success', text: 'Foto de perfil atualizada com sucesso!' });
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (err: any) {
+      console.error('Erro ao atualizar foto de perfil:', err);
+      setStatusMessage({
+        type: 'error',
+        text: err.response?.data?.error || 'Não foi possível atualizar a foto de perfil.',
+      });
+    } finally {
+      setAvatarLoading(false);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setStatusMessage({
+        type: 'error',
+        text: 'Por favor, selecione um arquivo de imagem válido (PNG, JPG, WebP ou GIF).',
+      });
+      return;
+    }
+
+    // Verificar se o arquivo não ultrapassa 15 MB antes de redimensionar
+    if (file.size > 15 * 1024 * 1024) {
+      setStatusMessage({
+        type: 'error',
+        text: 'O arquivo selecionado é muito grande. Escolha uma imagem de até 15MB.',
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        // Recorte central 1:1 e compressão para resolução nítida de 256x256
+        const canvas = document.createElement('canvas');
+        const TARGET_SIZE = 256;
+        canvas.width = TARGET_SIZE;
+        canvas.height = TARGET_SIZE;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const minSide = Math.min(img.width, img.height);
+        const startX = (img.width - minSide) / 2;
+        const startY = (img.height - minSide) / 2;
+
+        ctx.drawImage(img, startX, startY, minSide, minSide, 0, 0, TARGET_SIZE, TARGET_SIZE);
+
+        let dataUrl = canvas.toDataURL('image/webp', 0.85);
+        if (!dataUrl.startsWith('data:image/webp')) {
+          dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        }
+
+        setPreviewAvatar(dataUrl);
+        saveNewAvatar(dataUrl);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleGenerateRandomAvatar = () => {
+    const randomSeed = Math.random().toString(36).substring(2, 10);
+    const randomUrl = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(randomSeed)}`;
+    setPreviewAvatar(randomUrl);
+    saveNewAvatar(randomUrl);
+  };
+
+  const handleResetDefaultAvatar = () => {
+    const defaultUrl = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(user?.username || 'user')}`;
+    setPreviewAvatar(defaultUrl);
+    saveNewAvatar('default');
+  };
+
+  const handleSaveAvatarUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!avatarUrlInput.trim()) return;
+    const trimmed = avatarUrlInput.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      setStatusMessage({
+        type: 'error',
+        text: 'A URL da imagem deve começar com https:// ou http://',
+      });
+      return;
+    }
+
+    setPreviewAvatar(trimmed);
+    saveNewAvatar(trimmed);
+    setShowUrlInput(false);
+    setAvatarUrlInput('');
+  };
+
   const handleSaveNickname = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNickname.trim() || newNickname.trim() === user?.username) return;
@@ -437,56 +581,172 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           {activeTab === 'profile' && (
             <div className="space-y-6">
-              {/* Aba de Perfil */}
-              <form onSubmit={handleSaveNickname} className="space-y-5">
-              <div className="flex items-center space-x-4 p-3 bg-obsidian-card rounded-xl border border-obsidian-border">
-                <img
-                  src={
-                    user?.avatarUrl ||
-                    `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.username || 'user'}`
-                  }
-                  alt={user?.username}
-                  className="w-14 h-14 rounded-xl bg-obsidian-surface border border-obsidian-border"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-white font-semibold text-sm truncate">
-                    {user?.username}
+              {/* Estúdio de Foto de Perfil (Avatar do Usuário) */}
+              <div className="p-4 bg-obsidian-card rounded-2xl border border-obsidian-border space-y-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-white font-semibold text-xs">
+                    <div className="p-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
+                      <Camera className="w-3.5 h-3.5" />
+                    </div>
+                    <span>Foto de Perfil (Avatar)</span>
                   </div>
-                  <div className="text-obsidian-text-muted text-xs font-mono truncate">
-                    {user?.email && !user.email.endsWith('@xolas.local')
-                      ? user.email
-                      : `@${user?.username?.toLowerCase()}`}
+                  {avatarLoading && (
+                    <span className="text-[10px] text-indigo-400 font-mono flex items-center space-x-1 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Atualizando...</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                  {/* Avatar com Botão de Trocar Imagem no Hover */}
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="relative shrink-0 group cursor-pointer"
+                    title="Clique para escolher uma imagem do seu computador"
+                  >
+                    <img
+                      src={
+                        previewAvatar ||
+                        user?.avatarUrl ||
+                        `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.username || 'user'}`
+                      }
+                      alt={user?.username}
+                      className="w-20 h-20 rounded-2xl bg-obsidian-surface border-2 border-obsidian-border group-hover:border-indigo-500/60 shadow-lg object-cover transition-all"
+                    />
+                    {/* Overlay de Câmera ao passar o mouse */}
+                    <div className="absolute inset-0 bg-black/60 rounded-2xl flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
+                      <Camera className="w-5 h-5 text-white mb-0.5" />
+                      <span className="text-[9px] font-bold text-white uppercase tracking-wider">Alterar</span>
+                    </div>
+
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-obsidian-emerald rounded-full border-2 border-obsidian-card shadow-sm" />
+                  </div>
+
+                  {/* Ações e Informações */}
+                  <div className="flex-1 min-w-0 space-y-2.5 text-center sm:text-left">
+                    <div>
+                      <div className="text-white font-bold text-sm truncate">
+                        {user?.username}
+                      </div>
+                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                        Escolha uma imagem do computador, insira um link ou gere um novo robô aleatório.
+                      </p>
+                    </div>
+
+                    {/* Botões de Ação para o Avatar */}
+                    <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                      {/* Botão de Upload do Computador */}
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={avatarLoading}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl font-bold text-xs flex items-center space-x-1.5 transition-all shadow-md shadow-indigo-600/20 border border-indigo-400/30"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Carregar Foto</span>
+                      </button>
+
+                      {/* Botão de Gerar Aleatório */}
+                      <button
+                        type="button"
+                        onClick={handleGenerateRandomAvatar}
+                        disabled={avatarLoading}
+                        className="px-3 py-1.5 bg-obsidian-surface hover:bg-obsidian-surface-hover hover:text-white border border-obsidian-border text-obsidian-text-secondary rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                        title="Gerar um novo avatar robô aleatório"
+                      >
+                        <Shuffle className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Gerar Aleatório</span>
+                      </button>
+
+                      {/* Botão de Link / URL */}
+                      <button
+                        type="button"
+                        onClick={() => setShowUrlInput((v) => !v)}
+                        disabled={avatarLoading}
+                        className="px-3 py-1.5 bg-obsidian-surface hover:bg-obsidian-surface-hover hover:text-white border border-obsidian-border text-obsidian-text-secondary rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                      >
+                        <Link className="w-3.5 h-3.5 text-sky-400" />
+                        <span>{showUrlInput ? 'Ocultar Link' : 'Colar Link'}</span>
+                      </button>
+
+                      {/* Botão de Restaurar Padrão */}
+                      {user?.avatarUrl && (
+                        <button
+                          type="button"
+                          onClick={handleResetDefaultAvatar}
+                          disabled={avatarLoading}
+                          className="px-2.5 py-1.5 bg-obsidian-surface hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-400 border border-obsidian-border text-obsidian-text-muted rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                          title="Restaurar o avatar inicial padrão"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Restaurar</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Formulário de Input de URL (aberto ao clicar em 'Colar Link') */}
+                    {showUrlInput && (
+                      <form onSubmit={handleSaveAvatarUrl} className="pt-2 flex items-center gap-2">
+                        <input
+                          type="url"
+                          value={avatarUrlInput}
+                          onChange={(e) => setAvatarUrlInput(e.target.value)}
+                          placeholder="https://exemplo.com/sua-foto.png"
+                          required
+                          className="flex-1 bg-obsidian-surface border border-obsidian-border rounded-xl p-2 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60 placeholder-obsidian-text-muted font-mono"
+                        />
+                        <button
+                          type="submit"
+                          disabled={avatarLoading || !avatarUrlInput.trim()}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-xl font-bold text-xs transition-all shadow-md shadow-emerald-600/20"
+                        >
+                          Salvar
+                        </button>
+                      </form>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-2">
-                  Novo Apelido (Nome de Exibição)
-                </label>
+                {/* Input de arquivo invisível para acionar a seleção nativa do Windows/OS */}
                 <input
-                  type="text"
-                  value={newNickname}
-                  onChange={(e) => setNewNickname(e.target.value)}
-                  placeholder="Seu novo apelido"
-                  required
-                  className="w-full bg-obsidian-card border border-obsidian-border rounded-xl p-2.5 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                  onChange={handleFileSelect}
+                  className="hidden"
                 />
-                <p className="text-[11px] text-obsidian-text-muted mt-1.5">
-                  Esse nome aparecerá para todos nos canais de texto e salas de transmissão.
-                </p>
               </div>
 
-              <div className="flex justify-end pt-1">
-                <button
-                  type="submit"
-                  disabled={loading || !newNickname.trim() || newNickname.trim() === user?.username}
-                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-xl font-bold text-xs transition-all shadow-lg shadow-indigo-600/30 border border-indigo-400/40"
-                >
-                  {loading ? 'Salvando...' : 'Salvar Alterações'}
-                </button>
-              </div>
-            </form>
+              {/* Aba de Apelido */}
+              <form onSubmit={handleSaveNickname} className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-2">
+                    Novo Apelido (Nome de Exibição)
+                  </label>
+                  <input
+                    type="text"
+                    value={newNickname}
+                    onChange={(e) => setNewNickname(e.target.value)}
+                    placeholder="Seu novo apelido"
+                    required
+                    className="w-full bg-obsidian-card border border-obsidian-border rounded-xl p-2.5 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60"
+                  />
+                  <p className="text-[11px] text-obsidian-text-muted mt-1.5">
+                    Esse nome aparecerá para todos nos canais de texto e salas de transmissão.
+                  </p>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="submit"
+                    disabled={loading || !newNickname.trim() || newNickname.trim() === user?.username}
+                    className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-xl font-bold text-xs transition-all shadow-lg shadow-indigo-600/30 border border-indigo-400/40"
+                  >
+                    {loading ? 'Salvando...' : 'Salvar Apelido'}
+                  </button>
+                </div>
+              </form>
 
             {/* Seção de Segurança & Alteração de Senha */}
             <div className="border-t border-obsidian-border mt-6 pt-5">

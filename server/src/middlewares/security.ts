@@ -56,13 +56,21 @@ export function sanitizeText(input: unknown, maxLength = 4000): string {
 }
 
 /**
- * Valida URLs externas (como iconUrl e avatarUrl) permitindo apenas protocolos seguros (https:// ou http://)
- * para prevenir ataques XSS via javascript:, data:text/html, file:// ou vbscript:.
+ * Valida URLs e Data URIs de mídia (como iconUrl e avatarUrl) permitindo apenas protocolos seguros (https://, http://)
+ * ou Data URIs de imagens rasterizadas (png, jpeg, webp, gif) para prevenir ataques XSS via javascript:, data:text/html ou file://.
  */
 export function sanitizeSafeUrl(url: unknown): string | null {
   if (typeof url !== 'string' || !url.trim()) return null;
   const trimmed = url.trim();
-  if (trimmed.length > 1024) return null;
+
+  // Suporte a Data URIs de imagem compactada (PNG, JPEG, WebP, GIF) até 350 KB (~250 KB em imagem binária)
+  if (trimmed.startsWith('data:image/')) {
+    if (trimmed.length > 350_000) return null;
+    const isSafeDataUri = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(trimmed);
+    return isSafeDataUri ? trimmed : null;
+  }
+
+  if (trimmed.length > 2048) return null;
 
   try {
     const parsed = new URL(trimmed);

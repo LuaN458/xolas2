@@ -13,6 +13,8 @@ interface AuthContextType {
     email?: string
   ) => Promise<{ status: 'APPROVED' | 'PENDING'; user?: User }>;
   updateUsername: (newUsername: string) => Promise<void>;
+  updateProfile: (data: { username?: string; avatarUrl?: string }) => Promise<User>;
+  updateAvatar: (newAvatarUrl: string) => Promise<User>;
   logout: () => void;
   setUser: React.Dispatch<React.SetStateAction<User | null>>;
   setToken: React.Dispatch<React.SetStateAction<string | null>>;
@@ -87,10 +89,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { status: 'APPROVED' as const, user: registeredUser };
   };
 
-  const updateUsername = async (newUsername: string) => {
-    const response = await api.patch('/api/auth/profile', { username: newUsername });
-    const updatedUser = response.data.user;
+  const updateProfile = async (data: { username?: string; avatarUrl?: string }): Promise<User> => {
+    const response = await api.patch('/api/auth/profile', data);
+    const updatedUser: User = response.data.user;
     setUser(updatedUser);
+    return updatedUser;
+  };
+
+  const updateUsername = async (newUsername: string) => {
+    await updateProfile({ username: newUsername });
+  };
+
+  const updateAvatar = async (newAvatarUrl: string): Promise<User> => {
+    return await updateProfile({ avatarUrl: newAvatarUrl });
   };
 
   const logout = () => {
@@ -108,6 +119,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         updateUsername,
+        updateProfile,
+        updateAvatar,
         logout,
         setUser,
         setToken,

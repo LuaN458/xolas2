@@ -17,7 +17,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
 
   const safeAvatarUrl =
     message.user.avatarUrl &&
-    (message.user.avatarUrl.startsWith('https://') || message.user.avatarUrl.startsWith('http://'))
+    (message.user.avatarUrl.startsWith('https://') ||
+     message.user.avatarUrl.startsWith('http://') ||
+     message.user.avatarUrl.startsWith('data:image/'))
       ? message.user.avatarUrl
       : `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(message.user.username)}`;
 
