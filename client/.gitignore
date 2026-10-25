@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Production Builds & Binaries
+dist/
+dist-electron/
+release/
+*.exe
+build/
+Xolas/
+
+# Secrets & Environment
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+.env.local
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db
