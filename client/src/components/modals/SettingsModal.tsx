@@ -24,6 +24,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setMasterVolume,
     micInputGain,
     setMicInputGain,
+    voiceActivationThreshold,
+    setVoiceActivationThreshold,
   } = useVoice();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'audio' | 'updates'>('profile');
@@ -550,27 +552,78 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </p>
               </div>
 
-              {/* Medidor de Volume em Tempo Real */}
-              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3">
+              {/* Sensibilidade de Entrada / Limiar de Ativação por Voz (Estilo Discord) */}
+              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3.5">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center space-x-2 text-obsidian-text-secondary font-medium">
                     <Volume2 className="w-4 h-4 text-emerald-400" />
-                    <span>Teste de Microfone em Tempo Real</span>
+                    <span>Sensibilidade de Entrada (Ativação por Voz)</span>
                   </div>
-                  <span className="text-[10px] font-mono text-emerald-400">
-                    {volumeLevel > 0 ? `${volumeLevel}%` : 'Fale algo...'}
-                  </span>
+                  {volumeLevel >= voiceActivationThreshold ? (
+                    <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/40 flex items-center space-x-1 animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      <span>Transmitindo ({volumeLevel}%)</span>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-mono text-obsidian-text-muted bg-obsidian-surface px-2 py-0.5 rounded-md border border-obsidian-border">
+                      Silenciado ({volumeLevel}%)
+                    </span>
+                  )}
                 </div>
 
-                {/* Barra Animada de Nível de Som */}
-                <div className="w-full h-3 bg-obsidian-surface rounded-full overflow-hidden border border-obsidian-border p-[1px]">
+                {/* Barra Interativa com Marcador de Limiar Sobreposto Estilo Discord */}
+                <div className="relative w-full h-8 bg-obsidian-surface rounded-xl overflow-hidden border border-obsidian-border select-none flex items-center">
+                  {/* Nível do microfone abaixo do limiar (Região Cortada / Silenciosa em âmbar/cinza) */}
                   <div
-                    className="h-full rounded-full transition-all duration-75 bg-gradient-to-r from-emerald-500 via-teal-400 to-indigo-500"
-                    style={{ width: `${Math.max(4, volumeLevel)}%` }}
+                    className="absolute left-0 top-0 bottom-0 bg-amber-500/25 transition-all duration-75"
+                    style={{
+                      width: `${Math.min(volumeLevel, voiceActivationThreshold)}%`,
+                    }}
+                  />
+
+                  {/* Nível do microfone acima do limiar (Região Ativa / Transmitida em verde esmeralda com brilho) */}
+                  {volumeLevel > voiceActivationThreshold && (
+                    <div
+                      className="absolute top-0 bottom-0 bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_12px_rgba(16,185,129,0.5)] transition-all duration-75"
+                      style={{
+                        left: `${voiceActivationThreshold}%`,
+                        width: `${Math.max(0, volumeLevel - voiceActivationThreshold)}%`,
+                      }}
+                    />
+                  )}
+
+                  {/* Marcador Vertical da Linha de Corte (Threshold Handle) */}
+                  <div
+                    className="absolute top-0 bottom-0 w-1 bg-white shadow-lg pointer-events-none z-10"
+                    style={{ left: `calc(${voiceActivationThreshold}% - 2px)` }}
+                  >
+                    <div className="absolute -top-1 -left-1 w-3 h-3 bg-white rounded-full shadow-md border border-black/30" />
+                    <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-white rounded-full shadow-md border border-black/30" />
+                  </div>
+
+                  {/* Input Range Invisível Sobreposto para arrastar o Limiar com precisão */}
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={voiceActivationThreshold}
+                    onChange={(e) => setVoiceActivationThreshold(Number(e.target.value))}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                    title={`Limiar de ativação: ${voiceActivationThreshold}%`}
                   />
                 </div>
-                <p className="text-[10px] text-obsidian-text-muted">
-                  Fale no microfone para conferir se a barra verde se move conforme o tom da sua voz.
+
+                {/* Legendas e Dica de Calibração */}
+                <div className="flex items-center justify-between text-[11px] text-obsidian-text-muted font-mono">
+                  <span>0% (Mais sensível)</span>
+                  <span className="text-white font-bold bg-obsidian-surface px-2 py-0.5 rounded border border-obsidian-border text-xs">
+                    Corte em {voiceActivationThreshold}%
+                  </span>
+                  <span>100% (Menos sensível)</span>
+                </div>
+
+                <p className="text-[10px] text-obsidian-text-muted leading-relaxed">
+                  Arraste o marcador branco para ajustar: sons à esquerda da linha serão bloqueados (cortando barulhos de teclado e respiração), e sons que ultrapassarem a linha serão transmitidos para todos na sala.
                 </p>
               </div>
 

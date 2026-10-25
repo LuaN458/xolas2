@@ -75,6 +75,8 @@ interface VoiceContextType {
   setMasterVolume: (volume: number) => void;
   micInputGain: number;
   setMicInputGain: (gain: number) => void;
+  voiceActivationThreshold: number;
+  setVoiceActivationThreshold: (threshold: number) => void;
   updateScreenQualityPreset: (options: ScreenQualityOptions) => void;
   // Multiusuário e compartilhamento de tela WebRTC
   voiceParticipants: ActiveParticipant[];
@@ -119,6 +121,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [masterVolume, setMasterVolumeState] = useState<number>(initialSettings.masterOutputVolume);
   const [micInputGain, setMicInputGainState] = useState<number>(initialSettings.micInputGain);
+  const [voiceActivationThreshold, setVoiceActivationThresholdState] = useState<number>(
+    initialSettings.voiceActivationThreshold
+  );
 
   const [voiceParticipants, setVoiceParticipants] = useState<ActiveParticipant[]>([]);
   const [activeScreenShares, setActiveScreenShares] = useState<ActiveScreenShareInfo[]>([]);
@@ -133,6 +138,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const isScreenSharingRef = useRef<boolean>(false);
   const isLocalSpeakingRef = useRef<boolean>(false);
   const masterVolumeRef = useRef<number>(initialSettings.masterOutputVolume);
+  const micInputGainRef = useRef<number>(initialSettings.micInputGain);
+  const voiceActivationThresholdRef = useRef<number>(initialSettings.voiceActivationThreshold);
   const screenQualityRef = useRef<ScreenQualityOptions>({
     resolution: initialSettings.screenResolution,
     fps: initialSettings.screenFps,
@@ -564,7 +571,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender]
   );
 
-  // Configura detector de atividade de voz (VAD) para o microfone local
+  // Configura detector de atividade de voz (VAD / Noise Gate estilo Discord) para o microfone local
   const setupLocalVAD = useCallback(
     (stream: MediaStream) => {
       if (vadCleanupRef.current) {
@@ -578,12 +585,22 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const source = audioCtx.createMediaStreamSource(stream);
         const analyser = audioCtx.createAnalyser();
         analyser.fftSize = 256;
-        analyser.smoothingTimeConstant = 0.5;
+        analyser.smoothingTimeConstant = 0.4;
         source.connect(analyser);
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        let hangoverTimeout: number | null = null;
+        const micTrack = stream.getAudioTracks()[0];
+
         const interval = window.setInterval(() => {
           if (isMutedRef.current || !currentChannelRef.current) {
+            if (hangoverTimeout) {
+              window.clearTimeout(hangoverTimeout);
+              hangoverTimeout = null;
+            }
+            if (micTrack && micTrack.enabled) {
+              micTrack.enabled = false;
+            }
             if (isLocalSpeakingRef.current) {
               isLocalSpeakingRef.current = false;
               syncVoiceState();
@@ -598,17 +615,47 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             sum += dataArray[i];
           }
           const avg = sum / dataArray.length;
-          const speaking = avg > 12;
+          // Normaliza o nível de áudio de 0 a 100 aplicando o ganho de entrada
+          const currentLevel = Math.min(
+            100,
+            Math.round((avg / 64) * 100 * (micInputGainRef.current / 100))
+          );
+          const threshold = voiceActivationThresholdRef.current;
 
-          if (speaking !== isLocalSpeakingRef.current) {
-            isLocalSpeakingRef.current = speaking;
-            syncVoiceState();
-            emitLocalVoiceState();
+          const isAboveThreshold = currentLevel >= threshold;
+
+          if (isAboveThreshold) {
+            if (hangoverTimeout) {
+              window.clearTimeout(hangoverTimeout);
+              hangoverTimeout = null;
+            }
+            if (micTrack && !micTrack.enabled) {
+              micTrack.enabled = true;
+            }
+            if (!isLocalSpeakingRef.current) {
+              isLocalSpeakingRef.current = true;
+              syncVoiceState();
+              emitLocalVoiceState();
+            }
+          } else {
+            // Se caiu abaixo do limiar, aplica cauda de fala de 250ms antes de fechar o microfone
+            if (isLocalSpeakingRef.current && hangoverTimeout === null) {
+              hangoverTimeout = window.setTimeout(() => {
+                hangoverTimeout = null;
+                if (micTrack) {
+                  micTrack.enabled = false;
+                }
+                isLocalSpeakingRef.current = false;
+                syncVoiceState();
+                emitLocalVoiceState();
+              }, 250);
+            }
           }
-        }, 180);
+        }, 45);
 
         vadCleanupRef.current = () => {
           clearInterval(interval);
+          if (hangoverTimeout) window.clearTimeout(hangoverTimeout);
           source.disconnect();
           audioCtx.close().catch(() => {});
         };
@@ -765,8 +812,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const setMicInputGain = useCallback((val: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(val)));
+    micInputGainRef.current = clamped;
     setMicInputGainState(clamped);
     saveUserSetting('micInputGain', clamped);
+  }, []);
+
+  const setVoiceActivationThreshold = useCallback((val: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(val)));
+    voiceActivationThresholdRef.current = clamped;
+    setVoiceActivationThresholdState(clamped);
+    saveUserSetting('voiceActivationThreshold', clamped);
   }, []);
 
   const updateScreenQualityPreset = useCallback(
@@ -812,7 +867,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setSelectedAudioDeviceIdState(settings.selectedAudioDeviceId);
       masterVolumeRef.current = settings.masterOutputVolume;
       setMasterVolumeState(settings.masterOutputVolume);
+      micInputGainRef.current = settings.micInputGain;
       setMicInputGainState(settings.micInputGain);
+      voiceActivationThresholdRef.current = settings.voiceActivationThreshold;
+      setVoiceActivationThresholdState(settings.voiceActivationThreshold);
       const updatedQuality: ScreenQualityOptions = {
         resolution: settings.screenResolution,
         fps: settings.screenFps,
@@ -1721,6 +1779,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setMasterVolume,
         micInputGain,
         setMicInputGain,
+        voiceActivationThreshold,
+        setVoiceActivationThreshold,
         updateScreenQualityPreset,
         voiceParticipants,
         activeScreenShares,

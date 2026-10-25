@@ -5,6 +5,7 @@ export interface UserAudioSettings {
   streamVolume: number; // 0 a 100
   isStreamMuted: boolean;
   micInputGain: number; // 0 a 100
+  voiceActivationThreshold: number; // 0 a 100 (limiar de ativação de voz estilo Discord)
   screenResolution: '720p' | '1080p';
   screenFps: 30 | 60;
   screenIncludeAudio: boolean;
@@ -20,6 +21,7 @@ export const DEFAULT_USER_SETTINGS: UserAudioSettings = {
   streamVolume: 100,
   isStreamMuted: false,
   micInputGain: 100,
+  voiceActivationThreshold: 20,
   screenResolution: '1080p',
   screenFps: 60,
   screenIncludeAudio: true,
@@ -40,6 +42,7 @@ export function getUserSettings(): UserAudioSettings {
     const masterOutput = Number(parsed.masterOutputVolume ?? (legacyMaster ? Number(legacyMaster) : DEFAULT_USER_SETTINGS.masterOutputVolume));
     const streamVol = Number(parsed.streamVolume ?? DEFAULT_USER_SETTINGS.streamVolume);
     const micGain = Number(parsed.micInputGain ?? DEFAULT_USER_SETTINGS.micInputGain);
+    const thresholdVal = Number(parsed.voiceActivationThreshold ?? DEFAULT_USER_SETTINGS.voiceActivationThreshold);
     const fpsVal = Number(parsed.screenFps ?? DEFAULT_USER_SETTINGS.screenFps);
 
     return {
@@ -49,6 +52,7 @@ export function getUserSettings(): UserAudioSettings {
       streamVolume: isNaN(streamVol) ? 100 : Math.max(0, Math.min(100, streamVol)),
       isStreamMuted: Boolean(parsed.isStreamMuted ?? DEFAULT_USER_SETTINGS.isStreamMuted),
       micInputGain: isNaN(micGain) ? 100 : Math.max(0, Math.min(100, micGain)),
+      voiceActivationThreshold: isNaN(thresholdVal) ? 20 : Math.max(0, Math.min(100, thresholdVal)),
       screenResolution: parsed.screenResolution === '720p' ? '720p' : '1080p',
       screenFps: fpsVal === 30 ? 30 : 60,
       screenIncludeAudio: parsed.screenIncludeAudio !== undefined ? Boolean(parsed.screenIncludeAudio) : DEFAULT_USER_SETTINGS.screenIncludeAudio,

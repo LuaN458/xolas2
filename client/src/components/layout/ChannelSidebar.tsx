@@ -181,15 +181,15 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
 
                   {/* Árvore de Conexão Lateral (Tree Line) e Lista de Usuários Conectados */}
                   {count > 0 && (
-                    <div className="relative ml-4 pl-3.5 my-1 space-y-1 border-l-2 border-emerald-500/25">
+                    <div className="relative ml-4 pl-3 my-1 space-y-1 border-l-2 border-emerald-500/25">
                       {participants.map((p) => {
                         const isMe = p.id === user?.id;
                         return (
                           <div
                             key={p.id}
-                            className="group flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-white/[0.06] text-xs transition-all cursor-default"
+                            className="group flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-white/[0.06] text-xs transition-all cursor-default space-x-2"
                           >
-                            <div className="flex items-center min-w-0 space-x-2.5">
+                            <div className="flex items-center min-w-0 flex-1 space-x-2">
                               <div className="relative shrink-0">
                                 <img
                                   src={
@@ -197,32 +197,34 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                                     `https://api.dicebear.com/7.x/bottts/svg?seed=${p.username}`
                                   }
                                   alt={p.username}
-                                  className="w-6 h-6 rounded-lg bg-obsidian-card border border-emerald-500/40 shadow-sm"
+                                  className="w-6 h-6 rounded-lg bg-obsidian-card border border-emerald-500/40 shadow-sm shrink-0"
                                 />
                                 <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-obsidian-bg shadow-[0_0_6px_#10b981]" />
                               </div>
-                              <div className="flex items-center min-w-0">
-                                <span className="truncate font-semibold text-white">
+
+                              <div className="flex items-center min-w-0 flex-1 overflow-hidden">
+                                <span className="truncate font-semibold text-white text-xs">
                                   {p.username}
                                 </span>
                                 {isMe && (
-                                  <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono font-bold tracking-tight">
-                                    Você
-                                  </span>
-                                )}
-                                {((isMe && isScreenSharing) ||
-                                  activeScreenShares.some((s) => !s.isLocal && s.id.includes(p.id)) ||
-                                  livekitParticipants.some((lp) => lp.id === p.id && lp.screenTrack)) && (
-                                  <span className="ml-1.5 px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-[9px] font-bold tracking-wider flex items-center space-x-1 animate-pulse">
-                                    <Monitor className="w-2.5 h-2.5" />
-                                    <span>AO VIVO</span>
+                                  <span className="ml-1 text-[10px] text-emerald-400/80 font-mono font-bold shrink-0">
+                                    (você)
                                   </span>
                                 )}
                               </div>
+
+                              {((isMe && isScreenSharing) ||
+                                activeScreenShares.some((s) => !s.isLocal && s.id.includes(p.id)) ||
+                                livekitParticipants.some((lp) => lp.id === p.id && lp.screenTrack)) && (
+                                <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-[9px] font-bold tracking-wider flex items-center space-x-1 animate-pulse">
+                                  <Monitor className="w-2.5 h-2.5 shrink-0" />
+                                  <span>AO VIVO</span>
+                                </span>
+                              )}
                             </div>
 
                             {/* Indicador de Áudio Dinâmico */}
-                            <div className="shrink-0 flex items-center pl-2">
+                            <div className="shrink-0 flex items-center pl-1">
                               {isMe && isMuted ? (
                                 <span title="Microfone mutado">
                                   <MicOff className="w-3.5 h-3.5 text-obsidian-rose" />

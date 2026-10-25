@@ -311,7 +311,7 @@ export const App: React.FC = () => {
           />
 
           {/* 2. Barra Lateral de Canais + Perfil de Usuário Ancorado na Base */}
-          <div className="w-64 bg-obsidian-surface flex flex-col h-full shrink-0 border-r border-obsidian-border justify-between">
+          <div className="w-72 bg-obsidian-surface flex flex-col h-full shrink-0 border-r border-obsidian-border justify-between">
             <ChannelSidebar
               server={activeServerDetails}
               activeChannelId={activeChannel?.id || null}
