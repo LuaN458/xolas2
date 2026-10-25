@@ -30,11 +30,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const response = await api.get('/api/auth/me');
         setUser(response.data.user);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Falha ao autenticar com token salvo:', err);
-        localStorage.removeItem('discord_token');
-        setToken(null);
-        setUser(null);
+        // Só limpa o token se for erro explícito de autenticação inválida (401 / 403)
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          localStorage.removeItem('discord_token');
+          setToken(null);
+          setUser(null);
+        }
       } finally {
         setLoading(false);
       }

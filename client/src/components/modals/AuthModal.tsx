@@ -29,10 +29,14 @@ export const AuthModal: React.FC = () => {
         await register(cleanUser, password);
       }
     } catch (err: any) {
-      setError(
-        err.response?.data?.error ||
-          (isLogin ? 'Falha ao autenticar. Verifique seu nickname e senha.' : 'Falha ao cadastrar nickname.')
-      );
+      if (!err.response) {
+        setError('Não foi possível conectar ao servidor da Xolas. Verifique sua conexão ou tente novamente em instantes.');
+      } else {
+        setError(
+          err.response?.data?.error ||
+            (isLogin ? 'Nickname ou senha incorretos.' : 'Falha ao cadastrar nickname.')
+        );
+      }
     } finally {
       setLoading(false);
     }

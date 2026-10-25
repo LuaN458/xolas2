@@ -30,6 +30,7 @@ jobs:
       - name: Compilar e Publicar Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_API_URL: https://xolas-server.onrender.com
         run: |
           npm --prefix client run build
           npx electron-builder --projectDir client --win --publish always

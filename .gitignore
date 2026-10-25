@@ -25,6 +25,8 @@ build/
 *.env
 *.env.*
 !.env.example
+!.env.production
+!client/.env.production
 *.db
 *.db-journal
 
