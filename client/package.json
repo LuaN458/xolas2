@@ -37,7 +37,6 @@
         "zip"
       ],
       "artifactName": "Xolas-${version}-${arch}.${ext}",
-      "publisherName": "Xolas",
       "verifyUpdateCodeSignature": false,
       "requestedExecutionLevel": "asInvoker",
       "legalTrademarks": "Xolas"
