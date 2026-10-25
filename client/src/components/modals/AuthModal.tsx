@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { Command } from 'lucide-react';
+import { Command, RefreshCw } from 'lucide-react';
 
 export const AuthModal: React.FC = () => {
   const { login, register } = useAuth();
@@ -9,6 +9,36 @@ export const AuthModal: React.FC = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string>('1.0.3');
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (window.electronAPI?.getAppVersion) {
+      window.electronAPI.getAppVersion().then((v) => {
+        if (v) setAppVersion(v);
+      });
+    }
+  }, []);
+
+  const handleManualCheckUpdate = async () => {
+    if (!window.electronAPI?.checkForUpdates) return;
+    setIsCheckingUpdate(true);
+    setUpdateStatusText('Buscando atualizações...');
+    try {
+      const res = await window.electronAPI.checkForUpdates();
+      if (res?.status === 'success') {
+        setUpdateStatusText('Verificação concluída!');
+      } else {
+        setUpdateStatusText('Você está na versão mais recente!');
+      }
+    } catch {
+      setUpdateStatusText('Falha ao verificar.');
+    } finally {
+      setIsCheckingUpdate(false);
+      setTimeout(() => setUpdateStatusText(null), 4000);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,6 +144,20 @@ export const AuthModal: React.FC = () => {
             className="text-indigo-400 hover:text-indigo-300 hover:underline font-semibold"
           >
             {isLogin ? 'Criar agora' : 'Entrar'}
+          </button>
+        </div>
+
+        {/* Rodapé com versão e verificação de atualização */}
+        <div className="mt-5 pt-3 border-t border-obsidian-border/60 flex items-center justify-between text-[11px] text-obsidian-text-muted">
+          <span className="font-mono">Xolas v{appVersion}</span>
+          <button
+            type="button"
+            onClick={handleManualCheckUpdate}
+            disabled={isCheckingUpdate}
+            className="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center space-x-1 font-medium disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+            <span>{updateStatusText || 'Buscar atualização'}</span>
           </button>
         </div>
       </div>

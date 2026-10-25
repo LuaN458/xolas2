@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer } from 'electron';
+import { app, BrowserWindow, ipcMain, desktopCapturer, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { autoUpdater } from 'electron-updater';
@@ -67,14 +67,14 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
-  // Iniciar checagem automática silenciosa quando a interface terminar de carregar
+  // Iniciar checagem automática silenciosa quase imediata quando a interface terminar de carregar
   mainWindow.webContents.once('did-finish-load', () => {
     if (app.isPackaged) {
       setTimeout(() => {
         autoUpdater.checkForUpdatesAndNotify().catch((err) => {
           console.warn('[AutoUpdater] Falha na checagem inicial:', err);
         });
-      }, 3000);
+      }, 800);
     }
   });
 
@@ -118,6 +118,12 @@ ipcMain.handle('restart-and-install', () => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('open-external', async (_event, url: string) => {
+  if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+    await shell.openExternal(url);
+  }
 });
 
 // Handler IPC para capturar janelas e telas disponíveis para transmissão

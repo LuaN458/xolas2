@@ -69,6 +69,7 @@ declare global {
     electronAPI?: {
       getScreenSources: () => Promise<ScreenSource[]>;
       isElectron?: boolean;
+      openExternal?: (url: string) => Promise<void>;
       getAppVersion?: () => Promise<string>;
       checkForUpdates?: () => Promise<{ status: string; version: string; error?: string; result?: any }>;
       restartAndInstall?: () => Promise<void>;

@@ -17,6 +17,7 @@ import { CreateServerModal } from './components/modals/CreateServerModal';
 import { CreateChannelModal } from './components/modals/CreateChannelModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { AuthModal } from './components/modals/AuthModal';
+import { ForceUpdateModal } from './components/modals/ForceUpdateModal';
 import { UpdateNotificationBanner } from './components/layout/UpdateNotificationBanner';
 import { MessageSquareText } from 'lucide-react';
 
@@ -216,112 +217,117 @@ export const App: React.FC = () => {
     );
   }
 
-  if (!user) {
-    return <AuthModal />;
-  }
-
   return (
-    <div className="h-screen w-screen flex bg-obsidian-bg overflow-hidden font-sans text-obsidian-text-primary antialiased">
-      {/* 1. Dock Lateral de Espaços (Linear Style) */}
-      <ServerSidebar
-        servers={servers}
-        activeServerId={activeServerId}
-        onSelectServer={(id) => setActiveServerId(id)}
-        onOpenCreateModal={() => setIsCreateServerOpen(true)}
-      />
+    <>
+      {!user ? (
+        <AuthModal />
+      ) : (
+        <div className="h-screen w-screen flex bg-obsidian-bg overflow-hidden font-sans text-obsidian-text-primary antialiased">
+          {/* 1. Dock Lateral de Espaços (Linear Style) */}
+          <ServerSidebar
+            servers={servers}
+            activeServerId={activeServerId}
+            onSelectServer={(id) => setActiveServerId(id)}
+            onOpenCreateModal={() => setIsCreateServerOpen(true)}
+          />
 
-      {/* 2. Barra Lateral de Canais + Perfil de Usuário Ancorado na Base */}
-      <div className="w-64 bg-obsidian-surface flex flex-col h-full shrink-0 border-r border-obsidian-border justify-between">
-        <ChannelSidebar
-          server={activeServerDetails}
-          activeChannelId={activeChannel?.id || null}
-          voiceParticipants={voiceParticipants}
-          onSelectChannel={handleSelectChannel}
-          onDisconnectVoice={redirectToGeneralChat}
-          onOpenCreateChannelModal={(type) => {
-            setCreateChannelType(type);
-            setIsCreateChannelOpen(true);
-          }}
-        />
-        <UserControlsFooter onOpenSettings={() => setIsSettingsOpen(true)} />
-      </div>
-
-      {/* 3. Área Central (Discussão ou Estúdio de Voz) */}
-      <main className="flex-1 flex flex-col min-w-0 bg-obsidian-bg relative">
-        {activeChannel ? (
-          <>
-            <ChatHeader channel={activeChannel} />
-            {activeChannel.type === 'VOICE' ? (
-              <VoiceRoom channel={activeChannel} onDisconnect={redirectToGeneralChat} />
-            ) : (
-              <>
-                <MessageArea channel={activeChannel} />
-                <ChatInput
-                  channelName={activeChannel.name}
-                  onSendMessage={handleSendMessage}
-                />
-              </>
-            )}
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-obsidian-text-muted">
-            <div className="w-12 h-12 rounded-2xl bg-obsidian-card border border-obsidian-border flex items-center justify-center text-obsidian-accent mb-3">
-              <MessageSquareText className="w-6 h-6" />
-            </div>
-            <h3 className="text-sm font-bold text-obsidian-text-primary mb-1">Nenhum canal ativo</h3>
-            <p className="text-xs max-w-xs text-obsidian-text-muted">
-              Selecione um canal na barra lateral para iniciar a transmissão ou conversa.
-            </p>
+          {/* 2. Barra Lateral de Canais + Perfil de Usuário Ancorado na Base */}
+          <div className="w-64 bg-obsidian-surface flex flex-col h-full shrink-0 border-r border-obsidian-border justify-between">
+            <ChannelSidebar
+              server={activeServerDetails}
+              activeChannelId={activeChannel?.id || null}
+              voiceParticipants={voiceParticipants}
+              onSelectChannel={handleSelectChannel}
+              onDisconnectVoice={redirectToGeneralChat}
+              onOpenCreateChannelModal={(type) => {
+                setCreateChannelType(type);
+                setIsCreateChannelOpen(true);
+              }}
+            />
+            <UserControlsFooter onOpenSettings={() => setIsSettingsOpen(true)} />
           </div>
-        )}
-      </main>
 
-      {/* 4. Barra Lateral de Participantes (apenas em canais de texto) */}
-      {activeServerDetails && activeChannel?.type === 'TEXT' && (
-        <MemberList members={activeServerDetails.members || []} />
+          {/* 3. Área Central (Discussão ou Estúdio de Voz) */}
+          <main className="flex-1 flex flex-col min-w-0 bg-obsidian-bg relative">
+            {activeChannel ? (
+              <>
+                <ChatHeader channel={activeChannel} />
+                {activeChannel.type === 'VOICE' ? (
+                  <VoiceRoom channel={activeChannel} onDisconnect={redirectToGeneralChat} />
+                ) : (
+                  <>
+                    <MessageArea channel={activeChannel} />
+                    <ChatInput
+                      channelName={activeChannel.name}
+                      onSendMessage={handleSendMessage}
+                    />
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-obsidian-text-muted">
+                <div className="w-12 h-12 rounded-2xl bg-obsidian-card border border-obsidian-border flex items-center justify-center text-obsidian-accent mb-3">
+                  <MessageSquareText className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-obsidian-text-primary mb-1">Nenhum canal ativo</h3>
+                <p className="text-xs max-w-xs text-obsidian-text-muted">
+                  Selecione um canal na barra lateral para iniciar a transmissão ou conversa.
+                </p>
+              </div>
+            )}
+          </main>
+
+          {/* 4. Barra Lateral de Participantes (apenas em canais de texto) */}
+          {activeServerDetails && activeChannel?.type === 'TEXT' && (
+            <MemberList members={activeServerDetails.members || []} />
+          )}
+
+          {/* Modais */}
+          <CreateServerModal
+            isOpen={isCreateServerOpen}
+            onClose={() => setIsCreateServerOpen(false)}
+            onServerCreated={(newServer) => {
+              setServers((prev) => [...prev, newServer]);
+              setActiveServerId(newServer.id);
+            }}
+          />
+
+          {activeServerDetails && (
+            <CreateChannelModal
+              isOpen={isCreateChannelOpen}
+              serverId={activeServerDetails.id}
+              initialType={createChannelType}
+              onClose={() => setIsCreateChannelOpen(false)}
+              onChannelCreated={(newChannel) => {
+                setActiveServerDetails((prev) => {
+                  if (!prev) return null;
+                  return {
+                    ...prev,
+                    channels: [...prev.channels, newChannel],
+                  };
+                });
+                setActiveChannel(newChannel);
+                if (newChannel.type === 'VOICE') {
+                  joinVoiceChannel(newChannel);
+                }
+              }}
+            />
+          )}
+
+          {/* Modal de Configurações (Apelido & Microfone) */}
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+          />
+        </div>
       )}
 
-      {/* Modais */}
-      <CreateServerModal
-        isOpen={isCreateServerOpen}
-        onClose={() => setIsCreateServerOpen(false)}
-        onServerCreated={(newServer) => {
-          setServers((prev) => [...prev, newServer]);
-          setActiveServerId(newServer.id);
-        }}
-      />
+      {/* Modal de Atualização Obrigatória para usuários deslogados */}
+      <ForceUpdateModal isLoggedIn={Boolean(user)} />
 
-      {activeServerDetails && (
-        <CreateChannelModal
-          isOpen={isCreateChannelOpen}
-          serverId={activeServerDetails.id}
-          initialType={createChannelType}
-          onClose={() => setIsCreateChannelOpen(false)}
-          onChannelCreated={(newChannel) => {
-            setActiveServerDetails((prev) => {
-              if (!prev) return null;
-              return {
-                ...prev,
-                channels: [...prev.channels, newChannel],
-              };
-            });
-            setActiveChannel(newChannel);
-            if (newChannel.type === 'VOICE') {
-              joinVoiceChannel(newChannel);
-            }
-          }}
-        />
-      )}
-
-      {/* Modal de Configurações (Apelido & Microfone) */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
-
-      {/* Banner Flutuante de Atualização Automática */}
+      {/* Banner Flutuante de Atualização Automática para usuários logados */}
       <UpdateNotificationBanner />
-    </div>
+    </>
   );
 };
 

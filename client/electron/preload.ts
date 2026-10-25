@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
   isElectron: true,
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   restartAndInstall: () => ipcRenderer.invoke('restart-and-install'),
