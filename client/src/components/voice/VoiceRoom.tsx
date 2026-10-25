@@ -145,11 +145,12 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     }>();
 
     // 1. Participante Local
+    const localVp = voiceParticipants.find((vp) => vp.isLocal);
     map.set(user?.id || 'local-user', {
       id: user?.id || 'local-user',
       username: user?.username || 'Você',
       avatarUrl: user?.avatarUrl,
-      isSpeaking: !isMuted,
+      isSpeaking: localVp ? localVp.isSpeaking : false,
       isMuted,
       isLocal: true,
       cameraTrack: cameraStream ? cameraStream.getVideoTracks()[0] : undefined,
@@ -196,27 +197,13 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     return activeScreenShares[0];
   }, [activeScreenShares, selectedScreenShareId]);
 
-  const isConfigured = livekitUrl && !livekitUrl.includes('your-livekit-url');
-
   return (
     <div className="flex-1 bg-obsidian-bg flex flex-col justify-between overflow-hidden relative">
-      {/* Banner informativo minimalista se URL não configurada */}
-      {!isConfigured && (
-        <div className="bg-obsidian-card border-b border-obsidian-border px-4 py-2 flex items-center justify-between text-xs text-obsidian-text-secondary">
-          <div className="flex items-center space-x-2">
-            <Info className="w-3.5 h-3.5 text-obsidian-accent shrink-0" />
-            <span>
-              <strong>Transmissão Local em Alta Fidelidade:</strong> Seleção e captura de telas e janelas ativas.
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Área Central Studio */}
       <div className="flex-1 p-5 overflow-y-auto flex flex-col items-center justify-center">
         {activeShare ? (
           /* Modo Destaque: Tela Compartilhada Ativa */
-          <div className="w-full flex-1 flex flex-col space-y-3 max-w-5xl">
+          <div className="w-full h-full flex-1 flex flex-col space-y-3 max-w-5xl">
             {/* Barra superior de alternância caso haja múltiplas transmissões */}
             {activeScreenShares.length > 1 && (
               <div className="flex items-center space-x-2 px-1">
@@ -244,8 +231,8 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
             {/* Visualizador da Tela em Destaque (Spotlight) */}
             <div
               ref={screenContainerRef}
-              className={`bg-black rounded-2xl overflow-hidden border border-obsidian-border shadow-2xl relative flex items-center justify-center group ${
-                isFullscreen ? 'fixed inset-0 z-50 rounded-none w-screen h-screen' : 'flex-1 max-h-[68vh]'
+              className={`bg-black rounded-2xl overflow-hidden border border-obsidian-border shadow-2xl relative flex items-center justify-center group w-full ${
+                isFullscreen ? 'fixed inset-0 z-50 rounded-none w-screen h-screen' : 'flex-1 min-h-[360px] max-h-[68vh]'
               }`}
             >
               <ParticipantTile

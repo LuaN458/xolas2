@@ -27,14 +27,23 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
   const videoRef = React.useRef<HTMLVideoElement>(null);
 
   React.useEffect(() => {
-    if (videoRef.current) {
-      if (stream) {
-        videoRef.current.srcObject = stream;
-      } else if (videoTrack) {
-        videoRef.current.srcObject = new MediaStream([videoTrack]);
-      } else {
-        videoRef.current.srcObject = null;
+    const el = videoRef.current;
+    if (!el) return;
+
+    if (stream) {
+      if (el.srcObject !== stream) {
+        el.srcObject = stream;
       }
+      el.play().catch(() => {});
+    } else if (videoTrack) {
+      const currentObj = el.srcObject as MediaStream | null;
+      const existingTrack = currentObj?.getVideoTracks()[0];
+      if (existingTrack !== videoTrack) {
+        el.srcObject = new MediaStream([videoTrack]);
+      }
+      el.play().catch(() => {});
+    } else {
+      el.srcObject = null;
     }
   }, [stream, videoTrack]);
 
@@ -53,12 +62,19 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
   const hasVideo = stream ? stream.getVideoTracks().length > 0 : Boolean(videoTrack);
 
   return (
-    <div className="relative bg-obsidian-card rounded-xl overflow-hidden flex flex-col items-center justify-center min-h-[160px] aspect-video border border-obsidian-border shadow-lg group">
+    <div
+      className={`relative bg-obsidian-card rounded-xl overflow-hidden flex flex-col items-center justify-center min-h-[160px] w-full ${
+        isScreenShare ? 'h-full' : 'aspect-video'
+      } border border-obsidian-border shadow-lg group`}
+    >
       {hasVideo ? (
         <video
           ref={videoRef}
           autoPlay
           playsInline
+          onLoadedMetadata={(e) => {
+            e.currentTarget.play().catch(() => {});
+          }}
           className="w-full h-full object-contain bg-black"
         />
       ) : (
