@@ -1,5 +1,7 @@
 import { app, BrowserWindow, ipcMain, desktopCapturer, shell, session } from 'electron';
 import path from 'path';
+import fs from 'fs';
+import { spawn, ChildProcess } from 'child_process';
 import { fileURLToPath } from 'url';
 import { autoUpdater } from 'electron-updater';
 
@@ -10,6 +12,34 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
+let audioCaptureProcess: ChildProcess | null = null;
+
+function stopProcessAudioCapture() {
+  if (audioCaptureProcess) {
+    try {
+      audioCaptureProcess.stdout?.removeAllListeners();
+      audioCaptureProcess.stderr?.removeAllListeners();
+      audioCaptureProcess.kill();
+    } catch {}
+    audioCaptureProcess = null;
+  }
+}
+
+function getWasapiHelperPath(): string {
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'wasapi-loopback.exe') : '',
+    path.join(__dirname, 'wasapi-loopback.exe'),
+    path.join(__dirname, '../electron/wasapi-loopback.exe'),
+    path.join(app.getAppPath(), 'electron/wasapi-loopback.exe'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0];
+}
 
 // Configuração do Auto-Updater para GitHub Releases
 autoUpdater.autoDownload = true;
@@ -82,6 +112,7 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    stopProcessAudioCapture();
     mainWindow = null;
   });
 }
@@ -166,15 +197,84 @@ ipcMain.handle('get-screen-sources', async () => {
   }
 });
 
+// Handler IPC para captura de áudio isolada via WASAPI Process Loopback (Windows 10/11)
+// - Se sourceId for "window:<HWND>:0", captura SOMENTE a árvore de processos daquela janela (INCLUDE_TARGET_PROCESS_TREE)
+// - Se sourceId for "screen:<ID>:0", captura o áudio do sistema EXCLUINDO a árvore de processos do Xolas (EXCLUDE_TARGET_PROCESS_TREE)
+ipcMain.handle('start-process-audio-capture', async (_event, sourceId?: string) => {
+  stopProcessAudioCapture();
+
+  if (process.platform !== 'win32') {
+    return { started: false, reason: 'not-win32' };
+  }
+
+  const exePath = getWasapiHelperPath();
+  if (!fs.existsSync(exePath)) {
+    console.warn('[WASAPI] Helper binário não encontrado em:', exePath);
+    return { started: false, reason: 'binary-missing' };
+  }
+
+  const args: string[] = [];
+  if (sourceId && sourceId.startsWith('window:')) {
+    const parts = sourceId.split(':');
+    const hwndStr = parts[1];
+    if (hwndStr && /^\d+$/.test(hwndStr)) {
+      args.push('--hwnd', hwndStr, '--fallback-exclude-pid', String(process.pid));
+    } else {
+      args.push('--exclude-pid', String(process.pid));
+    }
+  } else {
+    args.push('--exclude-pid', String(process.pid));
+  }
+
+  try {
+    const child = spawn(exePath, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    audioCaptureProcess = child;
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('process-audio-chunk', chunk);
+      }
+    });
+
+    child.stderr?.on('data', (data: Buffer) => {
+      const msg = data.toString().trim();
+      if (msg) {
+        console.log(msg);
+      }
+    });
+
+    child.on('exit', (code) => {
+      if (audioCaptureProcess === child) {
+        audioCaptureProcess = null;
+      }
+      if (code !== 0 && code !== null) {
+        console.warn(`[WASAPI] Processo finalizado com código ${code}`);
+      }
+    });
+
+    return { started: true, mode: sourceId?.startsWith('window:') ? 'include-window-tree' : 'exclude-xolas-tree' };
+  } catch (err: any) {
+    console.error('[WASAPI] Erro ao iniciar wasapi-loopback.exe:', err);
+    return { started: false, reason: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('stop-process-audio-capture', () => {
+  stopProcessAudioCapture();
+  return { stopped: true };
+});
+
 app.whenReady().then(() => {
-  // Habilitar captura de áudio loopback nativa para getDisplayMedia no Windows
   try {
     session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
       desktopCapturer
         .getSources({ types: ['screen', 'window'] })
         .then((sources) => {
           if (sources && sources.length > 0) {
-            callback({ video: sources[0], audio: 'loopback' });
+            callback({ video: sources[0] });
           } else {
             callback({});
           }
@@ -191,6 +291,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  stopProcessAudioCapture();
   if (process.platform !== 'darwin') {
     app.quit();
   }

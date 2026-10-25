@@ -1,14 +1,15 @@
 {
   "name": "xolas",
   "productName": "Xolas",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Xolas - Aplicativo Desktop de Comunicação e Transmissão Studio Obsidian",
   "author": "Xolas",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "compile:audio": "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /optimize+ /out:electron\\wasapi-loopback.exe electron\\wasapi-loopback.cs",
+    "build": "npm run compile:audio && tsc && vite build",
     "preview": "vite preview",
     "pack": "npm run build && electron-builder --dir",
     "dist:win": "npm run build && electron-builder --win nsis",
@@ -25,6 +26,12 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/wasapi-loopback.exe",
+        "to": "wasapi-loopback.exe"
+      }
     ],
     "publish": {
       "provider": "github",

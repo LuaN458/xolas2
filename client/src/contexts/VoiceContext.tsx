@@ -141,6 +141,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const screenSendersRef = useRef<Map<string, RTCRtpSender[]>>(new Map());
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const vadCleanupRef = useRef<(() => void) | null>(null);
+  const screenAudioCleanupRef = useRef<(() => void) | null>(null);
 
   // Emite o estado atual do usuário local para os demais membros do canal
   const emitLocalVoiceState = useCallback(() => {
@@ -1057,6 +1058,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       vadCleanupRef.current = null;
     }
 
+    if (screenAudioCleanupRef.current) {
+      screenAudioCleanupRef.current();
+      screenAudioCleanupRef.current = null;
+    }
+
     if (localMicStreamRef.current) {
       localMicStreamRef.current.getTracks().forEach((t) => t.stop());
       localMicStreamRef.current = null;
@@ -1131,6 +1137,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const stopScreenShare = useCallback(() => {
     const ch = currentChannelRef.current;
 
+    if (screenAudioCleanupRef.current) {
+      screenAudioCleanupRef.current();
+      screenAudioCleanupRef.current = null;
+    }
+
     // Remover senders de tela de todas as conexões WebRTC ativas e renegociar
     peersRef.current.forEach((pc, peerId) => {
       const senders = screenSendersRef.current.get(peerId) || [];
@@ -1161,6 +1172,163 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     emitLocalVoiceState();
   }, [sendOffer, syncVoiceState, emitLocalVoiceState]);
 
+  // Cria uma MediaStreamTrack de áudio 100% isolada via WASAPI Process Loopback:
+  // - Ao compartilhar uma janela (window:HWND:0): captura APENAS o som daquele aplicativo (ex: Chrome/Opera/Jogo)
+  // - Ao compartilhar a tela inteira (screen:0:0): captura o som do PC EXCLUINDO a árvore de processos do Xolas
+  const createIsolatedProcessAudioTrack = useCallback(
+    async (sourceId?: string): Promise<MediaStreamTrack | null> => {
+      if (screenAudioCleanupRef.current) {
+        screenAudioCleanupRef.current();
+        screenAudioCleanupRef.current = null;
+      }
+
+      if (!window.electronAPI?.startProcessAudioCapture || !window.electronAPI?.onProcessAudioChunk) {
+        return null;
+      }
+
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const audioCtx: AudioContext = new AudioCtx({ sampleRate: 48000 });
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume().catch(() => {});
+        }
+
+        // Ring buffer circular para 48kHz Estéreo (1 segundo de capacidade, limite de baixa latência em 120ms)
+        const RING_SIZE = 48000;
+        const MAX_BUFFERED_FRAMES = 5760; // 120ms max latency
+        const TARGET_RESET_FRAMES = 2400; // 50ms
+        const ringLeft = new Float32Array(RING_SIZE);
+        const ringRight = new Float32Array(RING_SIZE);
+        let writeIdx = 0;
+        let readIdx = 0;
+        let availableFrames = 0;
+        let leftover = new Uint8Array(0);
+
+        const removeChunkListener = window.electronAPI.onProcessAudioChunk((rawChunk: Uint8Array) => {
+          const chunk =
+            rawChunk instanceof Uint8Array
+              ? rawChunk
+              : new Uint8Array((rawChunk as any).buffer || rawChunk);
+
+          let combined: Uint8Array;
+          if (leftover.byteLength > 0) {
+            combined = new Uint8Array(leftover.byteLength + chunk.byteLength);
+            combined.set(leftover, 0);
+            combined.set(chunk, leftover.byteLength);
+          } else {
+            combined = chunk;
+          }
+
+          const totalBytes = combined.byteLength;
+          const usableFrames = Math.floor(totalBytes / 4);
+          const remBytes = totalBytes % 4;
+
+          if (remBytes > 0) {
+            leftover = combined.slice(totalBytes - remBytes);
+          } else if (leftover.byteLength > 0) {
+            leftover = new Uint8Array(0);
+          }
+
+          if (usableFrames <= 0) return;
+
+          const view = new DataView(
+            combined.buffer,
+            combined.byteOffset,
+            usableFrames * 4
+          );
+
+          for (let i = 0; i < usableFrames; i++) {
+            const sL = view.getInt16(i * 4, true) / 32768.0;
+            const sR = view.getInt16(i * 4 + 2, true) / 32768.0;
+            ringLeft[writeIdx] = sL;
+            ringRight[writeIdx] = sR;
+            writeIdx = (writeIdx + 1) % RING_SIZE;
+          }
+
+          availableFrames += usableFrames;
+          if (availableFrames > MAX_BUFFERED_FRAMES) {
+            readIdx = (writeIdx - TARGET_RESET_FRAMES + RING_SIZE) % RING_SIZE;
+            availableFrames = TARGET_RESET_FRAMES;
+          }
+        });
+
+        const res = await window.electronAPI.startProcessAudioCapture(sourceId);
+        if (!res?.started) {
+          removeChunkListener();
+          audioCtx.close().catch(() => {});
+          return null;
+        }
+
+        // Nó de clock silencioso para garantir que o ScriptProcessor nunca seja suspenso quando o Xolas estiver minimizado
+        const osc = audioCtx.createOscillator();
+        const silentInGain = audioCtx.createGain();
+        silentInGain.gain.value = 0;
+        osc.connect(silentInGain);
+        osc.start();
+
+        const scriptNode = audioCtx.createScriptProcessor(1024, 2, 2);
+        const dest = audioCtx.createMediaStreamDestination();
+        const silentOutGain = audioCtx.createGain();
+        silentOutGain.gain.value = 0;
+
+        scriptNode.onaudioprocess = (e: AudioProcessingEvent) => {
+          const outL = e.outputBuffer.getChannelData(0);
+          const outR = e.outputBuffer.getChannelData(1);
+          const framesNeeded = outL.length;
+
+          for (let i = 0; i < framesNeeded; i++) {
+            if (availableFrames > 0) {
+              outL[i] = ringLeft[readIdx];
+              outR[i] = ringRight[readIdx];
+              readIdx = (readIdx + 1) % RING_SIZE;
+              availableFrames--;
+            } else {
+              outL[i] = 0;
+              outR[i] = 0;
+            }
+          }
+        };
+
+        silentInGain.connect(scriptNode);
+        scriptNode.connect(dest);
+        scriptNode.connect(silentOutGain);
+        silentOutGain.connect(audioCtx.destination);
+
+        const track = dest.stream.getAudioTracks()[0] || null;
+        if (track) {
+          try {
+            (track as any).contentHint = 'music';
+          } catch {}
+        }
+
+        screenAudioCleanupRef.current = () => {
+          try {
+            removeChunkListener();
+          } catch {}
+          try {
+            window.electronAPI?.stopProcessAudioCapture?.();
+          } catch {}
+          try {
+            scriptNode.onaudioprocess = null;
+            silentInGain.disconnect();
+            scriptNode.disconnect();
+            silentOutGain.disconnect();
+            osc.stop();
+          } catch {}
+          try {
+            audioCtx.close().catch(() => {});
+          } catch {}
+        };
+
+        return track;
+      } catch (err) {
+        console.warn('[WASAPI] Erro ao criar faixa de áudio isolada por processo:', err);
+        return null;
+      }
+    },
+    []
+  );
+
   const startScreenShare = useCallback(
     async (sourceId?: string, quality?: ScreenQualityOptions) => {
       try {
@@ -1172,6 +1340,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const height = is1080 ? 1080 : 720;
         const fps = activeQuality.fps;
         const includeAudio = activeQuality.includeAudio !== false;
+
+        // Encerrar captura de áudio de tela anterior antes de iniciar nova
+        if (screenAudioCleanupRef.current) {
+          screenAudioCleanupRef.current();
+          screenAudioCleanupRef.current = null;
+        }
 
         let stream: MediaStream;
 
@@ -1190,87 +1364,34 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
 
           try {
-            // Tentar capturar vídeo (tela ou janela) + áudio desktop loopback com filtro inteligente de vozes do Xolas
+            // IMPORTANTE: Capturar SOMENTE o vídeo via desktopCapturer (audio: false),
+            // pois o loopback padrão do Chromium captura o endpoint global do Windows e vaza as vozes do Xolas.
+            // O áudio isolado por processo (WASAPI Process Loopback) é anexado logo abaixo!
             stream = await (navigator.mediaDevices as any).getUserMedia({
-              audio: includeAudio
-                ? {
-                    mandatory: {
-                      chromeMediaSource: 'desktop',
-                    },
-                    optional: [
-                      { echoCancellation: true },
-                      { googEchoCancellation: true },
-                      { googExperimentalEchoCancellation: true },
-                      { googAutoGainControl: false },
-                      { googNoiseSuppression: false },
-                    ],
-                  }
-                : false,
+              audio: false,
               video: {
                 mandatory: videoMandatory,
                 optional: isWindow ? [{ maxWidth: width }, { maxHeight: height }] : [],
               },
             });
           } catch (errWindow) {
-            console.warn('Captura combinada falhou na janela, capturando vídeo e anexando áudio do sistema separadamente:', errWindow);
-            try {
-              stream = await (navigator.mediaDevices as any).getUserMedia({
-                audio: false,
-                video: {
-                  mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: sourceId,
-                  },
-                  optional: [{ maxWidth: width }, { maxHeight: height }],
+            console.warn('Captura de vídeo com maxFrameRate falhou, tentando constraints simplificados:', errWindow);
+            stream = await (navigator.mediaDevices as any).getUserMedia({
+              audio: false,
+              video: {
+                mandatory: {
+                  chromeMediaSource: 'desktop',
+                  chromeMediaSourceId: sourceId,
                 },
-              });
-            } catch (errFallback) {
-              console.warn('Fallback do Electron falhou, usando seletor do sistema:', errFallback);
-              stream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                  width: { ideal: width },
-                  height: { ideal: height },
-                  frameRate: { ideal: fps, max: fps },
-                },
-                audio: includeAudio,
-              });
-            }
+                optional: [{ maxWidth: width }, { maxHeight: height }],
+              },
+            });
           }
 
-          // Se o usuário pediu áudio (ex: selecionou a janela do Google/Opera) e o stream ainda não tem faixa de áudio,
-          // capturamos o loopback de áudio do desktop e injetamos no mesmo MediaStream da janela!
-          if (includeAudio && stream.getAudioTracks().length === 0) {
-            try {
-              const desktopAudioStream: MediaStream = await (navigator.mediaDevices as any).getUserMedia({
-                audio: {
-                  mandatory: {
-                    chromeMediaSource: 'desktop',
-                  },
-                  optional: [
-                    { echoCancellation: true },
-                    { googEchoCancellation: true },
-                    { googExperimentalEchoCancellation: true },
-                    { googAutoGainControl: false },
-                    { googNoiseSuppression: false },
-                  ],
-                },
-                video: {
-                  mandatory: {
-                    chromeMediaSource: 'desktop',
-                    maxWidth: 16,
-                    maxHeight: 16,
-                    maxFrameRate: 1,
-                  },
-                },
-              });
-              // Descartar imediatamente o vídeo auxiliar 16x16 e manter apenas a faixa de áudio do sistema
-              desktopAudioStream.getVideoTracks().forEach((vt) => vt.stop());
-              const sysAudioTrack = desktopAudioStream.getAudioTracks()[0];
-              if (sysAudioTrack) {
-                stream.addTrack(sysAudioTrack);
-              }
-            } catch (audioLoopbackErr) {
-              console.warn('Não foi possível capturar áudio loopback adicional para a janela:', audioLoopbackErr);
+          if (includeAudio) {
+            const isolatedAudioTrack = await createIsolatedProcessAudioTrack(sourceId);
+            if (isolatedAudioTrack) {
+              stream.addTrack(isolatedAudioTrack);
             }
           }
         } else {
@@ -1283,16 +1404,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             audio: includeAudio,
           });
         }
-
-        // Garantir fidelidade máxima de som para vídeos/jogos e isolamento das vozes da chamada do Xolas
-        stream.getAudioTracks().forEach((at) => {
-          at.enabled = true;
-          at.applyConstraints({
-            echoCancellation: true,
-            noiseSuppression: false,
-            autoGainControl: false,
-          }).catch(() => {});
-        });
 
         // Parar stream anterior se estiver trocando de janela/tela
         if (screenStreamRef.current && screenStreamRef.current.id !== stream.id) {
@@ -1345,7 +1456,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         console.error('Falha ao iniciar compartilhamento de tela:', error);
       }
     },
-    [stopScreenShare, syncVoiceState, emitLocalVoiceState, sendOffer]
+    [stopScreenShare, createIsolatedProcessAudioTrack, syncVoiceState, emitLocalVoiceState, sendOffer]
   );
 
   const watchScreenShare = useCallback((shareId: string) => {

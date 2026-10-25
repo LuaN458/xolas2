@@ -78,6 +78,9 @@ declare global {
       onUpdateDownloaded?: (callback: (info: UpdateInfo) => void) => () => void;
       onUpdateNotAvailable?: (callback: (info: UpdateInfo) => void) => () => void;
       onUpdateError?: (callback: (error: string) => void) => () => void;
+      startProcessAudioCapture?: (sourceId?: string) => Promise<{ started: boolean; mode?: string; reason?: string }>;
+      stopProcessAudioCapture?: () => Promise<{ stopped: boolean }>;
+      onProcessAudioChunk?: (callback: (chunk: Uint8Array) => void) => () => void;
     };
   }
 }

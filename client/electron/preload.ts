@@ -34,4 +34,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-error', handler);
     return () => ipcRenderer.removeListener('update-error', handler);
   },
+  startProcessAudioCapture: (sourceId?: string) =>
+    ipcRenderer.invoke('start-process-audio-capture', sourceId),
+  stopProcessAudioCapture: () =>
+    ipcRenderer.invoke('stop-process-audio-capture'),
+  onProcessAudioChunk: (callback: (chunk: Uint8Array) => void) => {
+    const handler = (_event: any, chunk: Uint8Array) => callback(chunk);
+    ipcRenderer.on('process-audio-chunk', handler);
+    return () => ipcRenderer.removeListener('process-audio-chunk', handler);
+  },
 });
