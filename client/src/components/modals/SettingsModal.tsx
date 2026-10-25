@@ -127,6 +127,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const micStreamRef = useRef<MediaStream | null>(null);
   const isReusingCallTrackRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
+  const micInputGainRef = useRef(micInputGain);
+  const isDraggingThresholdRef = useRef(false);
+
+  useEffect(() => {
+    micInputGainRef.current = micInputGain;
+  }, [micInputGain]);
+
+  const updateThresholdFromPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const pct = Math.max(0, Math.min(100, Math.round((x / rect.width) * 100)));
+    setVoiceActivationThreshold(pct);
+  };
+
+  const handleThresholdPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingThresholdRef.current = true;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+    updateThresholdFromPointer(e);
+  };
+
+  const handleThresholdPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingThresholdRef.current) return;
+    updateThresholdFromPointer(e);
+  };
+
+  const handleThresholdPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingThresholdRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+  };
 
   useEffect(() => {
     if (user?.username) {
@@ -183,26 +217,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       audioContextRef.current = audioContext;
 
       const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 512;
       analyserRef.current = analyser;
 
       const source = audioContext.createMediaStreamSource(stream);
       source.connect(analyser);
 
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const samples = new Float32Array(analyser.fftSize);
+      let smoothed = 0;
 
       const updateMeter = () => {
         if (!analyserRef.current) return;
-        analyserRef.current.getByteFrequencyData(dataArray);
 
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i];
+        if (analyserRef.current.getFloatTimeDomainData) {
+          analyserRef.current.getFloatTimeDomainData(samples);
+        } else {
+          const byteData = new Uint8Array(analyserRef.current.fftSize);
+          analyserRef.current.getByteTimeDomainData(byteData);
+          for (let i = 0; i < byteData.length; i++) {
+            samples[i] = (byteData[i] - 128) / 128;
+          }
         }
-        const avg = sum / dataArray.length;
-        // Normalizar volume de 0 a 100 aplicando o ganho configurado de forma suave
-        const normalized = Math.min(100, Math.round((avg / 64) * 100 * (micInputGain / 100)));
-        setVolumeLevel(normalized);
+
+        let sumSquares = 0;
+        for (let i = 0; i < samples.length; i++) {
+          sumSquares += samples[i] * samples[i];
+        }
+        const rms = Math.sqrt(sumSquares / samples.length);
+        // Decibéis relativos ao fundo de escala: -60 dB (silêncio) a 0 dB (pico máximo)
+        const db = 20 * Math.log10(rms || 0.00001);
+        const normalized = Math.max(0, Math.min(100, Math.round(((db + 60) / 60) * 100)));
+        const target = Math.max(
+          0,
+          Math.min(100, Math.round(normalized * (micInputGainRef.current / 100)))
+        );
+
+        // Balística de VU Meter estilo Discord: Ataque instantâneo (subida rápida), decaimento suave
+        if (target > smoothed) {
+          smoothed = target;
+        } else {
+          smoothed = Math.max(0, Math.round(smoothed * 0.82 + target * 0.18));
+        }
+
+        setVolumeLevel(smoothed);
 
         animationFrameRef.current = requestAnimationFrame(updateMeter);
       };
@@ -560,20 +617,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <span>Sensibilidade de Entrada (Ativação por Voz)</span>
                   </div>
                   {volumeLevel >= voiceActivationThreshold ? (
-                    <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/40 flex items-center space-x-1 animate-pulse">
+                    <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/40 flex items-center space-x-1.5 animate-pulse">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      <span>Transmitindo ({volumeLevel}%)</span>
+                      <span>Transmitindo ({volumeLevel}% / {Math.round(-60 + (volumeLevel / 100) * 60)} dBFS)</span>
                     </span>
                   ) : (
                     <span className="text-[10px] font-mono text-obsidian-text-muted bg-obsidian-surface px-2 py-0.5 rounded-md border border-obsidian-border">
-                      Silenciado ({volumeLevel}%)
+                      Silenciado ({volumeLevel}% / {Math.round(-60 + (volumeLevel / 100) * 60)} dBFS)
                     </span>
                   )}
                 </div>
 
                 {/* Barra Interativa com Marcador de Limiar Sobreposto Estilo Discord */}
-                <div className="relative w-full h-8 bg-obsidian-surface rounded-xl overflow-hidden border border-obsidian-border select-none flex items-center">
-                  {/* Nível do microfone abaixo do limiar (Região Cortada / Silenciosa em âmbar/cinza) */}
+                <div
+                  onPointerDown={handleThresholdPointerDown}
+                  onPointerMove={handleThresholdPointerMove}
+                  onPointerUp={handleThresholdPointerUp}
+                  onPointerCancel={handleThresholdPointerUp}
+                  className="relative w-full h-8 bg-obsidian-surface rounded-xl overflow-hidden border border-obsidian-border select-none flex items-center cursor-pointer touch-none"
+                >
+                  {/* Nível do microfone abaixo do limiar (Região Cortada / Ruído de Fundo em âmbar) */}
                   <div
                     className="absolute left-0 top-0 bottom-0 bg-amber-500/25 transition-all duration-75"
                     style={{
@@ -584,7 +647,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   {/* Nível do microfone acima do limiar (Região Ativa / Transmitida em verde esmeralda com brilho) */}
                   {volumeLevel > voiceActivationThreshold && (
                     <div
-                      className="absolute top-0 bottom-0 bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_12px_rgba(16,185,129,0.5)] transition-all duration-75"
+                      className="absolute top-0 bottom-0 bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_14px_rgba(16,185,129,0.55)] transition-all duration-75"
                       style={{
                         left: `${voiceActivationThreshold}%`,
                         width: `${Math.max(0, volumeLevel - voiceActivationThreshold)}%`,
@@ -601,25 +664,67 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-white rounded-full shadow-md border border-black/30" />
                   </div>
 
-                  {/* Input Range Invisível Sobreposto para arrastar o Limiar com precisão */}
+                  {/* Input Range Invisível Sobreposto para acessibilidade via teclado */}
                   <input
                     type="range"
                     min="0"
                     max="100"
                     value={voiceActivationThreshold}
                     onChange={(e) => setVoiceActivationThreshold(Number(e.target.value))}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                    className="absolute inset-0 w-full h-full opacity-0 pointer-events-none z-20"
                     title={`Limiar de ativação: ${voiceActivationThreshold}%`}
+                    aria-label="Limiar de ativação por voz"
                   />
                 </div>
 
                 {/* Legendas e Dica de Calibração */}
                 <div className="flex items-center justify-between text-[11px] text-obsidian-text-muted font-mono">
                   <span>0% (Mais sensível)</span>
-                  <span className="text-white font-bold bg-obsidian-surface px-2 py-0.5 rounded border border-obsidian-border text-xs">
-                    Corte em {voiceActivationThreshold}%
+                  <span className="text-white font-bold bg-obsidian-surface px-2.5 py-0.5 rounded-lg border border-obsidian-border text-xs flex items-center space-x-1.5">
+                    <span>Corte em {voiceActivationThreshold}%</span>
+                    <span className="text-obsidian-text-muted text-[10px]">
+                      ({Math.round(-60 + (voiceActivationThreshold / 100) * 60)} dBFS)
+                    </span>
                   </span>
                   <span>100% (Menos sensível)</span>
+                </div>
+
+                {/* Presets Rápidos de Calibração */}
+                <div className="flex items-center flex-wrap gap-2 pt-0.5">
+                  <span className="text-[10px] text-obsidian-text-muted font-medium">Calibração Rápida:</span>
+                  <button
+                    type="button"
+                    onClick={() => setVoiceActivationThreshold(25)}
+                    className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
+                      voiceActivationThreshold === 25
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
+                        : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                    }`}
+                  >
+                    Silencioso (25%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVoiceActivationThreshold(35)}
+                    className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
+                      voiceActivationThreshold === 35
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
+                        : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                    }`}
+                  >
+                    Padrão / Discord (35%) ⭐
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVoiceActivationThreshold(50)}
+                    className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
+                      voiceActivationThreshold === 50
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
+                        : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                    }`}
+                  >
+                    Ambiente Barulhento (50%)
+                  </button>
                 </div>
 
                 <p className="text-[10px] text-obsidian-text-muted leading-relaxed">

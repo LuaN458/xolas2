@@ -584,11 +584,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const audioCtx: AudioContext = new AudioCtx();
         const source = audioCtx.createMediaStreamSource(stream);
         const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        analyser.smoothingTimeConstant = 0.4;
+        analyser.fftSize = 512;
         source.connect(analyser);
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const samples = new Float32Array(analyser.fftSize);
         let hangoverTimeout: number | null = null;
         const micTrack = stream.getAudioTracks()[0];
 
@@ -609,16 +608,28 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             return;
           }
 
-          analyser.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            sum += dataArray[i];
+          if (analyser.getFloatTimeDomainData) {
+            analyser.getFloatTimeDomainData(samples);
+          } else {
+            const byteData = new Uint8Array(analyser.fftSize);
+            analyser.getByteTimeDomainData(byteData);
+            for (let i = 0; i < byteData.length; i++) {
+              samples[i] = (byteData[i] - 128) / 128;
+            }
           }
-          const avg = sum / dataArray.length;
-          // Normaliza o nível de áudio de 0 a 100 aplicando o ganho de entrada
-          const currentLevel = Math.min(
-            100,
-            Math.round((avg / 64) * 100 * (micInputGainRef.current / 100))
+
+          let sumSquares = 0;
+          for (let i = 0; i < samples.length; i++) {
+            sumSquares += samples[i] * samples[i];
+          }
+          const rms = Math.sqrt(sumSquares / samples.length);
+          // Decibéis relativos ao fundo de escala: -60 dB (silêncio) a 0 dB (pico máximo)
+          const db = 20 * Math.log10(rms || 0.00001);
+          // Normaliza de 0 a 100 com base na escala perceptiva de decibéis
+          const normalized = Math.max(0, Math.min(100, Math.round(((db + 60) / 60) * 100)));
+          const currentLevel = Math.max(
+            0,
+            Math.min(100, Math.round(normalized * (micInputGainRef.current / 100)))
           );
           const threshold = voiceActivationThresholdRef.current;
 
@@ -638,7 +649,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               emitLocalVoiceState();
             }
           } else {
-            // Se caiu abaixo do limiar, aplica cauda de fala de 250ms antes de fechar o microfone
+            // Se caiu abaixo do limiar, aplica cauda de fala de 280ms antes de fechar o microfone
             if (isLocalSpeakingRef.current && hangoverTimeout === null) {
               hangoverTimeout = window.setTimeout(() => {
                 hangoverTimeout = null;
@@ -648,10 +659,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 isLocalSpeakingRef.current = false;
                 syncVoiceState();
                 emitLocalVoiceState();
-              }, 250);
+              }, 280);
             }
           }
-        }, 45);
+        }, 40);
 
         vadCleanupRef.current = () => {
           clearInterval(interval);
