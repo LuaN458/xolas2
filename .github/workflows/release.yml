@@ -30,5 +30,6 @@ jobs:
       - name: Compilar e Publicar Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: client
-        run: npm run release
+        run: |
+          npm --prefix client run build
+          npx electron-builder --projectDir client --win --publish always

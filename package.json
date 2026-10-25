@@ -11,10 +11,12 @@
     "client:dev": "npm --prefix client run dev",
     "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
     "build": "npm --prefix server run build && npm --prefix client run build",
-    "dist:win": "npm --prefix client run dist:win"
+    "dist:win": "npm --prefix client run dist:win",
+    "release": "npm --prefix client run build && electron-builder --projectDir client --win --publish always"
   },
   "devDependencies": {
     "concurrently": "^9.2.5",
-    "electron": "34.0.0"
+    "electron": "34.0.0",
+    "electron-builder": "^26.18.0"
   }
 }

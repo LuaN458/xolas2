@@ -38,8 +38,7 @@
       ],
       "artifactName": "Xolas-${version}-${arch}.${ext}",
       "requestedExecutionLevel": "asInvoker",
-      "legalTrademarks": "Xolas",
-      "publisherName": "Xolas"
+      "legalTrademarks": "Xolas"
     },
     "nsis": {
       "oneClick": false,
