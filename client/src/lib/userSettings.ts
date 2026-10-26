@@ -40,13 +40,27 @@ export const DEFAULT_USER_SETTINGS: UserAudioSettings = {
 };
 
 /**
- * Converte aceleradores do Electron (ex: 'CommandOrControl+Shift+M') em lista legível para UI (ex: ['Ctrl', 'Shift', 'M']).
+ * Converte aceleradores do Electron (ex: 'CommandOrControl+Shift+M' ou 'ShiftLeft') em lista legível para UI.
  */
 export function formatAcceleratorForDisplay(accelerator: string): string[] {
   if (!accelerator || !accelerator.trim()) return [];
   const parts = accelerator.split('+').map((p) => p.trim());
   return parts.map((part) => {
     switch (part.toLowerCase()) {
+      case 'shiftleft':
+        return 'Shift (Esq)';
+      case 'shiftright':
+        return 'Shift (Dir)';
+      case 'controlleft':
+      case 'ctrlleft':
+        return 'Ctrl (Esq)';
+      case 'controlright':
+      case 'ctrlright':
+        return 'Ctrl (Dir)';
+      case 'altleft':
+        return 'Alt';
+      case 'altright':
+        return 'Alt Gr';
       case 'commandorcontrol':
       case 'ctrl':
       case 'control':
@@ -60,6 +74,8 @@ export function formatAcceleratorForDisplay(accelerator: string): string[] {
         return 'Win';
       case 'space':
         return 'Espaço';
+      case 'capslock':
+        return 'Caps Lock';
       default:
         return part.length === 1 ? part.toUpperCase() : part;
     }
@@ -67,13 +83,26 @@ export function formatAcceleratorForDisplay(accelerator: string): string[] {
 }
 
 /**
- * Converte um KeyboardEvent do navegador em acelerador compatível com o Electron.
- * Retorna null caso apenas modificadores estejam sendo pressionados (aguardando a tecla principal).
+ * Converte um KeyboardEvent do navegador em acelerador compatível com o Electron ou tecla física direta (ex: 'ShiftLeft').
+ * Se allowSingleModifier for true (ou no keyup/registro direto), permite teclas individuais como ShiftLeft, ControlLeft, etc.
  */
-export function keyboardEventToAccelerator(e: KeyboardEvent): string | null {
-  const isModifierOnly = ['Control', 'Shift', 'Alt', 'Meta'].includes(e.key);
-  if (isModifierOnly) {
-    return null;
+export function keyboardEventToAccelerator(e: KeyboardEvent, allowSingleModifier: boolean = true): string | null {
+  if (e.key === 'Escape') {
+    return null; // Tecla Escape cancela gravação
+  }
+
+  const isModifierKey = ['Shift', 'Control', 'Alt', 'Meta'].includes(e.key);
+
+  // Se for tecla modificadora isolada
+  if (isModifierKey) {
+    if (!allowSingleModifier) return null;
+    if (e.code === 'ShiftLeft') return 'ShiftLeft';
+    if (e.code === 'ShiftRight') return 'ShiftRight';
+    if (e.code === 'ControlLeft') return 'ControlLeft';
+    if (e.code === 'ControlRight') return 'ControlRight';
+    if (e.code === 'AltLeft') return 'AltLeft';
+    if (e.code === 'AltRight') return 'AltRight';
+    return e.code || e.key;
   }
 
   const parts: string[] = [];
@@ -94,10 +123,10 @@ export function keyboardEventToAccelerator(e: KeyboardEvent): string | null {
     mainKey = mainKey.toUpperCase();
   } else if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(mainKey)) {
     mainKey = mainKey.toUpperCase();
-  } else if (mainKey === ' ') {
+  } else if (mainKey === ' ' || e.code === 'Space') {
     mainKey = 'Space';
-  } else if (mainKey === 'Escape') {
-    return null; // Não permitir vincular a tecla Escape (usada para cancelar gravação)
+  } else if (e.code === 'CapsLock') {
+    mainKey = 'CapsLock';
   }
 
   parts.push(mainKey);

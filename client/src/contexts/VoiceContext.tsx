@@ -1564,10 +1564,22 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const hasModifiers = e.ctrlKey || e.metaKey || e.altKey;
       if (isInput && !hasModifiers) return;
 
-      if (muteKey && currentAcc.toLowerCase() === muteKey.toLowerCase()) {
+      const matchesKey = (targetShortcut?: string): boolean => {
+        if (!targetShortcut) return false;
+        const normTarget = targetShortcut.trim().toLowerCase();
+        const normAcc = currentAcc.toLowerCase();
+        const normCode = (e.code || '').toLowerCase();
+        if (normAcc === normTarget || normCode === normTarget) return true;
+        if (normTarget === 'shift' && (normCode === 'shiftleft' || normCode === 'shiftright')) return true;
+        if (normTarget === 'ctrl' && (normCode === 'controlleft' || normCode === 'controlright')) return true;
+        if (normTarget === 'alt' && (normCode === 'altleft' || normCode === 'altright')) return true;
+        return false;
+      };
+
+      if (matchesKey(muteKey)) {
         e.preventDefault();
         toggleMute();
-      } else if (deafenKey && currentAcc.toLowerCase() === deafenKey.toLowerCase()) {
+      } else if (matchesKey(deafenKey)) {
         e.preventDefault();
         toggleDeafen();
       }

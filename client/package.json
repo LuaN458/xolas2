@@ -1,7 +1,7 @@
 {
   "name": "xolas",
   "productName": "Xolas",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "description": "Xolas - Aplicativo Desktop de Comunicação e Transmissão Studio Obsidian",
   "author": "Xolas",
   "type": "module",
@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite",
     "compile:audio": "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /optimize+ /out:electron\\wasapi-loopback.exe electron\\wasapi-loopback.cs",
-    "build": "npm run compile:audio && tsc && vite build",
+    "compile:hotkey": "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /optimize+ /out:electron\\hotkey-helper.exe electron\\hotkey-helper.cs",
+    "build": "npm run compile:audio && npm run compile:hotkey && tsc && vite build",
     "preview": "vite preview",
     "pack": "npm run build && electron-builder --dir",
     "dist:win": "npm run build && electron-builder --win nsis",
@@ -31,6 +32,10 @@
       {
         "from": "electron/wasapi-loopback.exe",
         "to": "wasapi-loopback.exe"
+      },
+      {
+        "from": "electron/hotkey-helper.exe",
+        "to": "hotkey-helper.exe"
       }
     ],
     "publish": {
@@ -49,9 +54,9 @@
       "legalTrademarks": "Xolas"
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Xolas",

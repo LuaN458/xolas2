@@ -29,6 +29,7 @@ const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 let audioCaptureProcess: ChildProcess | null = null;
+let hotkeyHelperProcess: ChildProcess | null = null;
 
 function stopProcessAudioCapture() {
   if (audioCaptureProcess) {
@@ -41,12 +42,39 @@ function stopProcessAudioCapture() {
   }
 }
 
+function stopHotkeyHelper() {
+  if (hotkeyHelperProcess) {
+    try {
+      hotkeyHelperProcess.stdout?.removeAllListeners();
+      hotkeyHelperProcess.stderr?.removeAllListeners();
+      hotkeyHelperProcess.kill();
+    } catch {}
+    hotkeyHelperProcess = null;
+  }
+}
+
 function getWasapiHelperPath(): string {
   const candidates = [
     process.resourcesPath ? path.join(process.resourcesPath, 'wasapi-loopback.exe') : '',
     path.join(__dirname, 'wasapi-loopback.exe'),
     path.join(__dirname, '../electron/wasapi-loopback.exe'),
     path.join(app.getAppPath(), 'electron/wasapi-loopback.exe'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0];
+}
+
+function getHotkeyHelperPath(): string {
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'hotkey-helper.exe') : '',
+    path.join(__dirname, 'hotkey-helper.exe'),
+    path.join(__dirname, '../electron/hotkey-helper.exe'),
+    path.join(app.getAppPath(), 'electron/hotkey-helper.exe'),
   ].filter(Boolean);
 
   for (const candidate of candidates) {
@@ -174,6 +202,7 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     stopProcessAudioCapture();
+    stopHotkeyHelper();
     mainWindow = null;
   });
 }
@@ -208,7 +237,7 @@ ipcMain.handle('check-for-updates', async () => {
 });
 
 ipcMain.handle('restart-and-install', () => {
-  autoUpdater.quitAndInstall(false, true);
+  autoUpdater.quitAndInstall(true, true);
 });
 
 ipcMain.handle('get-app-version', () => {
@@ -333,31 +362,89 @@ ipcMain.handle('stop-process-audio-capture', () => {
 ipcMain.handle('register-global-hotkeys', (_event, hotkeys: Record<string, string>) => {
   try {
     globalShortcut.unregisterAll();
+    stopHotkeyHelper();
     const registered: string[] = [];
 
     if (!hotkeys || typeof hotkeys !== 'object') {
       return { success: true, registered: [] };
     }
 
+    const helperArgs: string[] = [];
+
     for (const [action, accelerator] of Object.entries(hotkeys)) {
       if (!accelerator || typeof accelerator !== 'string' || !accelerator.trim()) {
         continue;
       }
 
-      try {
-        const ok = globalShortcut.register(accelerator.trim(), () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('hotkey-trigger', action);
-          }
-        });
+      const cleanAcc = accelerator.trim();
+      // Teclas modificadoras isoladas (ShiftLeft, ControlRight, etc.) não são registradas pelo globalShortcut do Electron
+      const isSingleModifier = /^(ShiftLeft|ShiftRight|ControlLeft|ControlRight|AltLeft|AltRight|Shift|Control|Alt)$/i.test(cleanAcc);
 
-        if (ok) {
-          registered.push(action);
-        } else {
-          console.warn(`[GlobalShortcut] Falha ao registrar atalho "${accelerator}" para ação "${action}"`);
+      let ok = false;
+      if (!isSingleModifier) {
+        try {
+          ok = globalShortcut.register(cleanAcc, () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('hotkey-trigger', action);
+            }
+          });
+        } catch {
+          ok = false;
         }
-      } catch (regErr) {
-        console.warn(`[GlobalShortcut] Erro ao registrar atalho "${accelerator}":`, regErr);
+      }
+
+      if (ok) {
+        registered.push(action);
+      } else {
+        // Envia para o helper nativo de hook global de baixo nível (WH_KEYBOARD_LL)
+        helperArgs.push(`--${action}`, cleanAcc);
+      }
+    }
+
+    if (helperArgs.length > 0) {
+      const exePath = getHotkeyHelperPath();
+      if (fs.existsSync(exePath)) {
+        try {
+          const child = spawn(exePath, helperArgs, {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            windowsHide: true,
+          });
+          hotkeyHelperProcess = child;
+
+          let buffer = '';
+          child.stdout?.on('data', (chunk: Buffer) => {
+            buffer += chunk.toString();
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+              const triggeredAction = line.trim();
+              if (triggeredAction && mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('hotkey-trigger', triggeredAction);
+              }
+            }
+          });
+
+          child.stderr?.on('data', (data: Buffer) => {
+            const msg = data.toString().trim();
+            if (msg) {
+              console.log('[HotkeyHelper]', msg);
+            }
+          });
+
+          child.on('exit', () => {
+            if (hotkeyHelperProcess === child) {
+              hotkeyHelperProcess = null;
+            }
+          });
+
+          for (let i = 0; i < helperArgs.length; i += 2) {
+            registered.push(helperArgs[i].replace(/^--/, ''));
+          }
+        } catch (hErr) {
+          console.warn('[HotkeyHelper] Erro ao iniciar processo nativo:', hErr);
+        }
+      } else {
+        console.warn('[HotkeyHelper] Executável não encontrado em:', exePath);
       }
     }
 
@@ -393,6 +480,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopProcessAudioCapture();
+  stopHotkeyHelper();
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -403,6 +491,7 @@ app.on('will-quit', () => {
     globalShortcut.unregisterAll();
   } catch {}
   stopProcessAudioCapture();
+  stopHotkeyHelper();
 });
 
 app.on('activate', () => {

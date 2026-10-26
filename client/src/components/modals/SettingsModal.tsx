@@ -67,9 +67,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   // Estados de Teclas de Atalho
   const [keybindings, setKeybindings] = useState<UserKeybindings>(() => getUserSettings().keybindings);
   const [recordingAction, setRecordingAction] = useState<'toggleMute' | 'toggleDeafen' | null>(null);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const lastModifierRef = useRef<string | null>(null);
+  const nonModifierPressedRef = useRef<boolean>(false);
 
   useEffect(() => {
-    if (!recordingAction) return;
+    if (!recordingAction) {
+      setPendingKey(null);
+      lastModifierRef.current = null;
+      nonModifierPressedRef.current = false;
+      return;
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
@@ -77,10 +85,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
       if (e.key === 'Escape') {
         setRecordingAction(null);
+        setPendingKey(null);
+        lastModifierRef.current = null;
+        nonModifierPressedRef.current = false;
         return;
       }
 
-      const accelerator = keyboardEventToAccelerator(e);
+      const isModifier = ['Shift', 'Control', 'Alt', 'Meta'].includes(e.key);
+
+      if (isModifier) {
+        let modName = e.code;
+        if (e.code === 'ShiftLeft') modName = 'ShiftLeft';
+        else if (e.code === 'ShiftRight') modName = 'ShiftRight';
+        else if (e.code === 'ControlLeft') modName = 'ControlLeft';
+        else if (e.code === 'ControlRight') modName = 'ControlRight';
+        else if (e.code === 'AltLeft') modName = 'AltLeft';
+        else if (e.code === 'AltRight') modName = 'AltRight';
+
+        lastModifierRef.current = modName;
+        setPendingKey(modName);
+        return;
+      }
+
+      nonModifierPressedRef.current = true;
+      const accelerator = keyboardEventToAccelerator(e, false);
       if (accelerator) {
         const updated: UserKeybindings = {
           ...keybindings,
@@ -89,12 +117,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         setKeybindings(updated);
         saveUserSetting('keybindings', updated);
         setRecordingAction(null);
+        setPendingKey(null);
+        lastModifierRef.current = null;
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Se o usuário soltou uma tecla modificadora sem ter pressionado nenhuma outra tecla junto,
+      // salva essa tecla modificadora como atalho único direto (ex: ShiftLeft)!
+      if (lastModifierRef.current && !nonModifierPressedRef.current) {
+        const singleKey = lastModifierRef.current;
+        const updated: UserKeybindings = {
+          ...keybindings,
+          [recordingAction]: singleKey,
+        };
+        setKeybindings(updated);
+        saveUserSetting('keybindings', updated);
+        setRecordingAction(null);
+        setPendingKey(null);
+        lastModifierRef.current = null;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
     };
   }, [recordingAction, keybindings]);
 
@@ -105,7 +157,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     };
     setKeybindings(updated);
     saveUserSetting('keybindings', updated);
-    if (recordingAction === action) setRecordingAction(null);
+    if (recordingAction === action) {
+      setRecordingAction(null);
+      setPendingKey(null);
+    }
   };
 
   const handleResetKeybinding = (action: 'toggleMute' | 'toggleDeafen') => {
@@ -115,7 +170,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     };
     setKeybindings(updated);
     saveUserSetting('keybindings', updated);
-    if (recordingAction === action) setRecordingAction(null);
+    if (recordingAction === action) {
+      setRecordingAction(null);
+      setPendingKey(null);
+    }
   };
 
   // Estados de Foto de Perfil (Avatar Studio)
@@ -1280,16 +1338,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <button
                       type="button"
                       onClick={() => setRecordingAction(recordingAction === 'toggleMute' ? null : 'toggleMute')}
-                      className={`min-w-[140px] px-3 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                      className={`min-w-[150px] px-3.5 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
                         recordingAction === 'toggleMute'
                           ? 'bg-purple-600/20 border-purple-500 text-purple-300 ring-2 ring-purple-500/40 animate-pulse'
                           : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-white hover:border-obsidian-accent/50'
                       }`}
                     >
                       {recordingAction === 'toggleMute' ? (
-                        <span className="font-semibold text-purple-300 animate-pulse">
-                          Pressione as teclas...
-                        </span>
+                        pendingKey ? (
+                          <div className="flex items-center space-x-1 animate-pulse">
+                            {formatAcceleratorForDisplay(pendingKey).map((key, i) => (
+                              <kbd
+                                key={i}
+                                className="px-2 py-0.5 bg-purple-600/30 border border-purple-400 text-purple-200 rounded-md text-[11px] font-mono font-bold shadow-sm"
+                              >
+                                {key}
+                              </kbd>
+                            ))}
+                            <span className="text-[10px] text-purple-300 ml-1">solte para fixar</span>
+                          </div>
+                        ) : (
+                          <span className="font-semibold text-purple-300 animate-pulse">
+                            Pressione a tecla...
+                          </span>
+                        )
                       ) : keybindings.toggleMute ? (
                         <div className="flex items-center space-x-1">
                           {formatAcceleratorForDisplay(keybindings.toggleMute).map((key, i) => (
@@ -1349,16 +1421,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <button
                       type="button"
                       onClick={() => setRecordingAction(recordingAction === 'toggleDeafen' ? null : 'toggleDeafen')}
-                      className={`min-w-[140px] px-3 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                      className={`min-w-[150px] px-3.5 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
                         recordingAction === 'toggleDeafen'
                           ? 'bg-purple-600/20 border-purple-500 text-purple-300 ring-2 ring-purple-500/40 animate-pulse'
                           : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-white hover:border-obsidian-accent/50'
                       }`}
                     >
                       {recordingAction === 'toggleDeafen' ? (
-                        <span className="font-semibold text-purple-300 animate-pulse">
-                          Pressione as teclas...
-                        </span>
+                        pendingKey ? (
+                          <div className="flex items-center space-x-1 animate-pulse">
+                            {formatAcceleratorForDisplay(pendingKey).map((key, i) => (
+                              <kbd
+                                key={i}
+                                className="px-2 py-0.5 bg-purple-600/30 border border-purple-400 text-purple-200 rounded-md text-[11px] font-mono font-bold shadow-sm"
+                              >
+                                {key}
+                              </kbd>
+                            ))}
+                            <span className="text-[10px] text-purple-300 ml-1">solte para fixar</span>
+                          </div>
+                        ) : (
+                          <span className="font-semibold text-purple-300 animate-pulse">
+                            Pressione a tecla...
+                          </span>
+                        )
                       ) : keybindings.toggleDeafen ? (
                         <div className="flex items-center space-x-1">
                           {formatAcceleratorForDisplay(keybindings.toggleDeafen).map((key, i) => (
