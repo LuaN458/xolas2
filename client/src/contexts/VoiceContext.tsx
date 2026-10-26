@@ -7,6 +7,7 @@ import {
   saveUserSetting,
   subscribeToSettingsChange,
   resolveAudioDevice,
+  keyboardEventToAccelerator,
   UserAudioSettings,
 } from '../lib/userSettings';
 
@@ -93,6 +94,57 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
 ];
+
+// Feedback sonoro suave estilo Discord para alternância de mudo e ensordecer
+function playAudioCue(type: 'mute' | 'unmute' | 'deafen' | 'undeafen') {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.12, now);
+
+    if (type === 'mute') {
+      // Tom duplo descendente suave (550Hz -> 420Hz)
+      osc.frequency.setValueAtTime(550, now);
+      osc.frequency.exponentialRampToValueAtTime(420, now + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } else if (type === 'unmute') {
+      // Tom duplo ascendente alegre (420Hz -> 580Hz)
+      osc.frequency.setValueAtTime(420, now);
+      osc.frequency.exponentialRampToValueAtTime(580, now + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } else if (type === 'deafen') {
+      // Tom grave de ensordecer
+      osc.frequency.setValueAtTime(480, now);
+      osc.frequency.exponentialRampToValueAtTime(320, now + 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    } else if (type === 'undeafen') {
+      // Tom ascendente de desensordecer
+      osc.frequency.setValueAtTime(320, now);
+      osc.frequency.exponentialRampToValueAtTime(520, now + 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    }
+
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 300);
+  } catch {}
+}
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
@@ -1427,6 +1479,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (next) {
         isLocalSpeakingRef.current = false;
       }
+      playAudioCue(next ? 'mute' : 'unmute');
       syncVoiceState();
       emitLocalVoiceState();
       return next;
@@ -1449,11 +1502,82 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audioElementsRef.current.forEach((el) => {
         el.volume = next ? 0 : Math.max(0, Math.min(1, masterVolumeRef.current / 100));
       });
+      playAudioCue(next ? 'deafen' : 'undeafen');
       syncVoiceState();
       emitLocalVoiceState();
       return next;
     });
   }, [syncVoiceState, emitLocalVoiceState]);
+
+  // Sincronizar atalhos de teclado globais no Electron
+  useEffect(() => {
+    const registerHotkeys = (settings: UserAudioSettings) => {
+      if (window.electronAPI?.registerGlobalHotkeys && settings.keybindings) {
+        window.electronAPI.registerGlobalHotkeys({
+          toggleMute: settings.keybindings.toggleMute,
+          toggleDeafen: settings.keybindings.toggleDeafen,
+        }).catch(() => {});
+      }
+    };
+
+    registerHotkeys(getUserSettings());
+
+    const unsubscribe = subscribeToSettingsChange((newSettings) => {
+      registerHotkeys(newSettings);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Ouvinte de disparo de atalhos globais via IPC do Electron
+  useEffect(() => {
+    if (!window.electronAPI?.onHotkeyTrigger) return;
+
+    const unreg = window.electronAPI.onHotkeyTrigger((action: string) => {
+      if (action === 'toggleMute') {
+        toggleMute();
+      } else if (action === 'toggleDeafen') {
+        toggleDeafen();
+      }
+    });
+
+    return unreg;
+  }, [toggleMute, toggleDeafen]);
+
+  // Ouvinte de atalhos in-app via teclado (para quando a janela estiver em foco ou no navegador)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+
+      const settings = getUserSettings();
+      const muteKey = settings.keybindings?.toggleMute;
+      const deafenKey = settings.keybindings?.toggleDeafen;
+
+      const currentAcc = keyboardEventToAccelerator(e);
+      if (!currentAcc) return;
+
+      const hasModifiers = e.ctrlKey || e.metaKey || e.altKey;
+      if (isInput && !hasModifiers) return;
+
+      if (muteKey && currentAcc.toLowerCase() === muteKey.toLowerCase()) {
+        e.preventDefault();
+        toggleMute();
+      } else if (deafenKey && currentAcc.toLowerCase() === deafenKey.toLowerCase()) {
+        e.preventDefault();
+        toggleDeafen();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [toggleMute, toggleDeafen]);
 
   const stopScreenShare = useCallback(() => {
     const ch = currentChannelRef.current;

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, shell, session } from 'electron';
+import { app, BrowserWindow, ipcMain, desktopCapturer, shell, session, globalShortcut } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
@@ -329,6 +329,45 @@ ipcMain.handle('stop-process-audio-capture', () => {
   return { stopped: true };
 });
 
+// Gerenciamento de Atalhos Globais de Teclado (Global Hotkeys)
+ipcMain.handle('register-global-hotkeys', (_event, hotkeys: Record<string, string>) => {
+  try {
+    globalShortcut.unregisterAll();
+    const registered: string[] = [];
+
+    if (!hotkeys || typeof hotkeys !== 'object') {
+      return { success: true, registered: [] };
+    }
+
+    for (const [action, accelerator] of Object.entries(hotkeys)) {
+      if (!accelerator || typeof accelerator !== 'string' || !accelerator.trim()) {
+        continue;
+      }
+
+      try {
+        const ok = globalShortcut.register(accelerator.trim(), () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('hotkey-trigger', action);
+          }
+        });
+
+        if (ok) {
+          registered.push(action);
+        } else {
+          console.warn(`[GlobalShortcut] Falha ao registrar atalho "${accelerator}" para ação "${action}"`);
+        }
+      } catch (regErr) {
+        console.warn(`[GlobalShortcut] Erro ao registrar atalho "${accelerator}":`, regErr);
+      }
+    }
+
+    return { success: true, registered };
+  } catch (err: any) {
+    console.error('[GlobalShortcut] Erro geral ao registrar atalhos:', err);
+    return { success: false, error: err?.message || String(err), registered: [] };
+  }
+});
+
 app.whenReady().then(() => {
   try {
     session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
@@ -357,6 +396,13 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('will-quit', () => {
+  try {
+    globalShortcut.unregisterAll();
+  } catch {}
+  stopProcessAudioCapture();
 });
 
 app.on('activate', () => {

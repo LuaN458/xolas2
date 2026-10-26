@@ -1,3 +1,8 @@
+export interface UserKeybindings {
+  toggleMute: string;
+  toggleDeafen: string;
+}
+
 export interface UserAudioSettings {
   selectedAudioDeviceId: string;
   selectedAudioDeviceLabel: string;
@@ -9,10 +14,16 @@ export interface UserAudioSettings {
   screenResolution: '720p' | '1080p';
   screenFps: 30 | 60;
   screenIncludeAudio: boolean;
+  keybindings: UserKeybindings;
 }
 
 const SETTINGS_STORAGE_KEY = 'xolas_user_audio_settings';
 const SETTINGS_EVENT_NAME = 'xolas_settings_updated';
+
+export const DEFAULT_USER_KEYBINDINGS: UserKeybindings = {
+  toggleMute: 'CommandOrControl+Shift+M',
+  toggleDeafen: 'CommandOrControl+Shift+D',
+};
 
 export const DEFAULT_USER_SETTINGS: UserAudioSettings = {
   selectedAudioDeviceId: 'default',
@@ -25,7 +36,73 @@ export const DEFAULT_USER_SETTINGS: UserAudioSettings = {
   screenResolution: '1080p',
   screenFps: 60,
   screenIncludeAudio: true,
+  keybindings: DEFAULT_USER_KEYBINDINGS,
 };
+
+/**
+ * Converte aceleradores do Electron (ex: 'CommandOrControl+Shift+M') em lista legível para UI (ex: ['Ctrl', 'Shift', 'M']).
+ */
+export function formatAcceleratorForDisplay(accelerator: string): string[] {
+  if (!accelerator || !accelerator.trim()) return [];
+  const parts = accelerator.split('+').map((p) => p.trim());
+  return parts.map((part) => {
+    switch (part.toLowerCase()) {
+      case 'commandorcontrol':
+      case 'ctrl':
+      case 'control':
+        return 'Ctrl';
+      case 'shift':
+        return 'Shift';
+      case 'alt':
+        return 'Alt';
+      case 'super':
+      case 'meta':
+        return 'Win';
+      case 'space':
+        return 'Espaço';
+      default:
+        return part.length === 1 ? part.toUpperCase() : part;
+    }
+  });
+}
+
+/**
+ * Converte um KeyboardEvent do navegador em acelerador compatível com o Electron.
+ * Retorna null caso apenas modificadores estejam sendo pressionados (aguardando a tecla principal).
+ */
+export function keyboardEventToAccelerator(e: KeyboardEvent): string | null {
+  const isModifierOnly = ['Control', 'Shift', 'Alt', 'Meta'].includes(e.key);
+  if (isModifierOnly) {
+    return null;
+  }
+
+  const parts: string[] = [];
+
+  if (e.ctrlKey || e.metaKey) {
+    parts.push('CommandOrControl');
+  }
+  if (e.shiftKey) {
+    parts.push('Shift');
+  }
+  if (e.altKey) {
+    parts.push('Alt');
+  }
+
+  let mainKey = e.key;
+
+  if (mainKey.length === 1) {
+    mainKey = mainKey.toUpperCase();
+  } else if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(mainKey)) {
+    mainKey = mainKey.toUpperCase();
+  } else if (mainKey === ' ') {
+    mainKey = 'Space';
+  } else if (mainKey === 'Escape') {
+    return null; // Não permitir vincular a tecla Escape (usada para cancelar gravação)
+  }
+
+  parts.push(mainKey);
+  return parts.join('+');
+}
 
 /**
  * Carrega as preferências salvas no localStorage com suporte a fallbacks seguros e chaves legadas.
@@ -45,6 +122,12 @@ export function getUserSettings(): UserAudioSettings {
     const thresholdVal = Number(parsed.voiceActivationThreshold ?? DEFAULT_USER_SETTINGS.voiceActivationThreshold);
     const fpsVal = Number(parsed.screenFps ?? DEFAULT_USER_SETTINGS.screenFps);
 
+    const rawKeybindings = parsed.keybindings || {};
+    const keybindings: UserKeybindings = {
+      toggleMute: rawKeybindings.toggleMute !== undefined ? rawKeybindings.toggleMute : DEFAULT_USER_KEYBINDINGS.toggleMute,
+      toggleDeafen: rawKeybindings.toggleDeafen !== undefined ? rawKeybindings.toggleDeafen : DEFAULT_USER_KEYBINDINGS.toggleDeafen,
+    };
+
     return {
       selectedAudioDeviceId: parsed.selectedAudioDeviceId || legacyDevice || DEFAULT_USER_SETTINGS.selectedAudioDeviceId,
       selectedAudioDeviceLabel: parsed.selectedAudioDeviceLabel || '',
@@ -56,6 +139,7 @@ export function getUserSettings(): UserAudioSettings {
       screenResolution: parsed.screenResolution === '720p' ? '720p' : '1080p',
       screenFps: fpsVal === 30 ? 30 : 60,
       screenIncludeAudio: parsed.screenIncludeAudio !== undefined ? Boolean(parsed.screenIncludeAudio) : DEFAULT_USER_SETTINGS.screenIncludeAudio,
+      keybindings,
     };
   } catch (err) {
     console.warn('Erro ao carregar configurações do usuário:', err);

@@ -84,6 +84,8 @@ declare global {
       startProcessAudioCapture?: (sourceId?: string) => Promise<{ started: boolean; mode?: string; reason?: string }>;
       stopProcessAudioCapture?: () => Promise<{ stopped: boolean }>;
       onProcessAudioChunk?: (callback: (chunk: Uint8Array) => void) => () => void;
+      registerGlobalHotkeys?: (hotkeys: Record<string, string>) => Promise<{ success: boolean; registered: string[] }>;
+      onHotkeyTrigger?: (callback: (action: string) => void) => () => void;
     };
   }
 }

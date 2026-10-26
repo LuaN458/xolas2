@@ -43,4 +43,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('process-audio-chunk', handler);
     return () => ipcRenderer.removeListener('process-audio-chunk', handler);
   },
+  registerGlobalHotkeys: (hotkeys: Record<string, string>) =>
+    ipcRenderer.invoke('register-global-hotkeys', hotkeys),
+  onHotkeyTrigger: (callback: (action: string) => void) => {
+    const handler = (_event: any, action: string) => callback(action);
+    ipcRenderer.on('hotkey-trigger', handler);
+    return () => ipcRenderer.removeListener('hotkey-trigger', handler);
+  },
 });

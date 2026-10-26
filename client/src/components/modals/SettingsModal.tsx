@@ -22,7 +22,19 @@ import {
   Shuffle,
   Link,
   Trash2,
+  Keyboard,
+  RotateCcw,
+  VolumeX,
+  MicOff,
 } from 'lucide-react';
+import {
+  getUserSettings,
+  saveUserSetting,
+  formatAcceleratorForDisplay,
+  keyboardEventToAccelerator,
+  DEFAULT_USER_KEYBINDINGS,
+  UserKeybindings,
+} from '../../lib/userSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -47,10 +59,64 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setVoiceActivationThreshold,
   } = useVoice();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'audio' | 'updates'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'audio' | 'updates' | 'keybindings'>('profile');
   const [newNickname, setNewNickname] = useState(user?.username || '');
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Estados de Teclas de Atalho
+  const [keybindings, setKeybindings] = useState<UserKeybindings>(() => getUserSettings().keybindings);
+  const [recordingAction, setRecordingAction] = useState<'toggleMute' | 'toggleDeafen' | null>(null);
+
+  useEffect(() => {
+    if (!recordingAction) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === 'Escape') {
+        setRecordingAction(null);
+        return;
+      }
+
+      const accelerator = keyboardEventToAccelerator(e);
+      if (accelerator) {
+        const updated: UserKeybindings = {
+          ...keybindings,
+          [recordingAction]: accelerator,
+        };
+        setKeybindings(updated);
+        saveUserSetting('keybindings', updated);
+        setRecordingAction(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [recordingAction, keybindings]);
+
+  const handleClearKeybinding = (action: 'toggleMute' | 'toggleDeafen') => {
+    const updated: UserKeybindings = {
+      ...keybindings,
+      [action]: '',
+    };
+    setKeybindings(updated);
+    saveUserSetting('keybindings', updated);
+    if (recordingAction === action) setRecordingAction(null);
+  };
+
+  const handleResetKeybinding = (action: 'toggleMute' | 'toggleDeafen') => {
+    const updated: UserKeybindings = {
+      ...keybindings,
+      [action]: DEFAULT_USER_KEYBINDINGS[action],
+    };
+    setKeybindings(updated);
+    saveUserSetting('keybindings', updated);
+    if (recordingAction === action) setRecordingAction(null);
+  };
 
   // Estados de Foto de Perfil (Avatar Studio)
   const [previewAvatar, setPreviewAvatar] = useState<string>(user?.avatarUrl || '');
@@ -562,6 +628,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           >
             <Sparkles className="w-4 h-4 text-indigo-400" />
             <span>Atualizações</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('keybindings')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
+              activeTab === 'keybindings'
+                ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
+                : 'text-obsidian-text-secondary border-transparent hover:text-white hover:bg-obsidian-card/60'
+            }`}
+          >
+            <Keyboard className="w-4 h-4 text-purple-400" />
+            <span>Teclas de Atalho</span>
           </button>
         </div>
 
@@ -1153,6 +1231,180 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   <span className="font-semibold text-emerald-300 block">Atualizações Automáticas Ativas</span>
                   <p className="text-[11px] text-emerald-300/80 leading-relaxed">
                     O Xolas verifica o repositório silenciosamente a cada 2 horas. Quando houver uma nova versão, ela será baixada automaticamente em segundo plano e você receberá uma notificação na tela para reiniciar o aplicativo.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Aba: Teclas de Atalho */}
+          {activeTab === 'keybindings' && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* Cabeçalho do Card */}
+              <div className="p-5 bg-obsidian-card rounded-2xl border border-obsidian-border space-y-4">
+                <div className="flex items-center space-x-3.5">
+                  <div className="p-3 rounded-2xl bg-purple-600/20 border border-purple-500/30 text-purple-400 shadow-inner">
+                    <Keyboard className="w-5 h-5 text-purple-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white tracking-wide">
+                      Teclas de Atalho Globais
+                    </h3>
+                    <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                      Configure atalhos de teclado para controlar o microfone e som. Os atalhos funcionam globalmente no Windows, mesmo com jogos em tela cheia ou com o app minimizado.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista de Atalhos Disponíveis */}
+              <div className="space-y-3">
+                {/* 1. Silenciar / Ativar Microfone */}
+                <div className="p-4 bg-obsidian-card rounded-2xl border border-obsidian-border flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-start space-x-3">
+                    <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0 mt-0.5">
+                      <Mic className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white flex items-center space-x-2">
+                        <span>Silenciar Microfone</span>
+                        <span className="text-[10px] text-obsidian-text-muted font-normal">(Alternar Mudo)</span>
+                      </h4>
+                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                        Liga ou silencia o microfone com confirmação sonora de bipe suave.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setRecordingAction(recordingAction === 'toggleMute' ? null : 'toggleMute')}
+                      className={`min-w-[140px] px-3 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                        recordingAction === 'toggleMute'
+                          ? 'bg-purple-600/20 border-purple-500 text-purple-300 ring-2 ring-purple-500/40 animate-pulse'
+                          : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-white hover:border-obsidian-accent/50'
+                      }`}
+                    >
+                      {recordingAction === 'toggleMute' ? (
+                        <span className="font-semibold text-purple-300 animate-pulse">
+                          Pressione as teclas...
+                        </span>
+                      ) : keybindings.toggleMute ? (
+                        <div className="flex items-center space-x-1">
+                          {formatAcceleratorForDisplay(keybindings.toggleMute).map((key, i) => (
+                            <React.Fragment key={i}>
+                              {i > 0 && <span className="text-obsidian-text-muted text-[10px]">+</span>}
+                              <kbd className="px-2 py-0.5 bg-obsidian-card border border-obsidian-border rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
+                                {key}
+                              </kbd>
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-obsidian-text-muted italic">Nenhum atalho</span>
+                      )}
+                    </button>
+
+                    {keybindings.toggleMute && (
+                      <button
+                        type="button"
+                        onClick={() => handleClearKeybinding('toggleMute')}
+                        className="p-2 rounded-xl bg-obsidian-surface hover:bg-rose-500/10 border border-obsidian-border hover:border-rose-500/30 text-obsidian-text-muted hover:text-rose-400 transition-colors"
+                        title="Limpar atalho"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleResetKeybinding('toggleMute')}
+                      className="p-2 rounded-xl bg-obsidian-surface hover:bg-obsidian-card border border-obsidian-border text-obsidian-text-muted hover:text-white transition-colors"
+                      title="Restaurar padrão (Ctrl+Shift+M)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Ensordecer / Desensordecer Áudio */}
+                <div className="p-4 bg-obsidian-card rounded-2xl border border-obsidian-border flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-start space-x-3">
+                    <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shrink-0 mt-0.5">
+                      <Volume2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-white flex items-center space-x-2">
+                        <span>Ensordecer Áudio</span>
+                        <span className="text-[10px] text-obsidian-text-muted font-normal">(Alternar Ensordecer)</span>
+                      </h4>
+                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                        Muta seu microfone e silencia todo o áudio recebido da chamada de voz.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setRecordingAction(recordingAction === 'toggleDeafen' ? null : 'toggleDeafen')}
+                      className={`min-w-[140px] px-3 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                        recordingAction === 'toggleDeafen'
+                          ? 'bg-purple-600/20 border-purple-500 text-purple-300 ring-2 ring-purple-500/40 animate-pulse'
+                          : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-white hover:border-obsidian-accent/50'
+                      }`}
+                    >
+                      {recordingAction === 'toggleDeafen' ? (
+                        <span className="font-semibold text-purple-300 animate-pulse">
+                          Pressione as teclas...
+                        </span>
+                      ) : keybindings.toggleDeafen ? (
+                        <div className="flex items-center space-x-1">
+                          {formatAcceleratorForDisplay(keybindings.toggleDeafen).map((key, i) => (
+                            <React.Fragment key={i}>
+                              {i > 0 && <span className="text-obsidian-text-muted text-[10px]">+</span>}
+                              <kbd className="px-2 py-0.5 bg-obsidian-card border border-obsidian-border rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
+                                {key}
+                              </kbd>
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-obsidian-text-muted italic">Nenhum atalho</span>
+                      )}
+                    </button>
+
+                    {keybindings.toggleDeafen && (
+                      <button
+                        type="button"
+                        onClick={() => handleClearKeybinding('toggleDeafen')}
+                        className="p-2 rounded-xl bg-obsidian-surface hover:bg-rose-500/10 border border-obsidian-border hover:border-rose-500/30 text-obsidian-text-muted hover:text-rose-400 transition-colors"
+                        title="Limpar atalho"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleResetKeybinding('toggleDeafen')}
+                      className="p-2 rounded-xl bg-obsidian-surface hover:bg-obsidian-card border border-obsidian-border text-obsidian-text-muted hover:text-white transition-colors"
+                      title="Restaurar padrão (Ctrl+Shift+D)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dica Informativa */}
+              <div className="p-3.5 bg-purple-500/10 rounded-xl border border-purple-500/20 flex items-start space-x-3 text-xs text-purple-300">
+                <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-purple-400" />
+                <div className="space-y-1">
+                  <span className="font-semibold text-purple-200 block">Atalhos Globais Ativos no Windows</span>
+                  <p className="text-[11px] text-purple-300/80 leading-relaxed">
+                    Você pode pressionar as teclas configuradas a qualquer momento, mesmo quando estiver jogando jogos em tela cheia ou com o Xolas minimizado na bandeja. Pressione <kbd className="px-1.5 py-0.5 bg-obsidian-card border border-purple-500/30 rounded text-[10px] font-mono font-bold text-white">ESC</kbd> para cancelar uma gravação.
                   </p>
                 </div>
               </div>
