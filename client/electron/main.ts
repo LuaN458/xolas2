@@ -17,9 +17,11 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-webrtc-hw-encoding');
+app.commandLine.appendSwitch('enable-webrtc-hw-decoding');
 app.commandLine.appendSwitch(
   'enable-features',
-  'MediaFoundationD3D11VideoCapture,VaapiVideoEncoder,VaapiVideoDecoder,PlatformHEVCDecoderSupport'
+  'MediaFoundationD3D11VideoCapture,MediaFoundationVideoEncodeAcceleration,MediaFoundationVideoDecodeAcceleration,D3D11VideoDecoder,PlatformHEVCDecoderSupport'
 );
 
 const __filename = fileURLToPath(import.meta.url);

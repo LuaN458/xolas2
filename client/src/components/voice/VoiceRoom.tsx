@@ -203,25 +203,6 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     return activeScreenShares.find((s) => s.id === selectedScreenShareId) || null;
   }, [activeScreenShares, selectedScreenShareId]);
 
-  // Filtro anti-retorno no espectador: quando o próprio usuário (ou outro membro da chamada) fala,
-  // mantém o gate ativo durante a fala + 340ms (tempo de ida e volta da rede) para nunca ouvir a própria voz na live
-  const [isSelfEchoGateActive, setIsSelfEchoGateActive] = useState(false);
-  const localParticipantSpeaking = useMemo(
-    () => displayedParticipants.some((p) => p.isLocal && !p.isMuted && p.isSpeaking),
-    [displayedParticipants]
-  );
-
-  useEffect(() => {
-    if (localParticipantSpeaking) {
-      setIsSelfEchoGateActive(true);
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setIsSelfEchoGateActive(false);
-    }, 340);
-    return () => clearTimeout(timer);
-  }, [localParticipantSpeaking]);
-
   return (
     <div className="flex-1 bg-obsidian-bg flex flex-col justify-between overflow-hidden relative">
       {/* Área Central Studio */}
@@ -266,7 +247,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                 stream={activeShare.stream}
                 videoTrack={activeShare.track}
                 volume={
-                  isStreamMuted || (!activeShare.isLocal && isSelfEchoGateActive)
+                  isStreamMuted
                     ? 0
                     : Math.round((streamVolume * masterVolume) / 100)
                 }

@@ -314,40 +314,87 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, []);
 
-  // Otimiza o SDP de vídeo para garantir alto bitrate e partida rápida sem compressão excessiva
-  const boostVideoBitrateSdp = useCallback((sdp?: string): string | undefined => {
-    if (!sdp) return sdp;
-    const lines = sdp.split('\r\n');
-    let inVideoSection = false;
-    const result: string[] = [];
+  // Otimiza o SDP para vídeo adaptativo de alta fidelidade e áudio Opus com FEC (sem perdas e sem travadas)
+  const optimizeWebRtcSdp = useCallback(
+    (sdp?: string, quality?: ScreenQualityOptions): string | undefined => {
+      if (!sdp) return sdp;
+      const currentQuality = quality || screenQualityRef.current;
+      const is1080 = currentQuality.resolution === '1080p';
 
-    for (const line of lines) {
-      if (line.startsWith('m=video ')) {
-        inVideoSection = true;
-        result.push(line);
-        continue;
-      } else if (line.startsWith('m=')) {
-        inVideoSection = false;
+      // Parâmetros adaptativos de vídeo:
+      // min-bitrate suficiente para evitar congelamento durante quedas temporárias de rede
+      const minVideoBitrate = is1080 ? 800 : 500;
+      const startVideoBitrate = is1080 ? 3000 : 1800;
+      const maxVideoBitrate = is1080 ? 7000 : 4000;
+      const bAsBandwidth = is1080 ? 7000 : 4000;
+
+      const lines = sdp.split('\r\n');
+      let currentSection: 'none' | 'audio' | 'video' = 'none';
+      const result: string[] = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        if (line.startsWith('m=audio ')) {
+          currentSection = 'audio';
+          result.push(line);
+          continue;
+        } else if (line.startsWith('m=video ')) {
+          currentSection = 'video';
+          result.push(line);
+          // Injetar b=AS e b=TIAS para sinalizar largura de banda ao WebRTC
+          result.push(`b=AS:${bAsBandwidth}`);
+          result.push(`b=TIAS:${bAsBandwidth * 1000}`);
+          continue;
+        } else if (line.startsWith('m=')) {
+          currentSection = 'none';
+        }
+
+        if (currentSection === 'video') {
+          // Injetar limites adaptativos nos codecs de vídeo (sem travar em 2500 kbps mínimo)
+          if (
+            line.startsWith('a=fmtp:') &&
+            !line.includes('apt=') &&
+            !line.includes('x-google-max-bitrate')
+          ) {
+            result.push(
+              `${line};x-google-min-bitrate=${minVideoBitrate};x-google-start-bitrate=${startVideoBitrate};x-google-max-bitrate=${maxVideoBitrate}`
+            );
+          } else {
+            result.push(line);
+          }
+        } else if (currentSection === 'audio') {
+          // Otimizar codec Opus: Estéreo de estúdio, 128 kbps e Forward Error Correction (FEC)
+          // useinbandfec=1 permite ao receptor reconstruir pacotes de áudio perdidos sem cortes
+          if (line.startsWith('a=fmtp:') && line.toLowerCase().includes('minptime=')) {
+            let opusLine = line;
+            if (!opusLine.includes('stereo=')) {
+              opusLine += ';stereo=1;sprop-stereo=1';
+            }
+            if (!opusLine.includes('useinbandfec=')) {
+              opusLine += ';useinbandfec=1';
+            }
+            if (!opusLine.includes('maxaveragebitrate=')) {
+              opusLine += ';maxaveragebitrate=128000';
+            }
+            if (!opusLine.includes('cbr=')) {
+              opusLine += ';cbr=0';
+            }
+            result.push(opusLine);
+          } else {
+            result.push(line);
+          }
+        } else {
+          result.push(line);
+        }
       }
 
-      if (
-        inVideoSection &&
-        line.startsWith('a=fmtp:') &&
-        !line.includes('apt=') &&
-        !line.includes('x-google-max-bitrate')
-      ) {
-        result.push(
-          `${line};x-google-min-bitrate=2500;x-google-start-bitrate=5000;x-google-max-bitrate=8000`
-        );
-      } else {
-        result.push(line);
-      }
-    }
+      return result.join('\r\n');
+    },
+    []
+  );
 
-    return result.join('\r\n');
-  }, []);
-
-  // Configura o RTCRtpSender de vídeo para priorizar codificação por GPU (H.264) e manter 60 FPS constantes
+  // Configura o RTCRtpSender de vídeo para priorizar codificação por GPU (H.264) e manter reprodução suave
   const configureScreenVideoSender = useCallback(
     async (pc: RTCPeerConnection, sender: RTCRtpSender, quality: ScreenQualityOptions) => {
       try {
@@ -382,13 +429,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!params.encodings || params.encodings.length === 0) {
           params.encodings = [{}];
         }
-        const targetBitrate = quality.resolution === '1080p' ? 8_000_000 : 5_000_000;
+        const targetBitrate = quality.resolution === '1080p' ? 7_000_000 : 4_000_000;
         const targetFps = quality.fps || 60;
 
-        (params as any).degradationPreference = 'maintain-framerate';
+        // 'balanced' permite ao WebRTC equilibrar dinamicamente resolução e framerate,
+        // evitando travadas quando houver picos de CPU ou oscilação de rede
+        (params as any).degradationPreference = 'balanced';
         params.encodings[0].maxBitrate = targetBitrate;
         params.encodings[0].maxFramerate = targetFps;
-        params.encodings[0].scaleResolutionDownBy = 1.0;
         (params.encodings[0] as any).priority = 'high';
         (params.encodings[0] as any).networkPriority = 'high';
 
@@ -411,7 +459,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const offer = await pc.createOffer();
         if (pc.signalingState !== 'stable') return;
         try {
-          const boostedSdp = boostVideoBitrateSdp(offer.sdp);
+          const boostedSdp = optimizeWebRtcSdp(offer.sdp, screenQualityRef.current);
           await pc.setLocalDescription({ type: offer.type, sdp: boostedSdp });
         } catch {
           await pc.setLocalDescription(offer);
@@ -438,7 +486,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         makingOfferRef.current.set(remoteUserId, false);
       }
     },
-    [socket, boostVideoBitrateSdp, configureScreenVideoSender]
+    [socket, optimizeWebRtcSdp, configureScreenVideoSender]
   );
 
   // Cria ou retorna a RTCPeerConnection para um participante remoto
@@ -524,11 +572,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             attachRemoteAudio(remoteUserId, track, incomingStream || new MediaStream([track]));
           }
         } else if (track.kind === 'video') {
-          try {
-            // Minimizar jitter buffer de recepção para reprodução ultra-fluida em tempo real
-            (event.receiver as any).playoutDelayHint = 0.02;
-          } catch {}
-
           peerData.screenTrack = track;
           peerData.isScreenSharing = true;
 
@@ -1167,7 +1210,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         const answer = await pc.createAnswer();
         try {
-          const boostedSdp = boostVideoBitrateSdp(answer.sdp);
+          const boostedSdp = optimizeWebRtcSdp(answer.sdp, screenQualityRef.current);
           await pc.setLocalDescription({ type: answer.type, sdp: boostedSdp });
         } catch {
           await pc.setLocalDescription(answer);
@@ -1471,16 +1514,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           await audioCtx.resume().catch(() => {});
         }
 
-        // Ring buffer circular para 48kHz Estéreo (1 segundo de capacidade, limite de baixa latência em 120ms)
-        const RING_SIZE = 48000;
-        const MAX_BUFFERED_FRAMES = 5760; // 120ms max latency
-        const TARGET_RESET_FRAMES = 2400; // 50ms
+        // Ring buffer circular para 48kHz Estéreo (2 segundos de capacidade para absorver variações de IPC e carga de GPU)
+        const RING_SIZE = 96000;
+        const MAX_BUFFERED_FRAMES = 14400; // 300ms de tolerância máxima
+        const TARGET_RESET_FRAMES = 7200;  // 150ms ao estabilizar
         const ringLeft = new Float32Array(RING_SIZE);
         const ringRight = new Float32Array(RING_SIZE);
         let writeIdx = 0;
         let readIdx = 0;
         let availableFrames = 0;
         let leftover = new Uint8Array(0);
+        let isPreRollDone = false;
 
         const removeChunkListener = window.electronAPI.onProcessAudioChunk((rawChunk: Uint8Array) => {
           const chunk =
@@ -1525,8 +1569,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
           availableFrames += usableFrames;
           if (availableFrames > MAX_BUFFERED_FRAMES) {
-            readIdx = (writeIdx - TARGET_RESET_FRAMES + RING_SIZE) % RING_SIZE;
+            const excess = availableFrames - TARGET_RESET_FRAMES;
+            readIdx = (readIdx + excess) % RING_SIZE;
             availableFrames = TARGET_RESET_FRAMES;
+          }
+
+          if (!isPreRollDone && availableFrames >= 2048) {
+            isPreRollDone = true;
           }
         });
 
@@ -1544,46 +1593,32 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         osc.connect(silentInGain);
         osc.start();
 
-        const scriptNode = audioCtx.createScriptProcessor(1024, 2, 2);
+        // Buffer de 2048 frames (42.6ms) para reduzir interrupções na thread principal e eliminar cliques
+        const scriptNode = audioCtx.createScriptProcessor(2048, 2, 2);
         const dest = audioCtx.createMediaStreamDestination();
         const silentOutGain = audioCtx.createGain();
         silentOutGain.gain.value = 0;
-
-        let lastRemoteSpeechTime = 0;
 
         scriptNode.onaudioprocess = (e: AudioProcessingEvent) => {
           const outL = e.outputBuffer.getChannelData(0);
           const outR = e.outputBuffer.getChannelData(1);
           const framesNeeded = outL.length;
 
-          // Verificar se algum participante remoto na chamada do Xolas está falando neste instante
-          let remoteSpeakingNow = false;
-          remoteParticipantsRef.current.forEach((p) => {
-            if (!p.isMuted && p.isSpeaking) {
-              remoteSpeakingNow = true;
+          // Se ainda estiver acumulando o pré-roll inicial, manter silêncio sem consumir buffer
+          if (!isPreRollDone || availableFrames < framesNeeded) {
+            for (let i = 0; i < framesNeeded; i++) {
+              outL[i] = 0;
+              outR[i] = 0;
             }
-          });
-          const now = performance.now();
-          if (remoteSpeakingNow) {
-            lastRemoteSpeechTime = now;
+            return;
           }
-          // Se o modo caiu para fallback ou se houver cauda acústica de voz da chamada (280ms), bloquear retorno
-          const suppressCallEcho =
-            res.mode === 'exclude-xolas-tree' && now - lastRemoteSpeechTime < 280;
 
           for (let i = 0; i < framesNeeded; i++) {
             if (availableFrames > 0) {
-              const sampleL = ringLeft[readIdx];
-              const sampleR = ringRight[readIdx];
+              outL[i] = ringLeft[readIdx];
+              outR[i] = ringRight[readIdx];
               readIdx = (readIdx + 1) % RING_SIZE;
               availableFrames--;
-              if (suppressCallEcho) {
-                outL[i] = 0;
-                outR[i] = 0;
-              } else {
-                outL[i] = sampleL;
-                outR[i] = sampleR;
-              }
             } else {
               outL[i] = 0;
               outR[i] = 0;
@@ -1659,6 +1694,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: sourceId,
             maxFrameRate: fps,
+            minFrameRate: Math.min(30, fps),
           };
 
           if (!isWindow) {
@@ -1700,6 +1736,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (includeAudio) {
             const isolatedAudioTrack = await createIsolatedProcessAudioTrack(sourceId);
             if (isolatedAudioTrack) {
+              try {
+                (isolatedAudioTrack as any).contentHint = 'music';
+              } catch {}
               stream.addTrack(isolatedAudioTrack);
             }
           }
@@ -1728,13 +1767,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // Priorizar fluidez de movimento (60 FPS constantes em jogos 3D) em vez de travar frames
             (videoTrack as any).contentHint = 'motion';
           } catch {}
-          videoTrack
-            .applyConstraints({
-              width: { max: width },
-              height: { max: height },
-              frameRate: { ideal: fps, max: fps },
-            })
-            .catch(() => {});
           videoTrack.onended = () => {
             stopScreenShare();
           };

@@ -458,24 +458,6 @@ namespace XolasAudioLoopback
                     return 0;
                 }
 
-                // Se estivermos em modo INCLUDE_TREE (janela especifica) e tivermos o PID do Xolas,
-                // abrimos tambem um monitor de referencia do Xolas para detectar e suprimir qualquer vazamento
-                IAudioClient xolasRefAudioClient = null;
-                IAudioCaptureClient xolasRefCapture = null;
-                if (loopbackMode == 0 && fallbackExcludePid != 0 && fallbackExcludePid != targetPid)
-                {
-                    try
-                    {
-                        xolasRefCapture = ActivateLoopbackCapture(
-                            fallbackExcludePid,
-                            0, // INCLUDE_TARGET_PROCESS_TREE no Xolas
-                            ref fmt,
-                            null,
-                            out xolasRefAudioClient);
-                    }
-                    catch { }
-                }
-
                 // Watchdog thread: encerra automaticamente se o processo pai (Electron) fechar o pipe stdin
                 Thread stdinWatchdog = new Thread(() =>
                 {
@@ -492,48 +474,11 @@ namespace XolasAudioLoopback
 
                 Stream stdout = Console.OpenStandardOutput();
                 byte[] tempBuf = new byte[48000 * 4];
-                byte[] refBuf = new byte[48000 * 4];
                 byte[] silenceBuf = new byte[480 * 4]; // 10ms of silence
 
                 while (true)
                 {
                     sampleEvent.WaitOne(20);
-
-                    // Drenar o monitor de referencia do Xolas (se ativo) e medir se o Xolas esta emitindo voz neste exato frame
-                    int xolasPeak = 0;
-                    if (xolasRefCapture != null)
-                    {
-                        uint refPacket = 0;
-                        if (xolasRefCapture.GetNextPacketSize(out refPacket) >= 0)
-                        {
-                            while (refPacket > 0)
-                            {
-                                IntPtr refPtr;
-                                uint refFrames;
-                                uint refFlags;
-                                ulong rDevPos;
-                                ulong rQpcPos;
-                                if (xolasRefCapture.GetBuffer(out refPtr, out refFrames, out refFlags, out rDevPos, out rQpcPos) < 0)
-                                    break;
-
-                                int refBytes = (int)(refFrames * fmt.nBlockAlign);
-                                if (refBytes > 0 && (refFlags & AUDCLNT_BUFFERFLAGS_SILENT) == 0)
-                                {
-                                    if (refBuf.Length < refBytes) refBuf = new byte[refBytes];
-                                    Marshal.Copy(refPtr, refBuf, 0, refBytes);
-                                    for (int k = 0; k + 1 < refBytes; k += 2)
-                                    {
-                                        short sample = (short)(refBuf[k] | (refBuf[k + 1] << 8));
-                                        int abs = sample == short.MinValue ? 32767 : Math.Abs((int)sample);
-                                        if (abs > xolasPeak) xolasPeak = abs;
-                                    }
-                                }
-
-                                xolasRefCapture.ReleaseBuffer(refFrames);
-                                if (xolasRefCapture.GetNextPacketSize(out refPacket) < 0) break;
-                            }
-                        }
-                    }
 
                     uint nextPacketSize = 0;
                     int pHr = captureClient.GetNextPacketSize(out nextPacketSize);
@@ -568,24 +513,6 @@ namespace XolasAudioLoopback
                                     tempBuf = new byte[bytesToWrite];
                                 }
                                 Marshal.Copy(dataPtr, tempBuf, 0, bytesToWrite);
-
-                                // Se o monitor do Xolas detectou voz forte na chamada e o pacote da janela tem amplitude quase identica
-                                // (indicando que a janela compartilhada herdou o AudioService do Xolas), suprimir o vazamento!
-                                if (xolasPeak > 250)
-                                {
-                                    int winPeak = 0;
-                                    for (int k = 0; k + 1 < bytesToWrite; k += 2)
-                                    {
-                                        short s = (short)(tempBuf[k] | (tempBuf[k + 1] << 8));
-                                        int a = s == short.MinValue ? 32767 : Math.Abs((int)s);
-                                        if (a > winPeak) winPeak = a;
-                                    }
-                                    if (winPeak > 0 && Math.Abs(winPeak - xolasPeak) < (xolasPeak / 4))
-                                    {
-                                        Array.Clear(tempBuf, 0, bytesToWrite);
-                                    }
-                                }
-
                                 stdout.Write(tempBuf, 0, bytesToWrite);
                             }
                             stdout.Flush();
