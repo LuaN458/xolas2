@@ -1,7 +1,7 @@
 {
   "name": "xolas",
   "productName": "Xolas",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "Xolas - Aplicativo Desktop de Comunicação e Transmissão Studio Obsidian",
   "author": "Xolas",
   "type": "module",
@@ -48,6 +48,7 @@
         "nsis",
         "zip"
       ],
+      "icon": "build/icon.ico",
       "artifactName": "Xolas-${version}-${arch}.${ext}",
       "verifyUpdateCodeSignature": false,
       "requestedExecutionLevel": "asInvoker",
@@ -57,6 +58,10 @@
       "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "include": "build/installer.nsh",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Xolas",

@@ -6,8 +6,12 @@ dist/
 dist-electron/
 release/
 *.exe
-build/
 Xolas/
+build/*.exe
+!build/icon.ico
+!build/installerHeaderIcon.ico
+!build/installer.nsh
+!build/generate-icon.cs
 
 # Secrets & Environment
 .env

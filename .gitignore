@@ -18,6 +18,9 @@ server/dist/
 Xolas/
 *.exe
 build/
+!client/build/
+!client/build/**
+client/build/*.exe
 
 # Database & Environment Secrets
 .env
