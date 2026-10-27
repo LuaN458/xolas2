@@ -33,6 +33,8 @@ model Server {
   members   Member[]
   channels  Channel[]
   createdAt DateTime  @default(now())
+
+  @@index([ownerId])
 }
 
 model Member {
@@ -45,6 +47,7 @@ model Member {
   joinedAt  DateTime @default(now())
 
   @@unique([userId, serverId])
+  @@index([serverId])
 }
 
 model Channel {
@@ -55,6 +58,8 @@ model Channel {
   server    Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
   messages  Message[]
   createdAt DateTime  @default(now())
+
+  @@index([serverId])
 }
 
 model Message {
@@ -65,4 +70,7 @@ model Message {
   channelId String
   channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+
+  @@index([channelId])
+  @@index([userId])
 }
