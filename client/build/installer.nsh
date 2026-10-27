@@ -1,11 +1,6 @@
 ; Script de Personalização do Instalador NSIS do Xolas
 ; Aplica tema Obsidian Dark (#08090c / #12141a), Dark Mode nativo do Windows e barra de progresso Índigo (#6366f1)
 
-!macro customHeader
-  !define MUI_BGCOLOR "12141A"
-  !define MUI_TEXTCOLOR "F9FAFB"
-!macroend
-
 !macro customInstall
   ${IfNot} ${Silent}
     ; 1. Ativar Dark Mode na barra de título da janela do instalador (Windows 10 Build 19041+ e Windows 11)
