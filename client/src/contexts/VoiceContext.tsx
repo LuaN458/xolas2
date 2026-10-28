@@ -1467,7 +1467,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSelectedScreenShareId(null);
   }, [socket, cleanupPeer]);
 
+  const lastMuteToggleRef = useRef<number>(0);
+  const lastDeafenToggleRef = useRef<number>(0);
+
   const toggleMute = useCallback(() => {
+    const now = Date.now();
+    if (now - lastMuteToggleRef.current < 280) {
+      return;
+    }
+    lastMuteToggleRef.current = now;
+
     setIsMuted((prev) => {
       const next = !prev;
       isMutedRef.current = next;
@@ -1487,6 +1496,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [syncVoiceState, emitLocalVoiceState]);
 
   const toggleDeafen = useCallback(() => {
+    const now = Date.now();
+    if (now - lastDeafenToggleRef.current < 280) {
+      return;
+    }
+    lastDeafenToggleRef.current = now;
+
     setIsDeafened((prev) => {
       const next = !prev;
       isDeafenedRef.current = next;
@@ -1544,8 +1559,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return unreg;
   }, [toggleMute, toggleDeafen]);
 
-  // Ouvinte de atalhos in-app via teclado (para quando a janela estiver em foco ou no navegador)
+  // Ouvinte de atalhos in-app via teclado (apenas para ambiente de navegador web, já que no Electron é tratado com exclusividade via IPC global)
   useEffect(() => {
+    if (window.electronAPI) {
+      return;
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const isInput =

@@ -237,7 +237,12 @@ ipcMain.handle('check-for-updates', async () => {
 });
 
 ipcMain.handle('restart-and-install', () => {
-  autoUpdater.quitAndInstall(true, true);
+  stopProcessAudioCapture();
+  stopHotkeyHelper();
+  try {
+    globalShortcut.unregisterAll();
+  } catch {}
+  autoUpdater.quitAndInstall(false, true);
 });
 
 ipcMain.handle('get-app-version', () => {

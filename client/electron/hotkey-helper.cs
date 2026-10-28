@@ -87,6 +87,7 @@ namespace XolasHotkeyHook
 
         private static List<HotkeyRule> rules = new List<HotkeyRule>();
         private static HashSet<uint> keysDown = new HashSet<uint>();
+        private static Dictionary<string, long> lastActionTicks = new Dictionary<string, long>();
         private static IntPtr hookId = IntPtr.Zero;
         private static LowLevelKeyboardProc hookProc;
 
@@ -220,6 +221,24 @@ namespace XolasHotkeyHook
                     if (isUp)
                     {
                         keysDown.Remove(vk);
+                        if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT)
+                        {
+                            keysDown.Remove(VK_SHIFT);
+                            keysDown.Remove(VK_LSHIFT);
+                            keysDown.Remove(VK_RSHIFT);
+                        }
+                        else if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL)
+                        {
+                            keysDown.Remove(VK_CONTROL);
+                            keysDown.Remove(VK_LCONTROL);
+                            keysDown.Remove(VK_RCONTROL);
+                        }
+                        else if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU)
+                        {
+                            keysDown.Remove(VK_MENU);
+                            keysDown.Remove(VK_LMENU);
+                            keysDown.Remove(VK_RMENU);
+                        }
                     }
                     else if (isDown && !keysDown.Contains(vk))
                     {
@@ -240,8 +259,13 @@ namespace XolasHotkeyHook
 
                                 if (matches)
                                 {
-                                    Console.WriteLine(rule.Action);
-                                    Console.Out.Flush();
+                                    long now = Environment.TickCount;
+                                    if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
+                                    {
+                                        lastActionTicks[rule.Action] = now;
+                                        Console.WriteLine(rule.Action);
+                                        Console.Out.Flush();
+                                    }
                                     break;
                                 }
                             }
@@ -256,8 +280,13 @@ namespace XolasHotkeyHook
 
                                     if (modMatch)
                                     {
-                                        Console.WriteLine(rule.Action);
-                                        Console.Out.Flush();
+                                        long now = Environment.TickCount;
+                                        if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
+                                        {
+                                            lastActionTicks[rule.Action] = now;
+                                            Console.WriteLine(rule.Action);
+                                            Console.Out.Flush();
+                                        }
                                         break;
                                     }
                                 }
