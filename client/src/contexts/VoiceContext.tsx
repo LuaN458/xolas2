@@ -1472,7 +1472,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const toggleMute = useCallback(() => {
     const now = Date.now();
-    if (now - lastMuteToggleRef.current < 280) {
+    if (now - lastMuteToggleRef.current < 300) {
       return;
     }
     lastMuteToggleRef.current = now;
@@ -1497,7 +1497,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const toggleDeafen = useCallback(() => {
     const now = Date.now();
-    if (now - lastDeafenToggleRef.current < 280) {
+    if (now - lastDeafenToggleRef.current < 300) {
       return;
     }
     lastDeafenToggleRef.current = now;
@@ -1559,12 +1559,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return unreg;
   }, [toggleMute, toggleDeafen]);
 
-  // Ouvinte de atalhos in-app via teclado (apenas para ambiente de navegador web, já que no Electron é tratado com exclusividade via IPC global)
+  // Ouvinte de atalhos in-app via teclado (ativo em foco tanto na web quanto no Electron para resposta instantânea)
   useEffect(() => {
-    if (window.electronAPI) {
-      return;
-    }
-
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const isInput =
@@ -1586,12 +1582,19 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const matchesKey = (targetShortcut?: string): boolean => {
         if (!targetShortcut) return false;
         const normTarget = targetShortcut.trim().toLowerCase();
-        const normAcc = currentAcc.toLowerCase();
+        const normAcc = (currentAcc || '').toLowerCase();
         const normCode = (e.code || '').toLowerCase();
-        if (normAcc === normTarget || normCode === normTarget) return true;
+        const normKey = (e.key || '').toLowerCase();
+        if (normAcc === normTarget || normCode === normTarget || normKey === normTarget) return true;
         if (normTarget === 'shift' && (normCode === 'shiftleft' || normCode === 'shiftright')) return true;
-        if (normTarget === 'ctrl' && (normCode === 'controlleft' || normCode === 'controlright')) return true;
+        if (normTarget === 'shiftright' && normCode === 'shiftright') return true;
+        if (normTarget === 'shiftleft' && normCode === 'shiftleft') return true;
+        if ((normTarget === 'ctrl' || normTarget === 'control') && (normCode === 'controlleft' || normCode === 'controlright')) return true;
+        if (normTarget === 'controlright' && normCode === 'controlright') return true;
+        if (normTarget === 'controlleft' && normCode === 'controlleft') return true;
         if (normTarget === 'alt' && (normCode === 'altleft' || normCode === 'altright')) return true;
+        if (normTarget === 'altright' && normCode === 'altright') return true;
+        if (normTarget === 'altleft' && normCode === 'altleft') return true;
         return false;
       };
 

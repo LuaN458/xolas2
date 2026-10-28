@@ -13,8 +13,8 @@ using System.Threading;
 [assembly: AssemblyCopyright("Copyright © 2026 Xolas")]
 [assembly: AssemblyTrademark("Xolas")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("1.0.30.0")]
-[assembly: AssemblyFileVersion("1.0.30.0")]
+[assembly: AssemblyVersion("1.0.31.0")]
+[assembly: AssemblyFileVersion("1.0.31.0")]
 
 namespace XolasHotkeyCompanion
 {
@@ -34,6 +34,9 @@ namespace XolasHotkeyCompanion
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
 
+        [DllImport("user32.dll")]
+        private static extern short GetKeyState(int vKey);
+
         private class HotkeyRule
         {
             public string Action;
@@ -48,6 +51,70 @@ namespace XolasHotkeyCompanion
         private static HashSet<uint> keysDown = new HashSet<uint>();
         private static Dictionary<string, long> lastActionTicks = new Dictionary<string, long>();
 
+        private static bool CheckKeyDown(uint vk)
+        {
+            short state = GetAsyncKeyState((int)vk);
+            if ((state & 0x8000) != 0 || state < 0) return true;
+
+            // Fallback para variantes Left/Right de modificadores usando GetKeyState
+            if (vk == VK_RSHIFT)
+            {
+                short gen = GetAsyncKeyState(VK_SHIFT);
+                if ((gen & 0x8000) != 0 || gen < 0)
+                {
+                    short ks = GetKeyState(VK_RSHIFT);
+                    if ((ks & 0x8000) != 0 || ks < 0) return true;
+                }
+            }
+            else if (vk == VK_LSHIFT)
+            {
+                short gen = GetAsyncKeyState(VK_SHIFT);
+                if ((gen & 0x8000) != 0 || gen < 0)
+                {
+                    short ks = GetKeyState(VK_LSHIFT);
+                    if ((ks & 0x8000) != 0 || ks < 0) return true;
+                }
+            }
+            else if (vk == VK_RCONTROL)
+            {
+                short gen = GetAsyncKeyState(VK_CONTROL);
+                if ((gen & 0x8000) != 0 || gen < 0)
+                {
+                    short ks = GetKeyState(VK_RCONTROL);
+                    if ((ks & 0x8000) != 0 || ks < 0) return true;
+                }
+            }
+            else if (vk == VK_LCONTROL)
+            {
+                short gen = GetAsyncKeyState(VK_CONTROL);
+                if ((gen & 0x8000) != 0 || gen < 0)
+                {
+                    short ks = GetKeyState(VK_LCONTROL);
+                    if ((ks & 0x8000) != 0 || ks < 0) return true;
+                }
+            }
+            else if (vk == VK_RMENU)
+            {
+                short gen = GetAsyncKeyState(VK_MENU);
+                if ((gen & 0x8000) != 0 || gen < 0)
+                {
+                    short ks = GetKeyState(VK_RMENU);
+                    if ((ks & 0x8000) != 0 || ks < 0) return true;
+                }
+            }
+            else if (vk == VK_LMENU)
+            {
+                short gen = GetAsyncKeyState(VK_MENU);
+                if ((gen & 0x8000) != 0 || gen < 0)
+                {
+                    short ks = GetKeyState(VK_LMENU);
+                    if ((ks & 0x8000) != 0 || ks < 0) return true;
+                }
+            }
+
+            return false;
+        }
+
         private static uint ParseKeyToVk(string key)
         {
             string clean = (key ?? "").Trim().ToLowerInvariant();
@@ -55,13 +122,15 @@ namespace XolasHotkeyCompanion
             {
                 case "shiftleft": return VK_LSHIFT;
                 case "shiftright": return VK_RSHIFT;
-                case "shift": return VK_LSHIFT;
+                case "shift": return VK_SHIFT;
                 case "controlleft": return VK_LCONTROL;
                 case "controlright": return VK_RCONTROL;
                 case "ctrlleft": return VK_LCONTROL;
                 case "ctrlright": return VK_RCONTROL;
+                case "ctrl": case "control": return VK_CONTROL;
                 case "altleft": return VK_LMENU;
                 case "altright": return VK_RMENU;
+                case "alt": return VK_MENU;
                 case "capslock": return 0x14;
                 case "space": return 0x20;
                 case "tab": return 0x09;
@@ -134,7 +203,7 @@ namespace XolasHotkeyCompanion
             {
                 string single = parts[0].Trim().ToLowerInvariant();
                 if (single == "shiftleft" || single == "shiftright" || single == "shift" ||
-                    single == "controlleft" || single == "controlright" || single == "ctrl" ||
+                    single == "controlleft" || single == "controlright" || single == "ctrl" || single == "control" ||
                     single == "altleft" || single == "altright" || single == "alt")
                 {
                     return new HotkeyRule
@@ -145,6 +214,21 @@ namespace XolasHotkeyCompanion
                         NeedShift = false,
                         NeedAlt = false,
                         IsSingleModifier = true
+                    };
+                }
+
+                // Tecla única não modificadora (ex: F6, Space, CapsLock, M)
+                uint singleVk = ParseKeyToVk(single);
+                if (singleVk != 0)
+                {
+                    return new HotkeyRule
+                    {
+                        Action = action,
+                        TargetVk = singleVk,
+                        NeedCtrl = false,
+                        NeedShift = false,
+                        NeedAlt = false,
+                        IsSingleModifier = false
                     };
                 }
             }
@@ -204,61 +288,40 @@ namespace XolasHotkeyCompanion
             {
                 Thread.Sleep(20);
 
-                bool ctrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-                bool shiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-                bool altDown = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+                bool ctrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 || GetAsyncKeyState(VK_CONTROL) < 0;
+                bool shiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 || GetAsyncKeyState(VK_SHIFT) < 0;
+                bool altDown = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 || GetAsyncKeyState(VK_MENU) < 0;
 
                 for (int i = 0; i < rules.Count; i++)
                 {
                     var rule = rules[i];
-                    bool keyIsDown = (GetAsyncKeyState((int)rule.TargetVk) & 0x8000) != 0;
+                    bool keyIsDown = CheckKeyDown(rule.TargetVk);
 
-                    if (rule.IsSingleModifier)
+                    bool modMatch = true;
+                    if (!rule.IsSingleModifier)
                     {
-                        if (keyIsDown)
+                        if (rule.NeedCtrl != ctrlDown) modMatch = false;
+                        if (rule.NeedShift != shiftDown) modMatch = false;
+                        if (rule.NeedAlt != altDown) modMatch = false;
+                    }
+
+                    if (keyIsDown && modMatch)
+                    {
+                        if (!keysDown.Contains(rule.TargetVk))
                         {
-                            if (!keysDown.Contains(rule.TargetVk))
+                            keysDown.Add(rule.TargetVk);
+                            long now = Environment.TickCount;
+                            if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
                             {
-                                keysDown.Add(rule.TargetVk);
-                                long now = Environment.TickCount;
-                                if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
-                                {
-                                    lastActionTicks[rule.Action] = now;
-                                    Console.WriteLine(rule.Action);
-                                    Console.Out.Flush();
-                                }
+                                lastActionTicks[rule.Action] = now;
+                                Console.WriteLine(rule.Action);
+                                Console.Out.Flush();
                             }
-                        }
-                        else
-                        {
-                            keysDown.Remove(rule.TargetVk);
                         }
                     }
                     else
                     {
-                        bool modMatch = true;
-                        if (rule.NeedCtrl && !ctrlDown) modMatch = false;
-                        if (rule.NeedShift && !shiftDown) modMatch = false;
-                        if (rule.NeedAlt && !altDown) modMatch = false;
-
-                        if (keyIsDown && modMatch)
-                        {
-                            if (!keysDown.Contains(rule.TargetVk))
-                            {
-                                keysDown.Add(rule.TargetVk);
-                                long now = Environment.TickCount;
-                                if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
-                                {
-                                    lastActionTicks[rule.Action] = now;
-                                    Console.WriteLine(rule.Action);
-                                    Console.Out.Flush();
-                                }
-                            }
-                        }
-                        else
-                        {
-                            keysDown.Remove(rule.TargetVk);
-                        }
+                        keysDown.Remove(rule.TargetVk);
                     }
                 }
             }
