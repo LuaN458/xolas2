@@ -86,6 +86,13 @@ interface VoiceContextType {
   setSelectedScreenShareId: (id: string | null) => void;
   watchScreenShare: (shareId: string) => void;
   stopWatchingScreenShare: () => void;
+  // Volumes individuais e silenciamento local por usuário (0% a 200%)
+  userVolumes: Record<string, number>;
+  userMuted: Record<string, boolean>;
+  setUserVolume: (userId: string, volume: number) => void;
+  toggleMuteUser: (userId: string) => void;
+  getUserVolume: (userId: string) => number;
+  isUserMuted: (userId: string) => boolean;
 }
 
 const ICE_SERVERS: RTCIceServer[] = [
@@ -207,6 +214,62 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const vadCleanupRef = useRef<(() => void) | null>(null);
   const screenAudioCleanupRef = useRef<(() => void) | null>(null);
 
+  // Volumes individuais e silenciamento local por usuário (0% a 200%, persistidos no LocalStorage)
+  const [userVolumes, setUserVolumes] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem('xolas_user_volumes');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [userMuted, setUserMuted] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('xolas_user_muted');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const userVolumesRef = useRef<Record<string, number>>(userVolumes);
+  const userMutedRef = useRef<Record<string, boolean>>(userMuted);
+  userVolumesRef.current = userVolumes;
+  userMutedRef.current = userMuted;
+
+  interface RemoteAudioPipeline {
+    source: MediaStreamAudioSourceNode;
+    gainNode: GainNode;
+    destination: MediaStreamAudioDestinationNode;
+    audioEl: HTMLAudioElement;
+  }
+  const remoteAudioCtxRef = useRef<AudioContext | null>(null);
+  const remotePipelinesRef = useRef<Map<string, RemoteAudioPipeline>>(new Map());
+
+  const calculateGain = useCallback((peerId: string) => {
+    if (isDeafenedRef.current) return 0;
+    if (userMutedRef.current[peerId]) return 0;
+    const userVol = userVolumesRef.current[peerId] ?? 100; // 0 a 200
+    const masterVol = masterVolumeRef.current; // 0 a 100
+    return (userVol / 100) * (masterVol / 100);
+  }, []);
+
+  const updateAllGainNodes = useCallback(() => {
+    remotePipelinesRef.current.forEach((pipeline, key) => {
+      try {
+        const peerId = key.split('-')[0];
+        const gain = calculateGain(peerId);
+        pipeline.gainNode.gain.setValueAtTime(gain, remoteAudioCtxRef.current?.currentTime || 0);
+      } catch {}
+    });
+    audioElementsRef.current.forEach((el, key) => {
+      const peerId = key.split('-')[0];
+      const gain = calculateGain(peerId);
+      el.volume = Math.max(0, Math.min(1, gain));
+    });
+  }, [calculateGain]);
+
   // Emite o estado atual do usuário local para os demais membros do canal
   const emitLocalVoiceState = useCallback(() => {
     const ch = currentChannelRef.current;
@@ -310,7 +373,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [user]);
 
-  // Anexa stream de áudio remoto ao container DOM oculto
+  // Anexa stream de áudio remoto ao container DOM oculto com suporte a GainNode (0% a 200%)
   const attachRemoteAudio = useCallback((peerId: string, track: MediaStreamTrack, stream?: MediaStream) => {
     let container = document.getElementById('xolas-remote-audio-container');
     if (!container) {
@@ -331,14 +394,53 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     const mediaStream = stream || new MediaStream([track]);
+
+    // Tentativa de encadear via Web Audio API GainNode para amplificação limpa de até 200%
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        if (!remoteAudioCtxRef.current || remoteAudioCtxRef.current.state === 'closed') {
+          remoteAudioCtxRef.current = new AudioCtx();
+        }
+        const ctx = remoteAudioCtxRef.current;
+        if (ctx.state === 'suspended') {
+          ctx.resume().catch(() => {});
+        }
+
+        let pipeline = remotePipelinesRef.current.get(key);
+        if (!pipeline) {
+          const source = ctx.createMediaStreamSource(mediaStream);
+          const gainNode = ctx.createGain();
+          const destination = ctx.createMediaStreamDestination();
+          source.connect(gainNode);
+          gainNode.connect(destination);
+
+          pipeline = { source, gainNode, destination, audioEl };
+          remotePipelinesRef.current.set(key, pipeline);
+        }
+
+        const gain = calculateGain(peerId);
+        pipeline.gainNode.gain.setValueAtTime(gain, ctx.currentTime);
+
+        if (audioEl.srcObject !== pipeline.destination.stream) {
+          audioEl.srcObject = pipeline.destination.stream;
+        }
+        audioEl.volume = 1.0;
+        audioEl.play().catch(() => {});
+        return;
+      }
+    } catch (err) {
+      console.warn('[VoiceContext] Fallback para áudio direto sem GainNode:', err);
+    }
+
+    // Fallback nativo se Web Audio falhar
     if (audioEl.srcObject !== mediaStream) {
       audioEl.srcObject = mediaStream;
     }
-    audioEl.volume = isDeafenedRef.current
-      ? 0
-      : Math.max(0, Math.min(1, masterVolumeRef.current / 100));
+    const gain = calculateGain(peerId);
+    audioEl.volume = Math.max(0, Math.min(1, gain));
     audioEl.play().catch(() => {});
-  }, []);
+  }, [calculateGain]);
 
   // Remove conexões e elementos de mídia de um participante específico
   const cleanupPeer = useCallback((peerId: string) => {
@@ -354,6 +456,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     makingOfferRef.current.delete(peerId);
     screenSendersRef.current.delete(peerId);
     remoteParticipantsRef.current.delete(peerId);
+
+    // Remover pipelines Web Audio associados ao peer
+    Array.from(remotePipelinesRef.current.entries()).forEach(([key, pipeline]) => {
+      if (key.startsWith(`${peerId}-`)) {
+        try {
+          pipeline.source.disconnect();
+          pipeline.gainNode.disconnect();
+        } catch {}
+        remotePipelinesRef.current.delete(key);
+      }
+    });
 
     // Remover elementos de áudio associados ao peer
     Array.from(audioElementsRef.current.entries()).forEach(([key, el]) => {
@@ -945,10 +1058,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     masterVolumeRef.current = clamped;
     setMasterVolumeState(clamped);
     saveUserSetting('masterOutputVolume', clamped);
-    audioElementsRef.current.forEach((el) => {
-      el.volume = isDeafenedRef.current ? 0 : clamped / 100;
-    });
-  }, []);
+    updateAllGainNodes();
+  }, [updateAllGainNodes]);
 
   const setMicInputGain = useCallback((val: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(val)));
@@ -1453,6 +1564,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     Array.from(peersRef.current.keys()).forEach((peerId) => cleanupPeer(peerId));
     remoteParticipantsRef.current.clear();
 
+    remotePipelinesRef.current.forEach((pipeline) => {
+      try {
+        pipeline.source.disconnect();
+        pipeline.gainNode.disconnect();
+      } catch {}
+    });
+    remotePipelinesRef.current.clear();
+
     audioElementsRef.current.forEach((el) => {
       el.pause();
       el.srcObject = null;
@@ -1517,12 +1636,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audioElementsRef.current.forEach((el) => {
         el.volume = next ? 0 : Math.max(0, Math.min(1, masterVolumeRef.current / 100));
       });
+      updateAllGainNodes();
       playAudioCue(next ? 'deafen' : 'undeafen');
       syncVoiceState();
       emitLocalVoiceState();
       return next;
     });
-  }, [syncVoiceState, emitLocalVoiceState]);
+  }, [syncVoiceState, emitLocalVoiceState, updateAllGainNodes]);
 
   // Sincronizar atalhos de teclado globais no Electron
   useEffect(() => {
@@ -1987,6 +2107,72 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSelectedScreenShareId(null);
   }, []);
 
+  const setUserVolume = useCallback((userId: string, volume: number) => {
+    const clamped = Math.max(0, Math.min(200, Math.round(volume)));
+    setUserVolumes((prev) => {
+      const updated = { ...prev, [userId]: clamped };
+      userVolumesRef.current = updated;
+      try {
+        localStorage.setItem('xolas_user_volumes', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // Atualizar ganho imediatamente nos pipelines ativos
+    remotePipelinesRef.current.forEach((pipeline, key) => {
+      if (key.startsWith(`${userId}-`)) {
+        try {
+          const gain = calculateGain(userId);
+          pipeline.gainNode.gain.setValueAtTime(gain, remoteAudioCtxRef.current?.currentTime || 0);
+        } catch {}
+      }
+    });
+
+    audioElementsRef.current.forEach((el, key) => {
+      if (key.startsWith(`${userId}-`)) {
+        const gain = calculateGain(userId);
+        el.volume = Math.max(0, Math.min(1, gain));
+      }
+    });
+  }, [calculateGain]);
+
+  const toggleMuteUser = useCallback((userId: string) => {
+    setUserMuted((prev) => {
+      const next = !prev[userId];
+      const updated = { ...prev, [userId]: next };
+      userMutedRef.current = updated;
+      try {
+        localStorage.setItem('xolas_user_muted', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    // Atualizar ganho imediatamente nos pipelines ativos
+    remotePipelinesRef.current.forEach((pipeline, key) => {
+      if (key.startsWith(`${userId}-`)) {
+        try {
+          const gain = calculateGain(userId);
+          pipeline.gainNode.gain.setValueAtTime(gain, remoteAudioCtxRef.current?.currentTime || 0);
+        } catch {}
+      }
+    });
+
+    audioElementsRef.current.forEach((el, key) => {
+      if (key.startsWith(`${userId}-`)) {
+        const gain = calculateGain(userId);
+        el.volume = Math.max(0, Math.min(1, gain));
+      }
+    });
+  }, [calculateGain]);
+
+  const getUserVolume = useCallback((userId: string): number => {
+    return userVolumesRef.current[userId] ?? 100;
+  }, []);
+
+  const isUserMuted = useCallback((userId: string): boolean => {
+    return Boolean(userMutedRef.current[userId]);
+  }, []);
+
   return (
     <VoiceContext.Provider
       value={{
@@ -2023,6 +2209,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setSelectedScreenShareId,
         watchScreenShare,
         stopWatchingScreenShare,
+        userVolumes,
+        userMuted,
+        setUserVolume,
+        toggleMuteUser,
+        getUserVolume,
+        isUserMuted,
       }}
     >
       {children}

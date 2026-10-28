@@ -1,11 +1,12 @@
 import React from 'react';
-import { MicOff, Monitor } from 'lucide-react';
+import { MicOff, Monitor, VolumeX } from 'lucide-react';
 
 interface ParticipantTileProps {
   name: string;
   avatarUrl?: string;
   isSpeaking?: boolean;
   isMuted?: boolean;
+  isLocallyMuted?: boolean;
   isScreenShare?: boolean;
   hasScreenShare?: boolean;
   onWatchScreenShare?: () => void;
@@ -13,6 +14,7 @@ interface ParticipantTileProps {
   stream?: MediaStream | null;
   volume?: number; // 0 a 100
   isLocal?: boolean;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 export const ParticipantTile: React.FC<ParticipantTileProps> = ({
@@ -20,6 +22,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
   avatarUrl,
   isSpeaking = false,
   isMuted = false,
+  isLocallyMuted = false,
   isScreenShare = false,
   hasScreenShare = false,
   onWatchScreenShare,
@@ -27,6 +30,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
   stream,
   volume = 100,
   isLocal = false,
+  onContextMenu,
 }) => {
   const videoRef = React.useRef<HTMLVideoElement>(null);
 
@@ -88,6 +92,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
 
   return (
     <div
+      onContextMenu={onContextMenu}
       className={`relative bg-obsidian-card rounded-xl overflow-hidden flex flex-col items-center justify-center min-h-[160px] w-full ${
         isScreenShare ? 'h-full' : 'aspect-video'
       } border ${
@@ -153,7 +158,16 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
       <div className="absolute bottom-2.5 left-2.5 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-md flex items-center space-x-1.5 text-[11px] text-white border border-white/10 max-w-[85%]">
         {isScreenShare && <Monitor className="w-3 h-3 text-emerald-400 shrink-0" />}
         <span className="truncate font-medium">{name}</span>
-        {isMuted && <MicOff className="w-3 h-3 text-obsidian-rose shrink-0" />}
+        {isMuted && (
+          <span title="Microfone desligado">
+            <MicOff className="w-3 h-3 text-obsidian-rose shrink-0" />
+          </span>
+        )}
+        {isLocallyMuted && (
+          <span title="Silenciado localmente por você">
+            <VolumeX className="w-3 h-3 text-rose-400 shrink-0" />
+          </span>
+        )}
       </div>
     </div>
   );

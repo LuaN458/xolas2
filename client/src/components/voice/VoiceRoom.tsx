@@ -4,6 +4,7 @@ import { useVoice, ScreenQualityOptions } from '../../contexts/VoiceContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { ParticipantTile } from './ParticipantTile';
 import { ScreenShareModal } from './ScreenShareModal';
+import { UserAudioContextMenu } from './UserAudioContextMenu';
 import { VoiceParticipantInfo } from '../layout/ChannelSidebar';
 import {
   getUserSettings,
@@ -53,6 +54,10 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     activeScreenShares,
     selectedScreenShareId,
     setSelectedScreenShareId,
+    setUserVolume,
+    toggleMuteUser,
+    getUserVolume,
+    isUserMuted,
   } = useVoice();
 
   const [isCameraOn, setIsCameraOn] = useState(false);
@@ -62,6 +67,32 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
   const [streamVolume, setStreamVolume] = useState<number>(() => getUserSettings().streamVolume);
   const [isStreamMuted, setIsStreamMuted] = useState<boolean>(() => getUserSettings().isStreamMuted);
   const screenContainerRef = useRef<HTMLDivElement>(null);
+
+  // Estado do menu de contexto de áudio do usuário (clique com botão direito)
+  interface ContextMenuState {
+    x: number;
+    y: number;
+    userId: string;
+    username: string;
+    avatarUrl?: string;
+  }
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
+  const handleParticipantContextMenu = useCallback(
+    (e: React.MouseEvent, p: { id: string; username: string; avatarUrl?: string; isLocal?: boolean }) => {
+      if (p.isLocal) return; // Não abre para o próprio usuário local
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        userId: p.id,
+        username: p.username,
+        avatarUrl: p.avatarUrl,
+      });
+    },
+    []
+  );
 
   // Manter volume e mute sincronizados
   useEffect(() => {
@@ -335,8 +366,10 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                     avatarUrl={p.avatarUrl}
                     isSpeaking={p.isSpeaking}
                     isMuted={p.isMuted}
+                    isLocallyMuted={isUserMuted(p.id)}
                     videoTrack={p.cameraTrack}
                     isLocal={p.isLocal}
+                    onContextMenu={(e) => handleParticipantContextMenu(e, p)}
                   />
                 </div>
               ))}
@@ -366,6 +399,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                   avatarUrl={p.avatarUrl}
                   isSpeaking={p.isSpeaking}
                   isMuted={p.isMuted}
+                  isLocallyMuted={isUserMuted(p.id)}
                   hasScreenShare={p.hasScreenShare}
                   onWatchScreenShare={
                     remoteShare
@@ -376,6 +410,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                   }
                   videoTrack={p.cameraTrack}
                   isLocal={p.isLocal}
+                  onContextMenu={(e) => handleParticipantContextMenu(e, p)}
                 />
               );
             })}
@@ -459,6 +494,22 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
         onClose={() => setIsScreenModalOpen(false)}
         onSelectSource={handleSelectScreenSource}
       />
+
+      {/* Menu de Contexto de Áudio Individual do Participante (Clique com Botão Direito) */}
+      {contextMenu && (
+        <UserAudioContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          userId={contextMenu.userId}
+          username={contextMenu.username}
+          avatarUrl={contextMenu.avatarUrl}
+          volume={getUserVolume(contextMenu.userId)}
+          isMuted={isUserMuted(contextMenu.userId)}
+          onVolumeChange={(newVol) => setUserVolume(contextMenu.userId, newVol)}
+          onToggleMute={() => toggleMuteUser(contextMenu.userId)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 };
