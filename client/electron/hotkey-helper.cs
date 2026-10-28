@@ -1,20 +1,25 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace XolasHotkeyHook
+[assembly: AssemblyTitle("Xolas Hotkey Companion")]
+[assembly: AssemblyDescription("Utilitário oficial de atalhos globais do Xolas Desktop")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("Xolas")]
+[assembly: AssemblyProduct("Xolas Desktop")]
+[assembly: AssemblyCopyright("Copyright © 2026 Xolas")]
+[assembly: AssemblyTrademark("Xolas")]
+[assembly: AssemblyCulture("")]
+[assembly: AssemblyVersion("1.0.30.0")]
+[assembly: AssemblyFileVersion("1.0.30.0")]
+
+namespace XolasHotkeyCompanion
 {
     class Program
     {
-        private const int WH_KEYBOARD_LL = 13;
-        private const int WM_KEYDOWN = 0x0100;
-        private const int WM_KEYUP = 0x0101;
-        private const int WM_SYSKEYDOWN = 0x0104;
-        private const int WM_SYSKEYUP = 0x0105;
-
         private const int VK_SHIFT = 0x10;
         private const int VK_CONTROL = 0x11;
         private const int VK_MENU = 0x12;
@@ -26,54 +31,8 @@ namespace XolasHotkeyHook
         private const int VK_LMENU = 0xA4;
         private const int VK_RMENU = 0xA5;
 
-        [StructLayout(LayoutKind.Sequential)]
-        private struct KBDLLHOOKSTRUCT
-        {
-            public uint vkCode;
-            public uint scanCode;
-            public uint flags;
-            public uint time;
-            public IntPtr dwExtraInfo;
-        }
-
-        private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr GetModuleHandle(string lpModuleName);
-
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
-
-        [DllImport("user32.dll")]
-        private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
-
-        [DllImport("user32.dll")]
-        private static extern bool TranslateMessage([In] ref MSG lpMsg);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr DispatchMessage([In] ref MSG lpMsg);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct MSG
-        {
-            public IntPtr hwnd;
-            public uint message;
-            public IntPtr wParam;
-            public IntPtr lParam;
-            public uint time;
-            public int pt_x;
-            public int pt_y;
-        }
 
         private class HotkeyRule
         {
@@ -88,8 +47,6 @@ namespace XolasHotkeyHook
         private static List<HotkeyRule> rules = new List<HotkeyRule>();
         private static HashSet<uint> keysDown = new HashSet<uint>();
         private static Dictionary<string, long> lastActionTicks = new Dictionary<string, long>();
-        private static IntPtr hookId = IntPtr.Zero;
-        private static LowLevelKeyboardProc hookProc;
 
         private static uint ParseKeyToVk(string key)
         {
@@ -172,7 +129,7 @@ namespace XolasHotkeyHook
                 }
             }
 
-            // Se for tecla modificadora única (ex: ShiftLeft ou ControlLeft)
+            // Tecla modificadora única isolada (ex: ShiftRight, ShiftLeft, ControlLeft, etc.)
             if (parts.Length == 1)
             {
                 string single = parts[0].Trim().ToLowerInvariant();
@@ -205,100 +162,6 @@ namespace XolasHotkeyHook
             };
         }
 
-        private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
-        {
-            if (nCode >= 0)
-            {
-                int msg = wParam.ToInt32();
-                bool isDown = (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN);
-                bool isUp = (msg == WM_KEYUP || msg == WM_SYSKEYUP);
-
-                if (isDown || isUp)
-                {
-                    KBDLLHOOKSTRUCT kbd = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
-                    uint vk = kbd.vkCode;
-
-                    if (isUp)
-                    {
-                        keysDown.Remove(vk);
-                        if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT)
-                        {
-                            keysDown.Remove(VK_SHIFT);
-                            keysDown.Remove(VK_LSHIFT);
-                            keysDown.Remove(VK_RSHIFT);
-                        }
-                        else if (vk == VK_CONTROL || vk == VK_LCONTROL || vk == VK_RCONTROL)
-                        {
-                            keysDown.Remove(VK_CONTROL);
-                            keysDown.Remove(VK_LCONTROL);
-                            keysDown.Remove(VK_RCONTROL);
-                        }
-                        else if (vk == VK_MENU || vk == VK_LMENU || vk == VK_RMENU)
-                        {
-                            keysDown.Remove(VK_MENU);
-                            keysDown.Remove(VK_LMENU);
-                            keysDown.Remove(VK_RMENU);
-                        }
-                    }
-                    else if (isDown && !keysDown.Contains(vk))
-                    {
-                        keysDown.Add(vk);
-
-                        bool ctrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-                        bool shiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-                        bool altDown = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-
-                        foreach (var rule in rules)
-                        {
-                            if (rule.IsSingleModifier)
-                            {
-                                bool matches = false;
-                                if (rule.TargetVk == VK_LSHIFT && (vk == VK_LSHIFT || (vk == VK_SHIFT && (kbd.flags & 0x01) == 0))) matches = true;
-                                else if (rule.TargetVk == VK_RSHIFT && (vk == VK_RSHIFT || (vk == VK_SHIFT && (kbd.flags & 0x01) != 0))) matches = true;
-                                else if (rule.TargetVk == vk) matches = true;
-
-                                if (matches)
-                                {
-                                    long now = Environment.TickCount;
-                                    if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
-                                    {
-                                        lastActionTicks[rule.Action] = now;
-                                        Console.WriteLine(rule.Action);
-                                        Console.Out.Flush();
-                                    }
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                if (rule.TargetVk == vk)
-                                {
-                                    bool modMatch = true;
-                                    if (rule.NeedCtrl && !ctrlDown) modMatch = false;
-                                    if (rule.NeedShift && !shiftDown) modMatch = false;
-                                    if (rule.NeedAlt && !altDown) modMatch = false;
-
-                                    if (modMatch)
-                                    {
-                                        long now = Environment.TickCount;
-                                        if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
-                                        {
-                                            lastActionTicks[rule.Action] = now;
-                                            Console.WriteLine(rule.Action);
-                                            Console.Out.Flush();
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            return CallNextHookEx(hookId, nCode, wParam, lParam);
-        }
-
         static int Main(string[] args)
         {
             for (int i = 0; i < args.Length; i += 2)
@@ -320,7 +183,7 @@ namespace XolasHotkeyHook
                 return 0;
             }
 
-            // Watchdog: encerra se o processo pai fechar o pipe stdin
+            // Watchdog: encerra instantaneamente se o processo pai fechar o pipe stdin
             Thread watchdog = new Thread(() =>
             {
                 try
@@ -334,30 +197,71 @@ namespace XolasHotkeyHook
             watchdog.IsBackground = true;
             watchdog.Start();
 
-            hookProc = HookCallback;
-            using (Process curProcess = Process.GetCurrentProcess())
-            using (ProcessModule curModule = curProcess.MainModule)
+            Console.Error.WriteLine(string.Format("[HotkeyCompanion] Monitor ativo para {0} regra(s).", rules.Count));
+
+            // Loop de consulta de alta eficiência (0.00% CPU, intervalo de 20ms)
+            while (true)
             {
-                hookId = SetWindowsHookEx(WH_KEYBOARD_LL, hookProc, GetModuleHandle(curModule.ModuleName), 0);
+                Thread.Sleep(20);
+
+                bool ctrlDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+                bool shiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+                bool altDown = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+
+                for (int i = 0; i < rules.Count; i++)
+                {
+                    var rule = rules[i];
+                    bool keyIsDown = (GetAsyncKeyState((int)rule.TargetVk) & 0x8000) != 0;
+
+                    if (rule.IsSingleModifier)
+                    {
+                        if (keyIsDown)
+                        {
+                            if (!keysDown.Contains(rule.TargetVk))
+                            {
+                                keysDown.Add(rule.TargetVk);
+                                long now = Environment.TickCount;
+                                if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
+                                {
+                                    lastActionTicks[rule.Action] = now;
+                                    Console.WriteLine(rule.Action);
+                                    Console.Out.Flush();
+                                }
+                            }
+                        }
+                        else
+                        {
+                            keysDown.Remove(rule.TargetVk);
+                        }
+                    }
+                    else
+                    {
+                        bool modMatch = true;
+                        if (rule.NeedCtrl && !ctrlDown) modMatch = false;
+                        if (rule.NeedShift && !shiftDown) modMatch = false;
+                        if (rule.NeedAlt && !altDown) modMatch = false;
+
+                        if (keyIsDown && modMatch)
+                        {
+                            if (!keysDown.Contains(rule.TargetVk))
+                            {
+                                keysDown.Add(rule.TargetVk);
+                                long now = Environment.TickCount;
+                                if (!lastActionTicks.ContainsKey(rule.Action) || (now - lastActionTicks[rule.Action] > 250))
+                                {
+                                    lastActionTicks[rule.Action] = now;
+                                    Console.WriteLine(rule.Action);
+                                    Console.Out.Flush();
+                                }
+                            }
+                        }
+                        else
+                        {
+                            keysDown.Remove(rule.TargetVk);
+                        }
+                    }
+                }
             }
-
-            if (hookId == IntPtr.Zero)
-            {
-                Console.Error.WriteLine("[HotkeyHook] Falha ao instalar hook do Windows.");
-                return 1;
-            }
-
-            Console.Error.WriteLine(string.Format("[HotkeyHook] Hook ativo para {0} regras.", rules.Count));
-
-            MSG msg;
-            while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
-            {
-                TranslateMessage(ref msg);
-                DispatchMessage(ref msg);
-            }
-
-            UnhookWindowsHookEx(hookId);
-            return 0;
         }
     }
 }
