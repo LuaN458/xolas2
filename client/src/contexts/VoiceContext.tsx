@@ -241,7 +241,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   interface RemoteAudioPipeline {
     source: MediaStreamAudioSourceNode;
     gainNode: GainNode;
-    destination: MediaStreamAudioDestinationNode;
     audioEl: HTMLAudioElement;
   }
   const remoteAudioCtxRef = useRef<AudioContext | null>(null);
@@ -255,20 +254,47 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return (userVol / 100) * (masterVol / 100);
   }, []);
 
-  const updateAllGainNodes = useCallback(() => {
-    remotePipelinesRef.current.forEach((pipeline, key) => {
-      try {
-        const peerId = key.split('-')[0];
-        const gain = calculateGain(peerId);
-        pipeline.gainNode.gain.setValueAtTime(gain, remoteAudioCtxRef.current?.currentTime || 0);
-      } catch {}
-    });
+  const applyGainToPeer = useCallback((peerId: string) => {
+    const gain = calculateGain(peerId);
+    const ctx = remoteAudioCtxRef.current;
+
     audioElementsRef.current.forEach((el, key) => {
-      const peerId = key.split('-')[0];
-      const gain = calculateGain(peerId);
-      el.volume = Math.max(0, Math.min(1, gain));
+      if (key.startsWith(`${peerId}-`)) {
+        const pipeline = remotePipelinesRef.current.get(key);
+        if (gain > 1.0 && ctx && ctx.state !== 'closed' && pipeline) {
+          try {
+            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+            pipeline.gainNode.gain.setValueAtTime(gain, ctx.currentTime);
+            el.muted = true; // Web Audio entrega a reprodução amplificada
+            el.volume = 1.0;
+          } catch {
+            el.muted = false;
+            el.volume = 1.0;
+          }
+        } else {
+          // Volume normal 0% a 100% nativo no elemento de áudio
+          if (pipeline && ctx && ctx.state !== 'closed') {
+            try {
+              pipeline.gainNode.gain.setValueAtTime(0, ctx.currentTime);
+            } catch {}
+          }
+          el.muted = (gain === 0);
+          el.volume = Math.max(0, Math.min(1, gain));
+        }
+      }
     });
   }, [calculateGain]);
+
+  const updateAllGainNodes = useCallback(() => {
+    const seenPeers = new Set<string>();
+    audioElementsRef.current.forEach((_, key) => {
+      const peerId = key.split('-')[0];
+      if (!seenPeers.has(peerId)) {
+        seenPeers.add(peerId);
+        applyGainToPeer(peerId);
+      }
+    });
+  }, [applyGainToPeer]);
 
   // Emite o estado atual do usuário local para os demais membros do canal
   const emitLocalVoiceState = useCallback(() => {
@@ -395,7 +421,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const mediaStream = stream || new MediaStream([track]);
 
-    // Tentativa de encadear via Web Audio API GainNode para amplificação limpa de até 200%
+    // O elemento de áudio DEVE receber mediaStream diretamente para que o Chromium
+    // continue decodificando ativamente os pacotes WebRTC sem suspender por inatividade!
+    if (audioEl.srcObject !== mediaStream) {
+      audioEl.srcObject = mediaStream;
+    }
+
+    // Configurar pipeline Web Audio para suporte a volumes amplificados (> 100%)
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
@@ -411,36 +443,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!pipeline) {
           const source = ctx.createMediaStreamSource(mediaStream);
           const gainNode = ctx.createGain();
-          const destination = ctx.createMediaStreamDestination();
           source.connect(gainNode);
-          gainNode.connect(destination);
+          gainNode.connect(ctx.destination);
 
-          pipeline = { source, gainNode, destination, audioEl };
+          pipeline = { source, gainNode, audioEl };
           remotePipelinesRef.current.set(key, pipeline);
         }
-
-        const gain = calculateGain(peerId);
-        pipeline.gainNode.gain.setValueAtTime(gain, ctx.currentTime);
-
-        if (audioEl.srcObject !== pipeline.destination.stream) {
-          audioEl.srcObject = pipeline.destination.stream;
-        }
-        audioEl.volume = 1.0;
-        audioEl.play().catch(() => {});
-        return;
       }
     } catch (err) {
-      console.warn('[VoiceContext] Fallback para áudio direto sem GainNode:', err);
+      console.warn('[VoiceContext] Erro ao preparar pipeline Web Audio:', err);
     }
 
-    // Fallback nativo se Web Audio falhar
-    if (audioEl.srcObject !== mediaStream) {
-      audioEl.srcObject = mediaStream;
-    }
-    const gain = calculateGain(peerId);
-    audioEl.volume = Math.max(0, Math.min(1, gain));
+    applyGainToPeer(peerId);
     audioEl.play().catch(() => {});
-  }, [calculateGain]);
+  }, [applyGainToPeer]);
 
   // Remove conexões e elementos de mídia de um participante específico
   const cleanupPeer = useCallback((peerId: string) => {
@@ -717,11 +733,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
         screenSendersRef.current.set(remoteUserId, senders);
       } else {
-        // Se este cliente local NÃO estiver transmitindo tela, registra transceivers recvonly de vídeo e áudio.
-        // Isso garante que ofertas/respostas WebRTC sempre declarem m=video e m=audio para receber transmissões!
+        // Se este cliente local NÃO estiver transmitindo tela, registra transceiver recvonly de vídeo.
+        // Isso garante que ofertas/respostas WebRTC sempre declarem m=video para receber transmissões!
+        // O áudio de voz já é gerenciado pelo microfone via pc.addTrack!
         try {
           pc.addTransceiver('video', { direction: 'recvonly' });
-          pc.addTransceiver('audio', { direction: 'recvonly' });
         } catch {}
       }
 
@@ -819,7 +835,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender, ensureScreenTracksForPeer]
   );
 
-  // Configura detector de atividade de voz (VAD / Noise Gate estilo Discord) para o microfone local
+  // Configura detector de atividade de voz (VAD / Indicador de Fala estilo Discord) para o microfone local
   const setupLocalVAD = useCallback(
     (stream: MediaStream) => {
       if (vadCleanupRef.current) {
@@ -831,20 +847,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const micTrack = stream.getAudioTracks()[0];
         if (!micTrack) return;
 
-        // Criar um clone da faixa exclusivamente para o analisador de VAD.
-        // O clone compartilha o hardware de captura, mas possui estado .enabled independente,
-        // garantindo que mutar o micTrack na transmissão NUNCA ensurdeça o analisador de voz!
-        const analysisTrack = micTrack.clone();
-        analysisTrack.enabled = true;
-        const analysisStream = new MediaStream([analysisTrack]);
-
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
         const audioCtx: AudioContext = new AudioCtx();
         if (audioCtx.state === 'suspended') {
           audioCtx.resume().catch(() => {});
         }
 
-        const source = audioCtx.createMediaStreamSource(analysisStream);
+        const source = audioCtx.createMediaStreamSource(stream);
         const analyser = audioCtx.createAnalyser();
         analyser.fftSize = 512;
         source.connect(analyser);
@@ -869,16 +878,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             return;
           }
 
+          // Se não estiver mutado, garante que a faixa física do microfone continue transmitindo
+          if (micTrack && !micTrack.enabled) {
+            micTrack.enabled = true;
+          }
+
           const threshold = voiceActivationThresholdRef.current;
 
-          // Se o limiar for 0%, modo de transmissão contínua sem nenhum corte
+          // Se o limiar for 0%, modo de fala contínua sem cálculo de nível
           if (threshold === 0) {
             if (hangoverTimeout) {
               window.clearTimeout(hangoverTimeout);
               hangoverTimeout = null;
-            }
-            if (micTrack && !micTrack.enabled) {
-              micTrack.enabled = true;
             }
             if (!isLocalSpeakingRef.current) {
               isLocalSpeakingRef.current = true;
@@ -919,26 +930,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               window.clearTimeout(hangoverTimeout);
               hangoverTimeout = null;
             }
-            if (micTrack && !micTrack.enabled) {
-              micTrack.enabled = true;
-            }
             if (!isLocalSpeakingRef.current) {
               isLocalSpeakingRef.current = true;
               syncVoiceState();
               emitLocalVoiceState();
             }
           } else {
-            // Cauda de fala suave de 500ms (padrão Discord) para pausas naturais entre palavras
+            // Cauda de fala suave de 400ms (padrão Discord) para o anel verde de fala
             if (isLocalSpeakingRef.current && hangoverTimeout === null) {
               hangoverTimeout = window.setTimeout(() => {
                 hangoverTimeout = null;
-                if (micTrack) {
-                  micTrack.enabled = false;
-                }
                 isLocalSpeakingRef.current = false;
                 syncVoiceState();
                 emitLocalVoiceState();
-              }, 500);
+              }, 400);
             }
           }
         }, 40);
@@ -947,10 +952,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           clearInterval(interval);
           if (hangoverTimeout) window.clearTimeout(hangoverTimeout);
           try {
-            analysisTrack.stop();
+            source.disconnect();
+            analyser.disconnect();
+            audioCtx.close().catch(() => {});
           } catch {}
-          source.disconnect();
-          audioCtx.close().catch(() => {});
         };
       } catch (err) {
         console.warn('Falha ao iniciar detector de voz local:', err);
@@ -2202,23 +2207,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return updated;
     });
 
-    // Atualizar ganho imediatamente nos pipelines ativos
-    remotePipelinesRef.current.forEach((pipeline, key) => {
-      if (key.startsWith(`${userId}-`)) {
-        try {
-          const gain = calculateGain(userId);
-          pipeline.gainNode.gain.setValueAtTime(gain, remoteAudioCtxRef.current?.currentTime || 0);
-        } catch {}
-      }
-    });
-
-    audioElementsRef.current.forEach((el, key) => {
-      if (key.startsWith(`${userId}-`)) {
-        const gain = calculateGain(userId);
-        el.volume = Math.max(0, Math.min(1, gain));
-      }
-    });
-  }, [calculateGain]);
+    applyGainToPeer(userId);
+  }, [applyGainToPeer]);
 
   const toggleMuteUser = useCallback((userId: string) => {
     setUserMuted((prev) => {
@@ -2231,23 +2221,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return updated;
     });
 
-    // Atualizar ganho imediatamente nos pipelines ativos
-    remotePipelinesRef.current.forEach((pipeline, key) => {
-      if (key.startsWith(`${userId}-`)) {
-        try {
-          const gain = calculateGain(userId);
-          pipeline.gainNode.gain.setValueAtTime(gain, remoteAudioCtxRef.current?.currentTime || 0);
-        } catch {}
-      }
-    });
-
-    audioElementsRef.current.forEach((el, key) => {
-      if (key.startsWith(`${userId}-`)) {
-        const gain = calculateGain(userId);
-        el.volume = Math.max(0, Math.min(1, gain));
-      }
-    });
-  }, [calculateGain]);
+    applyGainToPeer(userId);
+  }, [applyGainToPeer]);
 
   const getUserVolume = useCallback((userId: string): number => {
     return userVolumesRef.current[userId] ?? 100;

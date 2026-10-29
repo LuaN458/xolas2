@@ -677,18 +677,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </button>
 
           <button
-            onClick={() => setActiveTab('updates')}
-            className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
-              activeTab === 'updates'
-                ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
-                : 'text-obsidian-text-secondary border-transparent hover:text-white hover:bg-obsidian-card/60'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-indigo-400" />
-            <span>Atualizações</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('keybindings')}
             className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
               activeTab === 'keybindings'
@@ -698,6 +686,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           >
             <Keyboard className="w-4 h-4 text-purple-400" />
             <span>Teclas de Atalho</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('updates')}
+            className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
+              activeTab === 'updates'
+                ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
+                : 'text-obsidian-text-secondary border-transparent hover:text-white hover:bg-obsidian-card/60'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <span>Atualizações</span>
           </button>
         </div>
 
@@ -1179,122 +1179,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             </div>
           )}
 
-          {activeTab === 'updates' && (
-            /* Nova Aba Exclusiva de Atualizações */
-            <div className="space-y-5">
-              {/* Card de Destaque da Versão */}
-              <div className="p-5 bg-obsidian-card rounded-2xl border border-obsidian-border space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3.5">
-                    <div className="p-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 shadow-inner">
-                      <Sparkles className="w-5 h-5 text-indigo-400" />
-                    </div>
-                    <div>
-                      <div className="flex items-center space-x-2">
-                        <h3 className="text-sm font-bold text-white tracking-wide">Xolas Desktop</h3>
-                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-obsidian-surface text-indigo-300 border border-obsidian-border shadow-sm">
-                          v{appVersion}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
-                        Aplicativo de Comunicação e Transmissão Studio Obsidian
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleManualCheckUpdate}
-                    disabled={isCheckingUpdate}
-                    className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-semibold transition-all flex items-center space-x-2 shadow-lg shadow-indigo-500/25 disabled:opacity-50 cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
-                    <span>{isCheckingUpdate ? 'Verificando...' : 'Verificar Atualização'}</span>
-                  </button>
-                </div>
-
-                {/* Status do Sistema */}
-                <div className="p-3.5 bg-obsidian-surface rounded-xl border border-obsidian-border flex items-center space-x-2.5 text-xs">
-                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isCheckingUpdate || isDownloading ? 'bg-indigo-400 animate-ping' : isUpdateReady ? 'bg-emerald-400 animate-bounce' : 'bg-emerald-400 animate-pulse'}`} />
-                  <span className="text-obsidian-text-secondary font-medium">Status do Sistema:</span>
-                  <span className="text-white font-medium text-[11px] truncate flex-1">
-                    {updateStatus || 'Você está utilizando a versão mais recente.'}
-                  </span>
-                </div>
-
-                {/* Barra de Progresso Durante o Download */}
-                {isDownloading && (
-                  <div className="p-3.5 bg-obsidian-surface rounded-xl border border-indigo-500/30 space-y-2 animate-in fade-in duration-200">
-                    <div className="flex justify-between text-xs">
-                      <span className="flex items-center space-x-1.5 text-indigo-400 font-semibold">
-                        <Download className="w-3.5 h-3.5 animate-bounce" />
-                        <span>Baixando atualização {availableVersion ? `v${availableVersion}` : ''}...</span>
-                      </span>
-                      <span className="font-mono font-bold text-indigo-300">{downloadProgress}%</span>
-                    </div>
-                    <div className="w-full h-2 bg-obsidian-card rounded-full overflow-hidden border border-obsidian-border">
-                      <div
-                        className="h-full bg-gradient-to-r from-indigo-500 via-indigo-400 to-emerald-400 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.max(5, downloadProgress)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Botão de Reiniciar Quando Baixada */}
-                {isUpdateReady && (
-                  <div className="p-4 bg-gradient-to-r from-emerald-500/10 to-indigo-500/10 border border-emerald-500/40 rounded-xl flex items-center justify-between animate-in fade-in duration-300 shadow-lg shadow-emerald-500/10">
-                    <div>
-                      <h4 className="text-xs font-bold text-white flex items-center space-x-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                        <span>Nova versão pronta para instalação!</span>
-                      </h4>
-                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
-                        A versão {availableVersion ? `v${availableVersion}` : ''} foi baixada. Reinicie o Xolas para aplicar.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => window.electronAPI?.restartAndInstall?.()}
-                      className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shadow-lg shadow-emerald-500/25 cursor-pointer shrink-0 ml-3"
-                    >
-                      <ArrowUpCircle className="w-4 h-4" />
-                      <span>Reiniciar e Aplicar</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Informações do Canal e Distribuição */}
-              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3">
-                <h4 className="text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider">
-                  Canal de Distribuição
-                </h4>
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border">
-                    <span className="text-[10px] text-obsidian-text-muted block mb-0.5">Provedor Oficial</span>
-                    <span className="font-semibold text-white">GitHub Releases</span>
-                  </div>
-                  <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border">
-                    <span className="text-[10px] text-obsidian-text-muted block mb-0.5">Repositório</span>
-                    <span className="font-semibold text-indigo-400 font-mono">LuaN458/xolas2</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Informações sobre Atualizações em Segundo Plano */}
-              <div className="p-3.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-start space-x-3 text-xs text-emerald-400">
-                <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <span className="font-semibold text-emerald-300 block">Atualizações Automáticas Ativas</span>
-                  <p className="text-[11px] text-emerald-300/80 leading-relaxed">
-                    O Xolas verifica o repositório silenciosamente a cada 2 horas. Quando houver uma nova versão, ela será baixada automaticamente em segundo plano e você receberá uma notificação na tela para reiniciar o aplicativo.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Aba: Teclas de Atalho */}
           {activeTab === 'keybindings' && (
             <div className="space-y-6 animate-in fade-in duration-200">
@@ -1491,6 +1375,122 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   <span className="font-semibold text-purple-200 block">Atalhos Globais Ativos no Windows</span>
                   <p className="text-[11px] text-purple-300/80 leading-relaxed">
                     Você pode pressionar as teclas configuradas a qualquer momento, mesmo quando estiver jogando jogos em tela cheia ou com o Xolas minimizado na bandeja. Pressione <kbd className="px-1.5 py-0.5 bg-obsidian-card border border-purple-500/30 rounded text-[10px] font-mono font-bold text-white">ESC</kbd> para cancelar uma gravação.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Aba: Atualizações (Sempre por último) */}
+          {activeTab === 'updates' && (
+            <div className="space-y-5 animate-in fade-in duration-200">
+              {/* Card de Destaque da Versão */}
+              <div className="p-5 bg-obsidian-card rounded-2xl border border-obsidian-border space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3.5">
+                    <div className="p-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 shadow-inner">
+                      <Sparkles className="w-5 h-5 text-indigo-400" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <h3 className="text-sm font-bold text-white tracking-wide">Xolas Desktop</h3>
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-obsidian-surface text-indigo-300 border border-obsidian-border shadow-sm">
+                          v{appVersion}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                        Aplicativo de Comunicação e Transmissão Studio Obsidian
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleManualCheckUpdate}
+                    disabled={isCheckingUpdate}
+                    className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-semibold transition-all flex items-center space-x-2 shadow-lg shadow-indigo-500/25 disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdate ? 'animate-spin' : ''}`} />
+                    <span>{isCheckingUpdate ? 'Verificando...' : 'Verificar Atualização'}</span>
+                  </button>
+                </div>
+
+                {/* Status do Sistema */}
+                <div className="p-3.5 bg-obsidian-surface rounded-xl border border-obsidian-border flex items-center space-x-2.5 text-xs">
+                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isCheckingUpdate || isDownloading ? 'bg-indigo-400 animate-ping' : isUpdateReady ? 'bg-emerald-400 animate-bounce' : 'bg-emerald-400 animate-pulse'}`} />
+                  <span className="text-obsidian-text-secondary font-medium">Status do Sistema:</span>
+                  <span className="text-white font-medium text-[11px] truncate flex-1">
+                    {updateStatus || 'Você está utilizando a versão mais recente.'}
+                  </span>
+                </div>
+
+                {/* Barra de Progresso Durante o Download */}
+                {isDownloading && (
+                  <div className="p-3.5 bg-obsidian-surface rounded-xl border border-indigo-500/30 space-y-2 animate-in fade-in duration-200">
+                    <div className="flex justify-between text-xs">
+                      <span className="flex items-center space-x-1.5 text-indigo-400 font-semibold">
+                        <Download className="w-3.5 h-3.5 animate-bounce" />
+                        <span>Baixando atualização {availableVersion ? `v${availableVersion}` : ''}...</span>
+                      </span>
+                      <span className="font-mono font-bold text-indigo-300">{downloadProgress}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-obsidian-card rounded-full overflow-hidden border border-obsidian-border">
+                      <div
+                        className="h-full bg-gradient-to-r from-indigo-500 via-indigo-400 to-emerald-400 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.max(5, downloadProgress)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Botão de Reiniciar Quando Baixada */}
+                {isUpdateReady && (
+                  <div className="p-4 bg-gradient-to-r from-emerald-500/10 to-indigo-500/10 border border-emerald-500/40 rounded-xl flex items-center justify-between animate-in fade-in duration-300 shadow-lg shadow-emerald-500/10">
+                    <div>
+                      <h4 className="text-xs font-bold text-white flex items-center space-x-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                        <span>Nova versão pronta para instalação!</span>
+                      </h4>
+                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                        A versão {availableVersion ? `v${availableVersion}` : ''} foi baixada. Reinicie o Xolas para aplicar.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => window.electronAPI?.restartAndInstall?.()}
+                      className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shadow-lg shadow-emerald-500/25 cursor-pointer shrink-0 ml-3"
+                    >
+                      <ArrowUpCircle className="w-4 h-4" />
+                      <span>Reiniciar e Aplicar</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Informações do Canal e Distribuição */}
+              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3">
+                <h4 className="text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider">
+                  Canal de Distribuição
+                </h4>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border">
+                    <span className="text-[10px] text-obsidian-text-muted block mb-0.5">Provedor Oficial</span>
+                    <span className="font-semibold text-white">GitHub Releases</span>
+                  </div>
+                  <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border">
+                    <span className="text-[10px] text-obsidian-text-muted block mb-0.5">Repositório</span>
+                    <span className="font-semibold text-indigo-400 font-mono">LuaN458/xolas2</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informações sobre Atualizações em Segundo Plano */}
+              <div className="p-3.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-start space-x-3 text-xs text-emerald-400">
+                <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-semibold text-emerald-300 block">Atualizações Automáticas Ativas</span>
+                  <p className="text-[11px] text-emerald-300/80 leading-relaxed">
+                    O Xolas verifica o repositório silenciosamente a cada 2 horas. Quando houver uma nova versão, ela será baixada automaticamente em segundo plano e você receberá uma notificação na tela para reiniciar o aplicativo.
                   </p>
                 </div>
               </div>
