@@ -32,3 +32,37 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* Animações Modernas do Carregador Xolas (Obsidian ⌘ Pulse & Orbit) */
+@keyframes xolas-orbit-cw {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes xolas-orbit-ccw {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(-360deg); }
+}
+
+@keyframes xolas-pulse-glow {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 16px rgba(99, 102, 241, 0.4));
+  }
+  50% {
+    transform: scale(1.08);
+    filter: drop-shadow(0 0 28px rgba(99, 102, 241, 0.75));
+  }
+}
+
+.animate-xolas-orbit-cw {
+  animation: xolas-orbit-cw 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-xolas-orbit-ccw {
+  animation: xolas-orbit-ccw 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-xolas-pulse-glow {
+  animation: xolas-pulse-glow 2s ease-in-out infinite;
+}

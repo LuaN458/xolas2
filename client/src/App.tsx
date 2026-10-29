@@ -20,6 +20,7 @@ import { AuthModal } from './components/modals/AuthModal';
 import { AdminModal } from './components/modals/AdminModal';
 import { ForceUpdateModal } from './components/modals/ForceUpdateModal';
 import { UpdateNotificationBanner } from './components/layout/UpdateNotificationBanner';
+import { LoadingScreen } from './components/ui/LoadingScreen';
 import { MessageSquareText } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -283,14 +284,7 @@ export const App: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <div className="h-screen w-screen bg-obsidian-bg flex items-center justify-center text-obsidian-text-muted">
-        <div className="flex flex-col items-center space-y-3">
-          <div className="w-8 h-8 border-2 border-obsidian-accent border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-mono">Conectando ao Xolas...</span>
-        </div>
-      </div>
-    );
+    return <LoadingScreen fullscreen size="md" />;
   }
 
   return (
