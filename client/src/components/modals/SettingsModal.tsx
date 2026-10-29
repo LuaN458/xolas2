@@ -59,7 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setVoiceActivationThreshold,
   } = useVoice();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'audio' | 'updates' | 'keybindings'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'audio' | 'keybindings' | 'updates'>('profile');
   const [newNickname, setNewNickname] = useState(user?.username || '');
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);

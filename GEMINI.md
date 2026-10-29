@@ -1,5 +1,8 @@
 # Regras e Diretrizes do Projeto Xolas
 
+## Diretrizes de Interface e Layout
+- **Aba de Atualizações Sempre por Último**: Em qualquer menu, barra de navegação ou modal de configurações (`SettingsModal`) onde a opção/aba de **Atualizações** estiver presente, ela deve permanecer **obrigatoriamente como o último item da lista** (à direita/no fim de todas as outras opções), garantindo consistência visual e previsibilidade de navegação.
+
 ## Ciclo de Finalização de Tarefas (Obrigatório)
 Sempre que finalizar qualquer tarefa, modificação ou correção no projeto:
 1. **Incremento de Versão**: Incrementar o patch version em `package.json` e `client/package.json` (ex: `1.0.24` -> `1.0.25`).
