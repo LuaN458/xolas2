@@ -86,6 +86,8 @@ declare global {
       onProcessAudioChunk?: (callback: (chunk: Uint8Array) => void) => () => void;
       registerGlobalHotkeys?: (hotkeys: Record<string, string>) => Promise<{ success: boolean; registered: string[] }>;
       onHotkeyTrigger?: (callback: (action: string) => void) => () => void;
+      loadUserSettings?: () => Promise<any>;
+      saveUserSettings?: (settings: any) => Promise<{ success: boolean }>;
     };
   }
 }

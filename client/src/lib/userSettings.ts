@@ -133,43 +133,92 @@ export function keyboardEventToAccelerator(e: KeyboardEvent, allowSingleModifier
   return parts.join('+');
 }
 
+// Cache em memória para sincronização atômica e evitar leitura de estados obsoletos
+let cachedSettings: UserAudioSettings | null = null;
+let isNativeSyncInitialized = false;
+
 /**
- * Carrega as preferências salvas no localStorage com suporte a fallbacks seguros e chaves legadas.
+ * Normaliza e valida um objeto parcial de configurações aplicando valores padrão seguros.
+ */
+function sanitizeUserSettings(parsed: any): UserAudioSettings {
+  const legacyDevice = typeof localStorage !== 'undefined' ? localStorage.getItem('selected_audio_device') : null;
+  const legacyMaster = typeof localStorage !== 'undefined' ? localStorage.getItem('master_output_volume') : null;
+
+  const masterOutput = Number(parsed?.masterOutputVolume ?? (legacyMaster ? Number(legacyMaster) : DEFAULT_USER_SETTINGS.masterOutputVolume));
+  const streamVol = Number(parsed?.streamVolume ?? DEFAULT_USER_SETTINGS.streamVolume);
+  const micGain = Number(parsed?.micInputGain ?? DEFAULT_USER_SETTINGS.micInputGain);
+  const thresholdVal = Number(parsed?.voiceActivationThreshold ?? DEFAULT_USER_SETTINGS.voiceActivationThreshold);
+  const fpsVal = Number(parsed?.screenFps ?? DEFAULT_USER_SETTINGS.screenFps);
+
+  const rawKeybindings = parsed?.keybindings || {};
+  const keybindings: UserKeybindings = {
+    toggleMute: rawKeybindings.toggleMute !== undefined ? rawKeybindings.toggleMute : DEFAULT_USER_KEYBINDINGS.toggleMute,
+    toggleDeafen: rawKeybindings.toggleDeafen !== undefined ? rawKeybindings.toggleDeafen : DEFAULT_USER_KEYBINDINGS.toggleDeafen,
+  };
+
+  return {
+    selectedAudioDeviceId: parsed?.selectedAudioDeviceId || legacyDevice || DEFAULT_USER_SETTINGS.selectedAudioDeviceId,
+    selectedAudioDeviceLabel: parsed?.selectedAudioDeviceLabel || '',
+    masterOutputVolume: isNaN(masterOutput) ? 100 : Math.max(0, Math.min(100, masterOutput)),
+    streamVolume: isNaN(streamVol) ? 100 : Math.max(0, Math.min(100, streamVol)),
+    isStreamMuted: Boolean(parsed?.isStreamMuted ?? DEFAULT_USER_SETTINGS.isStreamMuted),
+    micInputGain: isNaN(micGain) ? 100 : Math.max(0, Math.min(100, micGain)),
+    voiceActivationThreshold: isNaN(thresholdVal) ? 20 : Math.max(0, Math.min(100, thresholdVal)),
+    screenResolution: parsed?.screenResolution === '720p' ? '720p' : '1080p',
+    screenFps: fpsVal === 30 ? 30 : 60,
+    screenIncludeAudio: parsed?.screenIncludeAudio !== undefined ? Boolean(parsed.screenIncludeAudio) : DEFAULT_USER_SETTINGS.screenIncludeAudio,
+    keybindings,
+  };
+}
+
+/**
+ * Inicializa a sincronização com o arquivo nativo JSON do Electron (AppData/Xolas/user-settings.json).
+ */
+export function initNativeSettingsSync(): void {
+  if (isNativeSyncInitialized || typeof window === 'undefined') return;
+  isNativeSyncInitialized = true;
+
+  if (window.electronAPI?.loadUserSettings) {
+    window.electronAPI.loadUserSettings().then((nativeSettings) => {
+      if (nativeSettings && typeof nativeSettings === 'object') {
+        const sanitized = sanitizeUserSettings(nativeSettings);
+        cachedSettings = sanitized;
+
+        try {
+          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(sanitized));
+          if (sanitized.selectedAudioDeviceId) {
+            localStorage.setItem('selected_audio_device', sanitized.selectedAudioDeviceId);
+          }
+          localStorage.setItem('master_output_volume', String(sanitized.masterOutputVolume));
+        } catch {}
+
+        window.dispatchEvent(new CustomEvent(SETTINGS_EVENT_NAME, { detail: sanitized }));
+      }
+    }).catch((err) => {
+      console.warn('[Settings] Falha ao sincronizar configurações nativas do Electron:', err);
+    });
+  }
+}
+
+// Disparar sincronização na inicialização
+if (typeof window !== 'undefined') {
+  initNativeSettingsSync();
+}
+
+/**
+ * Carrega as preferências salvas com suporte a cache em memória, arquivo físico e localStorage.
  */
 export function getUserSettings(): UserAudioSettings {
+  if (cachedSettings) {
+    return { ...cachedSettings };
+  }
+
   try {
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SETTINGS_STORAGE_KEY) : null;
     const parsed = raw ? JSON.parse(raw) : {};
-
-    // Compatibilidade com chaves legadas anteriores
-    const legacyDevice = localStorage.getItem('selected_audio_device');
-    const legacyMaster = localStorage.getItem('master_output_volume');
-
-    const masterOutput = Number(parsed.masterOutputVolume ?? (legacyMaster ? Number(legacyMaster) : DEFAULT_USER_SETTINGS.masterOutputVolume));
-    const streamVol = Number(parsed.streamVolume ?? DEFAULT_USER_SETTINGS.streamVolume);
-    const micGain = Number(parsed.micInputGain ?? DEFAULT_USER_SETTINGS.micInputGain);
-    const thresholdVal = Number(parsed.voiceActivationThreshold ?? DEFAULT_USER_SETTINGS.voiceActivationThreshold);
-    const fpsVal = Number(parsed.screenFps ?? DEFAULT_USER_SETTINGS.screenFps);
-
-    const rawKeybindings = parsed.keybindings || {};
-    const keybindings: UserKeybindings = {
-      toggleMute: rawKeybindings.toggleMute !== undefined ? rawKeybindings.toggleMute : DEFAULT_USER_KEYBINDINGS.toggleMute,
-      toggleDeafen: rawKeybindings.toggleDeafen !== undefined ? rawKeybindings.toggleDeafen : DEFAULT_USER_KEYBINDINGS.toggleDeafen,
-    };
-
-    return {
-      selectedAudioDeviceId: parsed.selectedAudioDeviceId || legacyDevice || DEFAULT_USER_SETTINGS.selectedAudioDeviceId,
-      selectedAudioDeviceLabel: parsed.selectedAudioDeviceLabel || '',
-      masterOutputVolume: isNaN(masterOutput) ? 100 : Math.max(0, Math.min(100, masterOutput)),
-      streamVolume: isNaN(streamVol) ? 100 : Math.max(0, Math.min(100, streamVol)),
-      isStreamMuted: Boolean(parsed.isStreamMuted ?? DEFAULT_USER_SETTINGS.isStreamMuted),
-      micInputGain: isNaN(micGain) ? 100 : Math.max(0, Math.min(100, micGain)),
-      voiceActivationThreshold: isNaN(thresholdVal) ? 20 : Math.max(0, Math.min(100, thresholdVal)),
-      screenResolution: parsed.screenResolution === '720p' ? '720p' : '1080p',
-      screenFps: fpsVal === 30 ? 30 : 60,
-      screenIncludeAudio: parsed.screenIncludeAudio !== undefined ? Boolean(parsed.screenIncludeAudio) : DEFAULT_USER_SETTINGS.screenIncludeAudio,
-      keybindings,
-    };
+    const sanitized = sanitizeUserSettings(parsed);
+    cachedSettings = sanitized;
+    return { ...sanitized };
   } catch (err) {
     console.warn('Erro ao carregar configurações do usuário:', err);
     return { ...DEFAULT_USER_SETTINGS };
@@ -178,37 +227,39 @@ export function getUserSettings(): UserAudioSettings {
 
 /**
  * Resolve o dispositivo de áudio ativo: tenta por ID; se não encontrar, tenta por Label (para contornar
- * re-hashing de GUIDs do Windows); se nenhum corresponder, retorna 'default'.
+ * re-hashing de GUIDs do Windows); se nenhum corresponder, retorna 'default' com flag isFallback=true.
  */
 export function resolveAudioDevice(
   devices: MediaDeviceInfo[],
   savedId?: string,
   savedLabel?: string
-): { deviceId: string; label: string } {
+): { deviceId: string; label: string; isFallback: boolean } {
   if (!devices || devices.length === 0) {
-    return { deviceId: 'default', label: 'Padrão do Sistema' };
+    return { deviceId: 'default', label: 'Padrão do Sistema', isFallback: true };
   }
 
   // 1. Tentar correspondência exata por ID válido (que não seja 'default' ou 'communications')
   if (savedId && savedId !== 'default' && savedId !== 'communications') {
     const matchId = devices.find((d) => d.deviceId === savedId);
     if (matchId) {
-      return { deviceId: matchId.deviceId, label: matchId.label };
+      return { deviceId: matchId.deviceId, label: matchId.label || savedLabel || '', isFallback: false };
     }
   }
 
-  // 2. Tentar correspondência por Label se o ID não for encontrado
+  // 2. Tentar correspondência por Label se o ID não for encontrado (apenas se houver labels expostos)
   if (savedLabel && savedLabel.trim()) {
     const cleanSaved = savedLabel.toLowerCase().trim();
     const matchLabel = devices.find(
       (d) => d.label && d.label.toLowerCase().trim() === cleanSaved
     );
     if (matchLabel) {
-      return { deviceId: matchLabel.deviceId, label: matchLabel.label };
+      return { deviceId: matchLabel.deviceId, label: matchLabel.label, isFallback: false };
     }
   }
 
-  return { deviceId: 'default', label: 'Padrão do Sistema' };
+  // Se o usuário já havia configurado 'default', não é fallback de erro
+  const isExplicitDefault = !savedId || savedId === 'default';
+  return { deviceId: 'default', label: 'Padrão do Sistema', isFallback: !isExplicitDefault };
 }
 
 /**
@@ -220,6 +271,7 @@ export function saveUserSetting<K extends keyof UserAudioSettings>(key: K, value
     ...current,
     [key]: value,
   };
+  cachedSettings = updated;
 
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updated));
@@ -229,6 +281,11 @@ export function saveUserSetting<K extends keyof UserAudioSettings>(key: K, value
       localStorage.setItem('selected_audio_device', String(value));
     } else if (key === 'masterOutputVolume') {
       localStorage.setItem('master_output_volume', String(value));
+    }
+
+    // Persistir em arquivo físico no Electron
+    if (typeof window !== 'undefined' && window.electronAPI?.saveUserSettings) {
+      window.electronAPI.saveUserSettings(updated).catch(() => {});
     }
 
     // Disparar evento para que componentes abertos sincronizem seus estados instantaneamente
@@ -251,6 +308,7 @@ export function saveMultipleUserSettings(partial: Partial<UserAudioSettings>): U
     ...current,
     ...partial,
   };
+  cachedSettings = updated;
 
   try {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updated));
@@ -260,6 +318,11 @@ export function saveMultipleUserSettings(partial: Partial<UserAudioSettings>): U
     }
     if (partial.masterOutputVolume !== undefined) {
       localStorage.setItem('master_output_volume', String(partial.masterOutputVolume));
+    }
+
+    // Persistir em arquivo físico no Electron
+    if (typeof window !== 'undefined' && window.electronAPI?.saveUserSettings) {
+      window.electronAPI.saveUserSettings(updated).catch(() => {});
     }
 
     if (typeof window !== 'undefined') {

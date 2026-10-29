@@ -1047,17 +1047,30 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setAudioDevices(uniqueInputs);
 
         const settings = getUserSettings();
-        const resolved = resolveAudioDevice(
-          uniqueInputs,
-          settings.selectedAudioDeviceId,
-          settings.selectedAudioDeviceLabel
-        );
+        const hasLabels = uniqueInputs.some((d) => d.label && d.label.trim().length > 0);
 
-        if (resolved.deviceId !== settings.selectedAudioDeviceId) {
-          setSelectedAudioDeviceIdState(resolved.deviceId);
-          saveUserSetting('selectedAudioDeviceId', resolved.deviceId);
-          if (resolved.label) {
-            saveUserSetting('selectedAudioDeviceLabel', resolved.label);
+        // Se ainda não temos dispositivos ou os rótulos ainda não foram desbloqueados pelo navegador,
+        // NÃO sobrescrever as preferências salvas do usuário!
+        if (uniqueInputs.length > 0 && hasLabels) {
+          const resolved = resolveAudioDevice(
+            uniqueInputs,
+            settings.selectedAudioDeviceId,
+            settings.selectedAudioDeviceLabel
+          );
+
+          // Se encontrou uma correspondência exata ou por rótulo (ex: GUID re-hasheado pelo Windows)
+          if (!resolved.isFallback && resolved.deviceId !== settings.selectedAudioDeviceId) {
+            setSelectedAudioDeviceIdState(resolved.deviceId);
+            saveUserSetting('selectedAudioDeviceId', resolved.deviceId);
+            if (resolved.label) {
+              saveUserSetting('selectedAudioDeviceLabel', resolved.label);
+            }
+          } else if (resolved.isFallback) {
+            // Se o microfone salvo não estiver plugado no momento, utiliza 'default' apenas em tempo
+            // de execução na chamada, SEM apagar a configuração salva pelo usuário do disco!
+            setSelectedAudioDeviceIdState('default');
+          } else {
+            setSelectedAudioDeviceIdState(resolved.deviceId);
           }
         }
       }

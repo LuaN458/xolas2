@@ -5,6 +5,9 @@ import { spawn, ChildProcess } from 'child_process';
 import { fileURLToPath } from 'url';
 import { autoUpdater } from 'electron-updater';
 
+// Garantir identificação consistente do diretório userData em AppData/Xolas
+app.setName('Xolas');
+
 // Permitir reprodução automática de áudio e vídeo WebRTC sem bloqueio de gesto
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -247,6 +250,37 @@ ipcMain.handle('restart-and-install', () => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+// Handlers IPC para persistência de configurações locais em arquivo físico JSON
+ipcMain.handle('load-user-settings', async () => {
+  try {
+    const settingsPath = path.join(app.getPath('userData'), 'user-settings.json');
+    if (fs.existsSync(settingsPath)) {
+      const content = fs.readFileSync(settingsPath, 'utf8');
+      return JSON.parse(content);
+    }
+  } catch (err) {
+    console.warn('[Settings] Erro ao carregar user-settings.json:', err);
+  }
+  return null;
+});
+
+ipcMain.handle('save-user-settings', async (_event, settings: unknown) => {
+  try {
+    if (settings && typeof settings === 'object') {
+      const userDataDir = app.getPath('userData');
+      if (!fs.existsSync(userDataDir)) {
+        fs.mkdirSync(userDataDir, { recursive: true });
+      }
+      const settingsPath = path.join(userDataDir, 'user-settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+      return { success: true };
+    }
+  } catch (err) {
+    console.error('[Settings] Erro ao salvar user-settings.json:', err);
+  }
+  return { success: false };
 });
 
 ipcMain.handle('open-external', async (_event, url: unknown) => {

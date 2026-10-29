@@ -50,4 +50,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('hotkey-trigger', handler);
     return () => ipcRenderer.removeListener('hotkey-trigger', handler);
   },
+  loadUserSettings: () => ipcRenderer.invoke('load-user-settings'),
+  saveUserSettings: (settings: any) => ipcRenderer.invoke('save-user-settings', settings),
 });

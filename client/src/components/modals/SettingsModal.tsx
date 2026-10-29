@@ -30,6 +30,7 @@ import {
 import {
   getUserSettings,
   saveUserSetting,
+  subscribeToSettingsChange,
   formatAcceleratorForDisplay,
   keyboardEventToAccelerator,
   DEFAULT_USER_KEYBINDINGS,
@@ -70,6 +71,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const lastModifierRef = useRef<string | null>(null);
   const nonModifierPressedRef = useRef<boolean>(false);
+
+  // Sincronizar atalhos sempre que o modal for aberto ou quando as configurações forem atualizadas
+  useEffect(() => {
+    if (isOpen) {
+      setKeybindings(getUserSettings().keybindings);
+    }
+
+    const unsubscribe = subscribeToSettingsChange((newSettings) => {
+      if (newSettings?.keybindings) {
+        setKeybindings(newSettings.keybindings);
+      }
+    });
+
+    return unsubscribe;
+  }, [isOpen]);
 
   useEffect(() => {
     if (!recordingAction) {
