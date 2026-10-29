@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Volume2, Volume1, VolumeX, MicOff, RotateCcw } from 'lucide-react';
+import { Volume2, Volume1, VolumeX, MicOff, RotateCcw, Monitor } from 'lucide-react';
 
 interface UserAudioContextMenuProps {
   x: number;
@@ -9,6 +9,8 @@ interface UserAudioContextMenuProps {
   avatarUrl?: string;
   volume: number; // 0 a 200
   isMuted: boolean;
+  hasScreenShare?: boolean;
+  onWatchScreenShare?: () => void;
   onVolumeChange: (newVolume: number) => void;
   onToggleMute: () => void;
   onClose: () => void;
@@ -22,6 +24,8 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
   avatarUrl,
   volume,
   isMuted,
+  hasScreenShare = false,
+  onWatchScreenShare,
   onVolumeChange,
   onToggleMute,
   onClose,
@@ -53,7 +57,7 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
 
   // Posicionamento inteligente para evitar corte nas bordas da janela
   const MENU_WIDTH = 260;
-  const MENU_HEIGHT = 220;
+  const MENU_HEIGHT = hasScreenShare && onWatchScreenShare ? 275 : 225;
   const safeX = Math.max(10, Math.min(x, window.innerWidth - MENU_WIDTH - 16));
   const safeY = Math.max(10, Math.min(y, window.innerHeight - MENU_HEIGHT - 16));
 
@@ -86,6 +90,28 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Ação de Assistir Transmissão (se o usuário estiver transmitindo tela) */}
+      {hasScreenShare && onWatchScreenShare && (
+        <div className="pt-2.5 pb-1 border-b border-obsidian-border/60">
+          <button
+            type="button"
+            onClick={() => {
+              onWatchScreenShare();
+              onClose();
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-600/20 hover:bg-indigo-600/35 text-indigo-200 border border-indigo-500/40 shadow-lg shadow-indigo-600/15 transition-all group"
+          >
+            <div className="flex items-center space-x-2">
+              <Monitor className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
+              <span>Assistir Transmissão</span>
+            </div>
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase bg-indigo-500/30 text-indigo-300 border border-indigo-400/30 animate-pulse">
+              AO VIVO
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Seção de Volume do Usuário */}
       <div className="pt-3 pb-2 space-y-2">

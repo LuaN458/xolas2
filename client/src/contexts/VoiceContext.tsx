@@ -654,11 +654,44 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [socket, optimizeWebRtcSdp, configureScreenVideoSender]
   );
 
+  // Garante que as faixas da transmissão de tela local estejam anexadas aos senders do peer
+  const ensureScreenTracksForPeer = useCallback(
+    (remoteUserId: string, pc: RTCPeerConnection) => {
+      if (!screenStreamRef.current) return false;
+      const existingSenders = screenSendersRef.current.get(remoteUserId) || [];
+      const hasLiveVideoSender = existingSenders.some(
+        (s) => s.track && s.track.kind === 'video' && s.track.readyState === 'live'
+      );
+      if (!hasLiveVideoSender) {
+        existingSenders.forEach((s) => {
+          try {
+            pc.removeTrack(s);
+          } catch {}
+        });
+        const newSenders: RTCRtpSender[] = [];
+        screenStreamRef.current.getTracks().forEach((track) => {
+          const sender = pc.addTrack(track, screenStreamRef.current!);
+          if (track.kind === 'video') {
+            configureScreenVideoSender(pc, sender, screenQualityRef.current);
+          }
+          newSenders.push(sender);
+        });
+        screenSendersRef.current.set(remoteUserId, newSenders);
+        return true;
+      }
+      return false;
+    },
+    [configureScreenVideoSender]
+  );
+
   // Cria ou retorna a RTCPeerConnection para um participante remoto
   const getOrCreatePeerConnection = useCallback(
     (remoteUserId: string, channelId: string): { pc: RTCPeerConnection; isNew: boolean } => {
       const existing = peersRef.current.get(remoteUserId);
       if (existing && existing.connectionState !== 'closed') {
+        if (screenStreamRef.current) {
+          ensureScreenTracksForPeer(remoteUserId, existing);
+        }
         return { pc: existing, isNew: false };
       }
 
@@ -683,6 +716,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           senders.push(sender);
         });
         screenSendersRef.current.set(remoteUserId, senders);
+      } else {
+        // Se este cliente local NÃO estiver transmitindo tela, registra transceivers recvonly de vídeo e áudio.
+        // Isso garante que ofertas/respostas WebRTC sempre declarem m=video e m=audio para receber transmissões!
+        try {
+          pc.addTransceiver('video', { direction: 'recvonly' });
+          pc.addTransceiver('audio', { direction: 'recvonly' });
+        } catch {}
       }
 
       pc.onicecandidate = (event) => {
@@ -776,7 +816,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       return { pc, isNew: true };
     },
-    [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender]
+    [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender, ensureScreenTracksForPeer]
   );
 
   // Configura detector de atividade de voz (VAD / Noise Gate estilo Discord) para o microfone local
@@ -1199,9 +1239,22 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           screenStream: p.isScreenSharing === false ? undefined : existing?.screenStream,
         });
 
-        const { isNew } = getOrCreatePeerConnection(p.id, channelId);
-        if (isNew && String(user?.id || '') < String(p.id)) {
+        const { pc, isNew } = getOrCreatePeerConnection(p.id, channelId);
+        if (screenStreamRef.current) {
+          ensureScreenTracksForPeer(p.id, pc);
           sendOffer(p.id, channelId);
+        } else if (isNew && String(user?.id || '') < String(p.id)) {
+          sendOffer(p.id, channelId);
+        }
+
+        // Se o participante remoto estiver compartilhando tela e ainda não tivermos a faixa de vídeo dele,
+        // solicita imediatamente o envio da transmissão ao transmissor
+        if (p.isScreenSharing && (!existing?.screenTrack || existing.screenTrack.readyState !== 'live')) {
+          socket.emit('request-screen-stream', {
+            channelId,
+            targetUserId: p.id,
+            toUserId: p.id,
+          });
         }
       });
 
@@ -1250,7 +1303,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
 
       // Criar conexão e enviar oferta imediatamente (garante que quem já estava transmitindo envie a tela ao novo membro)
-      getOrCreatePeerConnection(peer.id, channelId);
+      const { pc } = getOrCreatePeerConnection(peer.id, channelId);
+      if (screenStreamRef.current) {
+        ensureScreenTracksForPeer(peer.id, pc);
+      }
       sendOffer(peer.id, channelId);
       syncVoiceState();
     };
@@ -1468,6 +1524,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     };
 
+    const handleRequestScreenStream = async (data: { channelId: string; fromUserId: string }) => {
+      const channelId = data?.channelId;
+      const fromUserId = data?.fromUserId;
+      if (!fromUserId || !currentChannelRef.current || currentChannelRef.current.id !== channelId) return;
+      if (!screenStreamRef.current) return;
+
+      const { pc } = getOrCreatePeerConnection(fromUserId, channelId);
+      ensureScreenTracksForPeer(fromUserId, pc);
+      await sendOffer(fromUserId, channelId);
+    };
+
     socket.on('voice-channel-updated', handleVoiceChannelUpdated);
     socket.on('voice-peer-joined', handleVoicePeerJoined);
     socket.on('voice-peer-left', handleVoicePeerLeft);
@@ -1475,6 +1542,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     socket.on('webrtc-offer', handleWebRTCOffer);
     socket.on('webrtc-answer', handleWebRTCAnswer);
     socket.on('webrtc-ice-candidate', handleWebRTCIceCandidate);
+    socket.on('request-screen-stream', handleRequestScreenStream);
 
     return () => {
       socket.off('voice-channel-updated', handleVoiceChannelUpdated);
@@ -1484,8 +1552,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       socket.off('webrtc-offer', handleWebRTCOffer);
       socket.off('webrtc-answer', handleWebRTCAnswer);
       socket.off('webrtc-ice-candidate', handleWebRTCIceCandidate);
+      socket.off('request-screen-stream', handleRequestScreenStream);
     };
-  }, [socket, user?.id, cleanupPeer, getOrCreatePeerConnection, sendOffer, syncVoiceState]);
+  }, [socket, user?.id, cleanupPeer, getOrCreatePeerConnection, sendOffer, syncVoiceState, ensureScreenTracksForPeer]);
 
   // Conectar a um canal de voz com WebRTC Mesh nativo
   const joinVoiceChannel = useCallback(
@@ -2099,9 +2168,24 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     ]
   );
 
-  const watchScreenShare = useCallback((shareId: string) => {
-    setSelectedScreenShareId(shareId);
-  }, []);
+  const watchScreenShare = useCallback(
+    (shareId: string) => {
+      setSelectedScreenShareId(shareId);
+      const targetUserId = shareId.replace(/^screen-/, '');
+      const ch = currentChannelRef.current;
+      if (socket && ch && targetUserId && targetUserId !== user?.id && targetUserId !== 'local-screen') {
+        const peerData = remoteParticipantsRef.current.get(targetUserId);
+        if (!peerData?.screenTrack || peerData.screenTrack.readyState !== 'live') {
+          socket.emit('request-screen-stream', {
+            channelId: ch.id,
+            targetUserId,
+            toUserId: targetUserId,
+          });
+        }
+      }
+    },
+    [socket, user?.id]
+  );
 
   const stopWatchingScreenShare = useCallback(() => {
     setSelectedScreenShareId(null);

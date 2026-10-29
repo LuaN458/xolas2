@@ -54,6 +54,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     activeScreenShares,
     selectedScreenShareId,
     setSelectedScreenShareId,
+    watchScreenShare,
     setUserVolume,
     toggleMuteUser,
     getUserVolume,
@@ -75,23 +76,31 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     userId: string;
     username: string;
     avatarUrl?: string;
+    hasScreenShare?: boolean;
+    shareId?: string;
   }
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const handleParticipantContextMenu = useCallback(
-    (e: React.MouseEvent, p: { id: string; username: string; avatarUrl?: string; isLocal?: boolean }) => {
+    (
+      e: React.MouseEvent,
+      p: { id: string; username: string; avatarUrl?: string; isLocal?: boolean; hasScreenShare?: boolean }
+    ) => {
       if (p.isLocal) return; // Não abre para o próprio usuário local
       e.preventDefault();
       e.stopPropagation();
+      const share = activeScreenShares.find((s) => !s.isLocal && s.id.includes(p.id));
       setContextMenu({
         x: e.clientX,
         y: e.clientY,
         userId: p.id,
         username: p.username,
         avatarUrl: p.avatarUrl,
+        hasScreenShare: Boolean(p.hasScreenShare || share),
+        shareId: share?.id,
       });
     },
-    []
+    [activeScreenShares]
   );
 
   // Manter volume e mute sincronizados
@@ -505,6 +514,12 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           avatarUrl={contextMenu.avatarUrl}
           volume={getUserVolume(contextMenu.userId)}
           isMuted={isUserMuted(contextMenu.userId)}
+          hasScreenShare={contextMenu.hasScreenShare}
+          onWatchScreenShare={
+            contextMenu.hasScreenShare
+              ? () => watchScreenShare(contextMenu.shareId || `screen-${contextMenu.userId}`)
+              : undefined
+          }
           onVolumeChange={(newVol) => setUserVolume(contextMenu.userId, newVol)}
           onToggleMute={() => toggleMuteUser(contextMenu.userId)}
           onClose={() => setContextMenu(null)}

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MessageSquareText, Radio, Plus, PhoneOff, Monitor, ChevronDown, Volume2, MicOff } from 'lucide-react';
 import { Server, Channel } from '../../types';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { UserAudioContextMenu } from '../voice/UserAudioContextMenu';
 
 export interface VoiceParticipantInfo {
   id: string;
@@ -39,7 +40,48 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
     isMuted,
     voiceParticipants: livekitParticipants,
     activeScreenShares,
+    getUserVolume,
+    isUserMuted,
+    setUserVolume,
+    toggleMuteUser,
+    watchScreenShare,
   } = useVoice();
+
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    userId: string;
+    username: string;
+    avatarUrl?: string;
+    hasScreenShare?: boolean;
+    shareId?: string;
+    channel: Channel;
+  } | null>(null);
+
+  const handleParticipantContextMenu = (
+    e: React.MouseEvent,
+    p: VoiceParticipantInfo,
+    channel: Channel,
+    hasScreenShare: boolean,
+    shareId: string
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Não abre menu de ajuste para si mesmo
+    if (p.id === user?.id) return;
+
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      userId: p.id,
+      username: p.username,
+      avatarUrl: p.avatarUrl,
+      hasScreenShare,
+      shareId,
+      channel,
+    });
+  };
 
   if (!server) {
     return (
@@ -184,10 +226,29 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                     <div className="relative ml-4 pl-3 my-1 space-y-1 border-l-2 border-emerald-500/25">
                       {participants.map((p) => {
                         const isMe = p.id === user?.id;
+                        const isStreaming = Boolean(
+                          (isMe && isScreenSharing) ||
+                          activeScreenShares.some((s) => !s.isLocal && s.id.includes(p.id)) ||
+                          livekitParticipants.some((lp) => lp.id === p.id && lp.screenTrack) ||
+                          p.isScreenSharing
+                        );
+                        const matchedShare = activeScreenShares.find((s) => !s.isLocal && s.id.includes(p.id));
+                        const shareId = matchedShare ? matchedShare.id : (p.screenStreamId || `screen-${p.id}`);
+
                         return (
                           <div
                             key={p.id}
-                            className="group flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-white/[0.06] text-xs transition-all cursor-default space-x-2"
+                            onContextMenu={(e) => handleParticipantContextMenu(e, p, channel, isStreaming, shareId)}
+                            onClick={() => {
+                              if (!isMe && isStreaming) {
+                                onSelectChannel(channel);
+                                watchScreenShare(shareId);
+                              } else {
+                                onSelectChannel(channel);
+                              }
+                            }}
+                            className="group flex items-center justify-between px-2 py-1.5 rounded-xl hover:bg-white/[0.06] text-xs transition-all cursor-pointer space-x-2"
+                            title={isMe ? p.username : `${p.username} - Botão direito para opções`}
                           >
                             <div className="flex items-center min-w-0 flex-1 space-x-2">
                               <div className="relative shrink-0">
@@ -213,10 +274,11 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                                 )}
                               </div>
 
-                              {((isMe && isScreenSharing) ||
-                                activeScreenShares.some((s) => !s.isLocal && s.id.includes(p.id)) ||
-                                livekitParticipants.some((lp) => lp.id === p.id && lp.screenTrack)) && (
-                                <span className="shrink-0 px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-[9px] font-bold tracking-wider flex items-center space-x-1 animate-pulse">
+                              {isStreaming && (
+                                <span
+                                  className="shrink-0 px-1.5 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 text-[9px] font-bold tracking-wider flex items-center space-x-1 animate-pulse hover:bg-indigo-500/30 transition-colors"
+                                  title="Clique para assistir"
+                                >
                                   <Monitor className="w-2.5 h-2.5 shrink-0" />
                                   <span>AO VIVO</span>
                                 </span>
@@ -281,6 +343,32 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {/* Menu de Contexto do Usuário na Barra Lateral */}
+      {contextMenu && (
+        <UserAudioContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          userId={contextMenu.userId}
+          username={contextMenu.username}
+          avatarUrl={contextMenu.avatarUrl}
+          volume={getUserVolume(contextMenu.userId)}
+          isMuted={isUserMuted(contextMenu.userId)}
+          hasScreenShare={contextMenu.hasScreenShare}
+          onWatchScreenShare={
+            contextMenu.hasScreenShare
+              ? () => {
+                  onSelectChannel(contextMenu.channel);
+                  watchScreenShare(contextMenu.shareId || `screen-${contextMenu.userId}`);
+                  setContextMenu(null);
+                }
+              : undefined
+          }
+          onVolumeChange={(newVol) => setUserVolume(contextMenu.userId, newVol)}
+          onToggleMute={() => toggleMuteUser(contextMenu.userId)}
+          onClose={() => setContextMenu(null)}
+        />
       )}
     </div>
   );

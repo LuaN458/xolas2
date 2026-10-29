@@ -396,6 +396,20 @@ export function setupSocketHandlers(io: Server): void {
     );
 
     socket.on(
+      'request-screen-stream',
+      (data: { toUserId?: unknown; targetUserId?: unknown; channelId?: unknown }) => {
+        if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
+        const targetId = data?.toUserId || data?.targetUserId;
+        if (!isValidIdentifier(targetId) || !isValidIdentifier(data?.channelId)) return;
+
+        sendToUser(targetId as string, 'request-screen-stream', {
+          fromUserId: user.userId,
+          channelId: data.channelId,
+        });
+      }
+    );
+
+    socket.on(
       'voice-user-state',
       (data: {
         channelId?: unknown;
