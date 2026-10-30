@@ -12,6 +12,7 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
   const [isReady, setIsReady] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [isRestarting, setIsRestarting] = useState(false);
 
   useEffect(() => {
     if (!window.electronAPI) return;
@@ -45,9 +46,13 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
 
   // Contagem regressiva para reinicialização automática quando a atualização estiver pronta
   useEffect(() => {
-    if (countdown === null) return;
+    if (countdown === null || isRestarting) return;
     if (countdown <= 0) {
-      window.electronAPI?.restartAndInstall?.();
+      setIsRestarting(true);
+      window.electronAPI?.restartAndInstall?.()?.catch((err) => {
+        console.error('Falha ao reiniciar:', err);
+        setIsRestarting(false);
+      });
       return;
     }
 
@@ -56,7 +61,7 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [countdown]);
+  }, [countdown, isRestarting]);
 
   // Se não houver atualização em andamento, não renderiza nada
   if (!isDownloading && !isReady) {
@@ -70,7 +75,12 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
   }
 
   const handleRestartNow = () => {
-    window.electronAPI?.restartAndInstall?.();
+    if (isRestarting) return;
+    setIsRestarting(true);
+    window.electronAPI?.restartAndInstall?.()?.catch((err) => {
+      console.error('Falha ao reiniciar:', err);
+      setIsRestarting(false);
+    });
   };
 
   const handleOpenGitHub = () => {
@@ -137,11 +147,22 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
           <div className="space-y-2.5">
             {isReady ? (
               <button
+                type="button"
                 onClick={handleRestartNow}
-                className="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all"
+                disabled={isRestarting}
+                className="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
               >
-                <ArrowUpCircle className="w-4 h-4" />
-                <span>Reiniciar e Aplicar Agora {countdown !== null && `(${countdown}s)`}</span>
+                {isRestarting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Reiniciando aplicativo...</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowUpCircle className="w-4 h-4" />
+                    <span>Reiniciar e Aplicar Agora {countdown !== null && `(${countdown}s)`}</span>
+                  </>
+                )}
               </button>
             ) : (
               <div className="py-2.5 px-4 bg-obsidian-card/60 rounded-xl border border-obsidian-border text-xs text-obsidian-text-muted flex items-center justify-center space-x-2">

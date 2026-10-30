@@ -91,6 +91,8 @@ function getHotkeyHelperPath(): string {
 // Configuração do Auto-Updater para GitHub Releases
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.autoRunAppAfterInstall = true;
+autoUpdater.logger = console;
 
 function setupAutoUpdater() {
   autoUpdater.on('checking-for-update', () => {
@@ -240,12 +242,42 @@ ipcMain.handle('check-for-updates', async () => {
 });
 
 ipcMain.handle('restart-and-install', () => {
+  console.log('[AutoUpdater] Executando restart-and-install solicitado pelo usuário');
   stopProcessAudioCapture();
   stopHotkeyHelper();
   try {
     globalShortcut.unregisterAll();
   } catch {}
-  autoUpdater.quitAndInstall(false, true);
+
+  if (!app.isPackaged) {
+    console.log('[AutoUpdater] Ambiente de desenvolvimento: simulando reinicialização');
+    app.relaunch();
+    app.exit(0);
+    return;
+  }
+
+  try {
+    // 1. Destruir janelas imediatamente para liberar arquivos e travas de DLL do Windows
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      try {
+        win.removeAllListeners('close');
+        win.destroy();
+      } catch {}
+    }
+
+    // 2. Executar quitAndInstall silencioso com auto-restart obrigatório
+    autoUpdater.quitAndInstall(true, true);
+  } catch (err) {
+    console.error('[AutoUpdater] Falha ao executar quitAndInstall:', err);
+  }
+
+  // 3. Garantir encerramento forçado caso app.quit() demore a finalizar
+  setTimeout(() => {
+    try {
+      app.exit(0);
+    } catch {}
+  }, 1000);
 });
 
 ipcMain.handle('get-app-version', () => {
