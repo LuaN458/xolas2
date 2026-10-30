@@ -19,8 +19,6 @@ import {
   PhoneOff,
   Monitor,
   MonitorOff,
-  Video,
-  VideoOff,
   Maximize2,
   Minimize2,
   RefreshCw,
@@ -69,8 +67,6 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     toggleMute: selfToggleMute,
   } = useVoice();
 
-  const [isCameraOn, setIsCameraOn] = useState(false);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [isScreenModalOpen, setIsScreenModalOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [streamVolume, setStreamVolume] = useState<number>(() => getUserSettings().streamVolume);
@@ -143,25 +139,6 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     });
   }, []);
 
-  const toggleCamera = async () => {
-    if (isCameraOn && cameraStream) {
-      cameraStream.getTracks().forEach((track) => track.stop());
-      setCameraStream(null);
-      setIsCameraOn(false);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
-        setCameraStream(stream);
-        setIsCameraOn(true);
-      } catch (err) {
-        console.error('Falha ao acessar câmera:', err);
-      }
-    }
-  };
-
   const handleSelectScreenSource = (sourceId?: string, quality?: ScreenQualityOptions) => {
     startScreenShare(sourceId, quality);
   };
@@ -196,7 +173,6 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
       isMuted: boolean;
       isLocal: boolean;
       hasScreenShare: boolean;
-      cameraTrack?: MediaStreamTrack;
     }>();
 
     // 1. Participante Local
@@ -210,7 +186,6 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
       isMuted,
       isLocal: true,
       hasScreenShare: localHasScreenShare,
-      cameraTrack: cameraStream ? cameraStream.getVideoTracks()[0] : undefined,
     });
 
     // 2. Participantes recebidos pelo Socket.io (presença rápida)
@@ -243,12 +218,11 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
         isMuted: vp.isMuted,
         isLocal: vp.isLocal,
         hasScreenShare: vp.isLocal ? localHasScreenShare : hasScreen,
-        cameraTrack: vp.isLocal && cameraStream ? cameraStream.getVideoTracks()[0] : vp.cameraTrack,
       });
     });
 
     return Array.from(map.values());
-  }, [user, isMuted, cameraStream, socketParticipants, voiceParticipants, isScreenSharing, screenStream, activeScreenShares]);
+  }, [user, isMuted, socketParticipants, voiceParticipants, isScreenSharing, screenStream, activeScreenShares]);
 
   // Transmissão de tela atualmente em foco
   const activeShare = useMemo(() => {
@@ -462,48 +436,32 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                 <span>{isMuted ? 'Mutado' : 'Microfone'}</span>
               </button>
 
-              {/* Câmera */}
-              <button
-                onClick={toggleCamera}
-                className={`h-10 px-3.5 rounded-xl flex items-center space-x-2 transition-all font-semibold text-xs ${
-                  isCameraOn
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-md shadow-emerald-500/20'
-                    : 'bg-obsidian-card border border-obsidian-border text-white hover:border-obsidian-border-light hover:bg-obsidian-card-hover'
-                }`}
-                title={isCameraOn ? 'Desligar Câmera' : 'Ligar Câmera'}
-              >
-                {isCameraOn ? <Video className="w-4 h-4 text-emerald-400" /> : <VideoOff className="w-4 h-4 text-obsidian-text-secondary" />}
-                <span>Câmera</span>
-              </button>
-
-              {/* Botão Parar / Transmitir Tela com Atalho */}
-              <button
-                onClick={() => {
-                  if (isScreenSharing) {
-                    stopScreenShare();
-                  } else {
-                    setIsScreenModalOpen(true);
-                  }
-                }}
-                className={`h-10 px-3.5 rounded-xl flex items-center space-x-2 transition-all font-bold text-xs ${
-                  isScreenSharing
-                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/50 shadow-lg shadow-indigo-600/30 ring-1 ring-indigo-400/40'
-                    : 'bg-obsidian-card border border-obsidian-border text-white hover:border-obsidian-border-light hover:bg-obsidian-card-hover'
-                }`}
-                title={isScreenSharing ? `Parar Transmissão (${stopShareShortcutText})` : 'Transmitir Tela ou Janela'}
-              >
-                {isScreenSharing ? (
+              {/* Botão Parar Transmissão (Streamer) ou Sair da Live (Espectador) com Atalho */}
+              {isScreenSharing ? (
+                <button
+                  onClick={stopScreenShare}
+                  className="h-10 px-3.5 rounded-xl flex items-center space-x-2 transition-all font-bold text-xs bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/50 shadow-lg shadow-indigo-600/30 ring-1 ring-indigo-400/40"
+                  title={`Parar Transmissão (${stopShareShortcutText})`}
+                >
                   <MonitorOff className="w-4 h-4 text-white" />
-                ) : (
-                  <Monitor className="w-4 h-4 text-indigo-400" />
-                )}
-                <span>{isScreenSharing ? 'Parar Transmissão' : 'Transmitir'}</span>
-                {isScreenSharing && (
+                  <span>Parar Transmissão</span>
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 border border-white/15 text-indigo-200 ml-1">
                     {stopShareShortcutText}
                   </span>
-                )}
-              </button>
+                </button>
+              ) : (
+                <button
+                  onClick={() => setSelectedScreenShareId(null)}
+                  className="h-10 px-3.5 rounded-xl flex items-center space-x-2 transition-all font-bold text-xs bg-indigo-600/80 hover:bg-indigo-600 text-white border border-indigo-400/50 shadow-lg shadow-indigo-600/30 ring-1 ring-indigo-400/40"
+                  title={`Sair da Live (${stopShareShortcutText})`}
+                >
+                  <LayoutGrid className="w-4 h-4 text-indigo-200" />
+                  <span>Sair da Live</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 border border-white/15 text-indigo-200 ml-1">
+                    {stopShareShortcutText}
+                  </span>
+                </button>
+              )}
 
               <div className="w-[1px] h-6 bg-obsidian-border mx-0.5" />
 
@@ -557,7 +515,6 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                         ? () => setSelectedScreenShareId('local-screen')
                         : undefined
                     }
-                    videoTrack={p.cameraTrack}
                     isLocal={p.isLocal}
                     onContextMenu={(e) => handleParticipantContextMenu(e, p)}
                   />
@@ -580,19 +537,6 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                 title={isMuted ? 'Ativar Microfone' : 'Silenciar'}
               >
                 {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-              </button>
-
-              {/* Câmera */}
-              <button
-                onClick={toggleCamera}
-                className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
-                  isCameraOn
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-md shadow-emerald-500/20'
-                    : 'bg-obsidian-card border border-obsidian-border text-white hover:border-obsidian-border-light hover:bg-obsidian-card-hover'
-                }`}
-                title={isCameraOn ? 'Desligar Câmera' : 'Ligar Câmera'}
-              >
-                {isCameraOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5 text-obsidian-text-secondary" />}
               </button>
 
               {/* Compartilhar / Trocar Tela com Texto e Ícone */}

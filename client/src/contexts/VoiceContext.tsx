@@ -24,7 +24,6 @@ export interface ActiveParticipant {
   isSpeaking: boolean;
   isMuted: boolean;
   isLocal: boolean;
-  cameraTrack?: MediaStreamTrack;
   screenTrack?: MediaStreamTrack;
   audioTrack?: MediaStreamTrack;
 }
@@ -195,6 +194,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const isMutedRef = useRef<boolean>(false);
   const isDeafenedRef = useRef<boolean>(false);
   const isScreenSharingRef = useRef<boolean>(false);
+  const selectedScreenShareIdRef = useRef<string | null>(null);
   const isLocalSpeakingRef = useRef<boolean>(false);
   const masterVolumeRef = useRef<number>(initialSettings.masterOutputVolume);
   const micInputGainRef = useRef<number>(initialSettings.micInputGain);
@@ -237,6 +237,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const userMutedRef = useRef<Record<string, boolean>>(userMuted);
   userVolumesRef.current = userVolumes;
   userMutedRef.current = userMuted;
+  selectedScreenShareIdRef.current = selectedScreenShareId;
 
   interface RemoteAudioPipeline {
     source: MediaStreamAudioSourceNode;
@@ -1793,10 +1794,26 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     isScreenSharingRef.current = false;
     setScreenStream(null);
     setIsScreenSharing(false);
+    setSelectedScreenShareId((prev) => (prev === 'local-screen' ? null : prev));
 
     syncVoiceState();
     emitLocalVoiceState();
   }, [sendOffer, syncVoiceState, emitLocalVoiceState]);
+
+  // Função unificada acionada pela hotkey (espectador ou streamer):
+  // - Se for o streamer compartilhando sua própria tela, encerra a transmissão
+  // - Se estiver assistindo a uma live em foco (espectador), sai da visualização e retorna à grade
+  const handleStopOrExitStream = useCallback(() => {
+    if (isScreenSharingRef.current) {
+      stopScreenShare();
+      setSelectedScreenShareId(null);
+      return;
+    }
+
+    if (selectedScreenShareIdRef.current) {
+      setSelectedScreenShareId(null);
+    }
+  }, [stopScreenShare]);
 
   // Sincronizar atalhos de teclado globais no Electron
   useEffect(() => {
@@ -1829,12 +1846,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       } else if (action === 'toggleDeafen') {
         toggleDeafen();
       } else if (action === 'stopScreenShare') {
-        stopScreenShare();
+        handleStopOrExitStream();
       }
     });
 
     return unreg;
-  }, [toggleMute, toggleDeafen, stopScreenShare]);
+  }, [toggleMute, toggleDeafen, handleStopOrExitStream]);
 
   // Ouvinte de atalhos in-app via teclado (ativo em foco tanto na web quanto no Electron para resposta instantânea)
   useEffect(() => {
@@ -1884,7 +1901,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         toggleDeafen();
       } else if (matchesKey(stopScreenKey)) {
         e.preventDefault();
-        stopScreenShare();
+        handleStopOrExitStream();
       }
     };
 
@@ -1892,7 +1909,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [toggleMute, toggleDeafen, stopScreenShare]);
+  }, [toggleMute, toggleDeafen, handleStopOrExitStream]);
 
   // Cria uma MediaStreamTrack de áudio 100% isolada via WASAPI Process Loopback:
   // - Ao compartilhar uma janela (window:HWND:0): captura APENAS o som daquele aplicativo (ex: Chrome/Opera/Jogo)

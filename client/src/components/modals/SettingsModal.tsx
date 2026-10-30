@@ -1385,16 +1385,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   </div>
                 </div>
 
-                {/* Card 3: Parar Transmissão de Tela */}
+                {/* Card 3: Sair da Transmissão / Live */}
                 <div className="p-4 bg-obsidian-card/40 rounded-2xl border border-obsidian-border flex items-center justify-between space-x-4 hover:border-obsidian-border-light transition-all">
                   <div className="flex items-center space-x-3.5 min-w-0">
                     <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
                       <MonitorOff className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
-                      <h4 className="text-xs font-bold text-white tracking-tight">Parar Transmissão de Tela</h4>
+                      <h4 className="text-xs font-bold text-white tracking-tight">Sair da Transmissão / Live</h4>
                       <p className="text-[11px] text-obsidian-text-muted mt-0.5">
-                        Encerra imediatamente o compartilhamento de tela ou janela ativo no canal de voz.
+                        Sai da transmissão de tela em foco (modo espectador) ou encerra seu compartilhamento de tela ativo.
                       </p>
                     </div>
                   </div>
