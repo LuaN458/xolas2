@@ -28,7 +28,16 @@ export const MemberList: React.FC<MemberListProps> = ({
 }) => {
   const { user } = useAuth();
   const { socket } = useSocket();
-  const { getUserVolume, isUserMuted, setUserVolume, toggleMuteUser } = useVoice();
+  const {
+    getUserVolume,
+    isUserMuted,
+    setUserVolume,
+    toggleMuteUser,
+    isDeafened,
+    toggleDeafen,
+    isMuted: selfIsMuted,
+    toggleMute: selfToggleMute,
+  } = useVoice();
 
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -205,10 +214,12 @@ export const MemberList: React.FC<MemberListProps> = ({
           userId={targetUserId}
           username={targetMember.user.username}
           avatarUrl={targetMember.user.avatarUrl}
-          volume={getUserVolume(targetUserId)}
-          isMuted={isUserMuted(targetUserId)}
+          volume={isSelf ? 100 : getUserVolume(targetUserId)}
+          isMuted={isSelf ? selfIsMuted : isUserMuted(targetUserId)}
+          isDeafened={isDeafened}
           onVolumeChange={(newVolume) => setUserVolume(targetUserId, newVolume)}
-          onToggleMute={() => toggleMuteUser(targetUserId)}
+          onToggleMute={isSelf ? selfToggleMute : () => toggleMuteUser(targetUserId)}
+          onToggleDeafen={toggleDeafen}
           onClose={() => setContextMenu(null)}
           isAdmin={canManageRoles || canDisconnectVoice || canServerMute}
           isSelf={isSelf}

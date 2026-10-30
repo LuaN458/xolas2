@@ -266,18 +266,16 @@ ipcMain.handle('restart-and-install', () => {
       } catch {}
     }
 
-    // 2. Executar quitAndInstall silencioso com auto-restart obrigatório
-    autoUpdater.quitAndInstall(true, true);
+    // 2. Executar quitAndInstall com auto-restart obrigatório
+    // isSilent = false permite que o instalador NSIS mostre a barra rápida e use runAfterFinish com privilégios normais do Windows
+    autoUpdater.quitAndInstall(false, true);
   } catch (err) {
     console.error('[AutoUpdater] Falha ao executar quitAndInstall:', err);
-  }
-
-  // 3. Garantir encerramento forçado caso app.quit() demore a finalizar
-  setTimeout(() => {
     try {
+      app.relaunch();
       app.exit(0);
     } catch {}
-  }, 1000);
+  }
 });
 
 ipcMain.handle('get-app-version', () => {

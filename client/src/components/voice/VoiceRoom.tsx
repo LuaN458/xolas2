@@ -62,6 +62,10 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     toggleMuteUser,
     getUserVolume,
     isUserMuted,
+    isDeafened,
+    toggleDeafen,
+    isMuted: selfIsMuted,
+    toggleMute: selfToggleMute,
   } = useVoice();
 
   const [isCameraOn, setIsCameraOn] = useState(false);
@@ -515,10 +519,13 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           userId={contextMenu.userId}
           username={contextMenu.username}
           avatarUrl={contextMenu.avatarUrl}
-          volume={getUserVolume(contextMenu.userId)}
-          isMuted={isUserMuted(contextMenu.userId)}
+          volume={contextMenu.userId === user?.id ? 100 : getUserVolume(contextMenu.userId)}
+          isMuted={contextMenu.userId === user?.id ? selfIsMuted : isUserMuted(contextMenu.userId)}
+          isDeafened={isDeafened}
           hasScreenShare={contextMenu.hasScreenShare}
           isAdmin={Boolean(isAdmin || user?.customRole?.permissions?.some((p) => ['disconnect_voice', 'server_mute'].includes(p)))}
+          isSelf={contextMenu.userId === user?.id}
+          inVoiceChannelName={channel.name}
           isServerMuted={
             socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
           }
@@ -553,7 +560,8 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
               : undefined
           }
           onVolumeChange={(newVol) => setUserVolume(contextMenu.userId, newVol)}
-          onToggleMute={() => toggleMuteUser(contextMenu.userId)}
+          onToggleMute={contextMenu.userId === user?.id ? selfToggleMute : () => toggleMuteUser(contextMenu.userId)}
+          onToggleDeafen={toggleDeafen}
           onClose={() => setContextMenu(null)}
         />
       )}

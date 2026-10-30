@@ -1,5 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Volume2, Volume1, VolumeX, MicOff, RotateCcw, Monitor, Shield, PhoneOff, Check, UserCheck } from 'lucide-react';
+import {
+  Volume2,
+  Volume1,
+  VolumeX,
+  Mic,
+  MicOff,
+  Headphones,
+  RotateCcw,
+  Monitor,
+  Shield,
+  PhoneOff,
+  Check,
+  UserCheck,
+} from 'lucide-react';
 import { CustomRole } from '../../types';
 
 interface UserAudioContextMenuProps {
@@ -10,10 +23,12 @@ interface UserAudioContextMenuProps {
   avatarUrl?: string;
   volume: number; // 0 a 200
   isMuted: boolean;
+  isDeafened?: boolean;
   hasScreenShare?: boolean;
   onWatchScreenShare?: () => void;
   onVolumeChange: (newVolume: number) => void;
   onToggleMute: () => void;
+  onToggleDeafen?: () => void;
   onClose: () => void;
   isAdmin?: boolean;
   isServerMuted?: boolean;
@@ -36,10 +51,12 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
   avatarUrl,
   volume,
   isMuted,
+  isDeafened = false,
   hasScreenShare = false,
   onWatchScreenShare,
   onVolumeChange,
   onToggleMute,
+  onToggleDeafen,
   onClose,
   isAdmin = false,
   isServerMuted = false,
@@ -80,7 +97,7 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
 
   // Posicionamento inteligente para evitar corte nas bordas da janela
   const MENU_WIDTH = 268;
-  const MENU_APPROX_HEIGHT = 440;
+  const MENU_APPROX_HEIGHT = 460;
   const safeX = Math.max(12, Math.min(x, window.innerWidth - MENU_WIDTH - 16));
   const safeY = Math.max(12, Math.min(y, window.innerHeight - MENU_APPROX_HEIGHT - 16));
 
@@ -151,6 +168,9 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
             {isMuted && !isSelf && (
               <span className="text-rose-400 font-semibold shrink-0">• Mudo</span>
             )}
+            {isDeafened && (
+              <span className="text-rose-400 font-semibold shrink-0">• Sem Áudio</span>
+            )}
           </div>
         </div>
       </div>
@@ -177,7 +197,7 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
         </div>
       )}
 
-      {/* Seção 1: Ajuste de Volume e Silenciamento Local (apenas se não for o próprio usuário) */}
+      {/* Seção 1A: Ajuste de Volume e Silenciamento Local (quando não é o próprio usuário) */}
       {!isSelf && (
         <div className="pt-3 pb-2 space-y-2">
           <div className="flex items-center justify-between text-xs">
@@ -246,7 +266,7 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
             <span className="text-amber-400/80">200%</span>
           </div>
 
-          {/* Botão de Silenciamento Local (Mudo) */}
+          {/* Botão de Silenciamento Local (Mudo do Usuário) */}
           <button
             type="button"
             onClick={onToggleMute}
@@ -282,6 +302,124 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
               )}
             </div>
           </button>
+
+          {/* Botão de Desativar Áudio (Ensurdecer / Mudo Geral) */}
+          {onToggleDeafen && (
+            <button
+              type="button"
+              onClick={onToggleDeafen}
+              className={`w-full mt-1.5 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
+                isDeafened
+                  ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25'
+                  : 'bg-obsidian-surface hover:bg-white/10 text-obsidian-text-primary hover:text-white border border-obsidian-border'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <Headphones
+                  className={`w-4 h-4 ${
+                    isDeafened ? 'text-rose-400' : 'text-obsidian-text-muted group-hover:text-white'
+                  }`}
+                />
+                <span>Desativar Áudio</span>
+              </div>
+
+              <div
+                className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
+                  isDeafened
+                    ? 'bg-rose-500 border-rose-400'
+                    : 'border-white/30 group-hover:border-white/50 bg-transparent'
+                }`}
+              >
+                {isDeafened && (
+                  <svg
+                    className="w-3 h-3 text-white fill-current"
+                    viewBox="0 0 20 20"
+                  >
+                    <path d="M0 11l2-2 5 5L18 3l2 2L7 18z" />
+                  </svg>
+                )}
+              </div>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Seção 1B: Controles Pessoais quando é o próprio usuário (Você) */}
+      {isSelf && (
+        <div className="pt-3 pb-2 space-y-1.5">
+          <div className="text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider px-1 mb-1">
+            Seus Controles de Áudio
+          </div>
+
+          {/* Silenciar Próprio Microfone */}
+          <button
+            type="button"
+            onClick={onToggleMute}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
+              isMuted
+                ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25'
+                : 'bg-obsidian-surface hover:bg-white/10 text-obsidian-text-primary hover:text-white border border-obsidian-border'
+            }`}
+          >
+            <div className="flex items-center space-x-2">
+              {isMuted ? (
+                <MicOff className="w-4 h-4 text-rose-400" />
+              ) : (
+                <Mic className="w-4 h-4 text-obsidian-text-muted group-hover:text-white" />
+              )}
+              <span>{isMuted ? 'Microfone Silenciado' : 'Silenciar Microfone'}</span>
+            </div>
+
+            <div
+              className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
+                isMuted
+                  ? 'bg-rose-500 border-rose-400'
+                  : 'border-white/30 group-hover:border-white/50 bg-transparent'
+              }`}
+            >
+              {isMuted && (
+                <svg className="w-3 h-3 text-white fill-current" viewBox="0 0 20 20">
+                  <path d="M0 11l2-2 5 5L18 3l2 2L7 18z" />
+                </svg>
+              )}
+            </div>
+          </button>
+
+          {/* Desativar Áudio Pessoal (Ensurdecer) */}
+          {onToggleDeafen && (
+            <button
+              type="button"
+              onClick={onToggleDeafen}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
+                isDeafened
+                  ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25'
+                  : 'bg-obsidian-surface hover:bg-white/10 text-obsidian-text-primary hover:text-white border border-obsidian-border'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <Headphones
+                  className={`w-4 h-4 ${
+                    isDeafened ? 'text-rose-400' : 'text-obsidian-text-muted group-hover:text-white'
+                  }`}
+                />
+                <span>{isDeafened ? 'Áudio Desativado' : 'Desativar Áudio'}</span>
+              </div>
+
+              <div
+                className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
+                  isDeafened
+                    ? 'bg-rose-500 border-rose-400'
+                    : 'border-white/30 group-hover:border-white/50 bg-transparent'
+                }`}
+              >
+                {isDeafened && (
+                  <svg className="w-3 h-3 text-white fill-current" viewBox="0 0 20 20">
+                    <path d="M0 11l2-2 5 5L18 3l2 2L7 18z" />
+                  </svg>
+                )}
+              </div>
+            </button>
+          )}
         </div>
       )}
 

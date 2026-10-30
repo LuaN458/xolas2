@@ -29,3 +29,10 @@
     ${EndIf}
   ${EndIf}
 !macroend
+
+!macro customInstallEnd
+  ; Garante que o aplicativo sempre reabra após a instalação/atualização, mesmo em modo silencioso
+  ${If} ${Silent}
+    Exec '"$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
+  ${EndIf}
+!macroend

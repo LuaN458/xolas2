@@ -44,6 +44,9 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
     leaveVoiceChannel,
     isScreenSharing,
     isMuted,
+    isDeafened,
+    toggleDeafen,
+    toggleMute: selfToggleMute,
     voiceParticipants: livekitParticipants,
     activeScreenShares,
     getUserVolume,
@@ -359,8 +362,9 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
           userId={contextMenu.userId}
           username={contextMenu.username}
           avatarUrl={contextMenu.avatarUrl}
-          volume={getUserVolume(contextMenu.userId)}
-          isMuted={isUserMuted(contextMenu.userId)}
+          volume={contextMenu.userId === user?.id ? 100 : getUserVolume(contextMenu.userId)}
+          isMuted={contextMenu.userId === user?.id ? isMuted : isUserMuted(contextMenu.userId)}
+          isDeafened={isDeafened}
           hasScreenShare={contextMenu.hasScreenShare}
           isAdmin={Boolean(user?.role === 'ADMIN' || user?.customRole?.permissions?.some((p) => ['disconnect_voice', 'server_mute'].includes(p)))}
           isSelf={contextMenu.userId === user?.id}
@@ -373,6 +377,9 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
               : undefined
           }
           inVoiceChannelName={contextMenu.channel.name}
+          onVolumeChange={(newVolume) => setUserVolume(contextMenu.userId, newVolume)}
+          onToggleMute={contextMenu.userId === user?.id ? selfToggleMute : () => toggleMuteUser(contextMenu.userId)}
+          onToggleDeafen={toggleDeafen}
           isServerMuted={
             voiceParticipants[contextMenu.channel.id]?.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
           }
@@ -410,8 +417,6 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                 }
               : undefined
           }
-          onVolumeChange={(newVol) => setUserVolume(contextMenu.userId, newVol)}
-          onToggleMute={() => toggleMuteUser(contextMenu.userId)}
           onClose={() => setContextMenu(null)}
         />
       )}
