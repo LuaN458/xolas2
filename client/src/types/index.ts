@@ -88,6 +88,22 @@ declare global {
       onHotkeyTrigger?: (callback: (action: string) => void) => () => void;
       loadUserSettings?: () => Promise<any>;
       saveUserSettings?: (settings: any) => Promise<{ success: boolean }>;
+      loadAuthSession?: () => Promise<{
+        token?: string | null;
+        user?: User | null;
+        lastUsername?: string;
+        cachedServers?: Server[];
+        cachedServerDetails?: Record<string, Server>;
+        updatedAt?: string;
+      } | null>;
+      saveAuthSession?: (sessionData: {
+        token?: string | null;
+        user?: User | null;
+        lastUsername?: string;
+        cachedServers?: Server[];
+        cachedServerDetails?: Record<string, Server>;
+      }) => Promise<{ success: boolean }>;
+      clearAuthSession?: (keepLastUsername?: string) => Promise<{ success: boolean }>;
     };
   }
 }

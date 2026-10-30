@@ -315,6 +315,80 @@ ipcMain.handle('save-user-settings', async (_event, settings: unknown) => {
   return { success: false };
 });
 
+// Handlers IPC para persistência nativa da sessão de autenticação em AppData/Roaming/Xolas/auth-session.json
+ipcMain.handle('load-auth-session', async () => {
+  try {
+    const authPath = path.join(app.getPath('userData'), 'auth-session.json');
+    if (fs.existsSync(authPath)) {
+      const content = fs.readFileSync(authPath, 'utf8');
+      return JSON.parse(content);
+    }
+  } catch (err) {
+    console.warn('[AuthSession] Erro ao carregar auth-session.json:', err);
+  }
+  return null;
+});
+
+ipcMain.handle('save-auth-session', async (_event, sessionData: unknown) => {
+  try {
+    if (sessionData && typeof sessionData === 'object') {
+      const userDataDir = app.getPath('userData');
+      if (!fs.existsSync(userDataDir)) {
+        fs.mkdirSync(userDataDir, { recursive: true });
+      }
+      const authPath = path.join(userDataDir, 'auth-session.json');
+      let existing: Record<string, unknown> = {};
+      if (fs.existsSync(authPath)) {
+        try {
+          existing = JSON.parse(fs.readFileSync(authPath, 'utf8')) || {};
+        } catch {}
+      }
+      const merged = {
+        ...existing,
+        ...(sessionData as Record<string, unknown>),
+        updatedAt: new Date().toISOString(),
+      };
+      fs.writeFileSync(authPath, JSON.stringify(merged, null, 2), 'utf8');
+      try {
+        session.defaultSession.flushStorageData();
+      } catch {}
+      return { success: true };
+    }
+  } catch (err) {
+    console.error('[AuthSession] Erro ao salvar auth-session.json:', err);
+  }
+  return { success: false };
+});
+
+ipcMain.handle('clear-auth-session', async (_event, keepLastUsername?: string) => {
+  try {
+    const userDataDir = app.getPath('userData');
+    const authPath = path.join(userDataDir, 'auth-session.json');
+    let lastUsername = typeof keepLastUsername === 'string' ? keepLastUsername : '';
+    if (!lastUsername && fs.existsSync(authPath)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(authPath, 'utf8'));
+        lastUsername = parsed?.lastUsername || parsed?.user?.username || '';
+      } catch {}
+    }
+    if (!fs.existsSync(userDataDir)) {
+      fs.mkdirSync(userDataDir, { recursive: true });
+    }
+    fs.writeFileSync(
+      authPath,
+      JSON.stringify({ token: null, user: null, lastUsername, updatedAt: new Date().toISOString() }, null, 2),
+      'utf8'
+    );
+    try {
+      session.defaultSession.flushStorageData();
+    } catch {}
+    return { success: true };
+  } catch (err) {
+    console.error('[AuthSession] Erro ao limpar auth-session.json:', err);
+  }
+  return { success: false };
+});
+
 ipcMain.handle('open-external', async (_event, url: unknown) => {
   const safeUrl = isSafeExternalUrl(url);
   if (safeUrl) {
@@ -558,6 +632,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('will-quit', () => {
+  try {
+    session.defaultSession.flushStorageData();
+  } catch {}
   try {
     globalShortcut.unregisterAll();
   } catch {}

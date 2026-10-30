@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getAuthToken } from './authStorage';
 
 // Em produção, se VITE_API_URL não for informada, faz fallback para o servidor na nuvem (Render)
 const DEFAULT_PROD_API = 'https://xolas-server.onrender.com';
@@ -10,11 +11,11 @@ export const API_BASE =
 
 export const api = axios.create({
   baseURL: API_BASE,
-  timeout: 15000,
+  timeout: 30000,
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('discord_token');
+  const token = getAuthToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

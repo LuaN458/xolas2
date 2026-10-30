@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { getLastUsername, loadStoredAuthNative } from '../../lib/authStorage';
 import { Command, RefreshCw, Clock, ArrowLeft, ShieldAlert, CheckCircle2 } from 'lucide-react';
 
 export const AuthModal: React.FC = () => {
   const { login, register } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(() => getLastUsername());
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +25,11 @@ export const AuthModal: React.FC = () => {
         if (v) setAppVersion(v);
       });
     }
+    loadStoredAuthNative().then((stored) => {
+      if (stored.lastUsername) {
+        setUsername((prev) => prev || stored.lastUsername);
+      }
+    });
   }, []);
 
   const handleManualCheckUpdate = async () => {

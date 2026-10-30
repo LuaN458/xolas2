@@ -3,6 +3,12 @@ import { useAuth } from './contexts/AuthContext';
 import { useSocket } from './contexts/SocketContext';
 import { useVoice } from './contexts/VoiceContext';
 import { api } from './lib/api';
+import {
+  getCachedServerDetails,
+  getCachedServers,
+  persistCachedServerDetails,
+  persistCachedServers,
+} from './lib/authStorage';
 import { Server, Channel } from './types';
 
 import { ServerSidebar } from './components/layout/ServerSidebar';
@@ -28,10 +34,24 @@ export const App: React.FC = () => {
   const { socket } = useSocket();
   const { joinVoiceChannel, currentVoiceChannel } = useVoice();
 
-  const [servers, setServers] = useState<Server[]>([]);
-  const [activeServerId, setActiveServerId] = useState<string | null>(null);
-  const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
-  const [activeServerDetails, setActiveServerDetails] = useState<Server | null>(null);
+  const [servers, setServers] = useState<Server[]>(() => getCachedServers());
+  const [activeServerId, setActiveServerId] = useState<string | null>(() => {
+    const cached = getCachedServers();
+    return cached.length > 0 ? cached[0].id : null;
+  });
+  const [activeChannel, setActiveChannel] = useState<Channel | null>(() => {
+    const cached = getCachedServers();
+    if (cached.length === 0) return null;
+    const details = getCachedServerDetails(cached[0].id) || cached[0];
+    if (details?.channels && details.channels.length > 0) {
+      return details.channels.find((c: Channel) => c.type === 'TEXT') || details.channels[0];
+    }
+    return null;
+  });
+  const [activeServerDetails, setActiveServerDetails] = useState<Server | null>(() => {
+    const cached = getCachedServers();
+    return cached.length > 0 ? getCachedServerDetails(cached[0].id) || cached[0] : null;
+  });
   const [voiceParticipants, setVoiceParticipants] = useState<Record<string, VoiceParticipantInfo[]>>({});
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
 
@@ -61,28 +81,47 @@ export const App: React.FC = () => {
     };
   }, [socket, user?.role]);
 
-  // Carregar servidores do usuário
+  // Carregar servidores do usuário (com suporte a cache offline e retentativa automática na inicialização)
   useEffect(() => {
     if (!user) return;
+    let isMounted = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     async function fetchServers() {
       try {
         const response = await api.get('/api/servers');
-        const list = response.data.servers;
+        if (!isMounted) return;
+        const list: Server[] = response.data.servers || [];
         setServers(list);
+        persistCachedServers(list);
 
-        if (list.length > 0 && !activeServerId) {
-          setActiveServerId(list[0].id);
+        if (list.length > 0) {
+          setActiveServerId((prev) => (prev && list.some((s) => s.id === prev) ? prev : list[0].id));
         }
       } catch (err) {
-        console.error('Falha ao carregar servidores:', err);
+        console.warn('Falha ao carregar servidores (tentando novamente em 5s):', err);
+        if (isMounted) {
+          retryTimer = setTimeout(fetchServers, 5000);
+        }
       }
     }
 
     fetchServers();
-  }, [user]);
 
-  // Carregar detalhes do servidor ativo (membros e canais)
+    if (socket) {
+      socket.on('connect', fetchServers);
+    }
+
+    return () => {
+      isMounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (socket) {
+        socket.off('connect', fetchServers);
+      }
+    };
+  }, [user?.id, socket]);
+
+  // Carregar detalhes do servidor ativo (membros e canais) com cache instantâneo e retentativa
   useEffect(() => {
     if (!activeServerId) {
       setActiveServerDetails(null);
@@ -90,35 +129,72 @@ export const App: React.FC = () => {
       return;
     }
 
+    let isMounted = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Exibir imediatamente os detalhes em cache enquanto busca do servidor
+    const cachedDetails = getCachedServerDetails(activeServerId);
+    if (cachedDetails) {
+      setActiveServerDetails(cachedDetails);
+      if (cachedDetails.channels && cachedDetails.channels.length > 0) {
+        setActiveChannel((prev) => {
+          if (prev && cachedDetails.channels.some((c: Channel) => c.id === prev.id)) {
+            return prev;
+          }
+          return cachedDetails.channels.find((c: Channel) => c.type === 'TEXT') || cachedDetails.channels[0];
+        });
+      }
+    }
+
     async function fetchServerDetails() {
       try {
         const response = await api.get(`/api/servers/${activeServerId}`);
-        const server = response.data.server;
+        if (!isMounted) return;
+        const server: Server = response.data.server;
         setActiveServerDetails(server);
+        persistCachedServerDetails(server);
 
-        // Selecionar o primeiro canal de texto por padrão se não houver um selecionado
+        // Selecionar o primeiro canal de texto por padrão se não houver um selecionado válido neste servidor
         if (server.channels && server.channels.length > 0) {
-          const defaultChannel =
-            server.channels.find((c: Channel) => c.type === 'TEXT') || server.channels[0];
-          setActiveChannel(defaultChannel);
+          setActiveChannel((prev) => {
+            if (prev && server.channels.some((c: Channel) => c.id === prev.id)) {
+              return prev;
+            }
+            return server.channels.find((c: Channel) => c.type === 'TEXT') || server.channels[0];
+          });
         }
 
         // Carregar estado inicial de voz
         try {
           const voiceRes = await api.get(`/api/servers/${activeServerId}/voice-state`);
-          if (voiceRes.data.voiceState) {
+          if (isMounted && voiceRes.data.voiceState) {
             setVoiceParticipants(voiceRes.data.voiceState);
           }
         } catch {
           // Ignorar se endpoint de voz falhar
         }
       } catch (err) {
-        console.error('Falha ao carregar detalhes do servidor:', err);
+        console.warn('Falha ao carregar detalhes do servidor (tentando novamente em 5s):', err);
+        if (isMounted) {
+          retryTimer = setTimeout(fetchServerDetails, 5000);
+        }
       }
     }
 
     fetchServerDetails();
-  }, [activeServerId]);
+
+    if (socket) {
+      socket.on('connect', fetchServerDetails);
+    }
+
+    return () => {
+      isMounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (socket) {
+        socket.off('connect', fetchServerDetails);
+      }
+    };
+  }, [activeServerId, socket]);
 
   // Sincronizar participantes de voz em tempo real
   useEffect(() => {
@@ -367,7 +443,11 @@ export const App: React.FC = () => {
             isOpen={isCreateServerOpen}
             onClose={() => setIsCreateServerOpen(false)}
             onServerCreated={(newServer) => {
-              setServers((prev) => [...prev, newServer]);
+              setServers((prev) => {
+                const next = [...prev, newServer];
+                persistCachedServers(next);
+                return next;
+              });
               setActiveServerId(newServer.id);
             }}
           />
@@ -381,10 +461,12 @@ export const App: React.FC = () => {
               onChannelCreated={(newChannel) => {
                 setActiveServerDetails((prev) => {
                   if (!prev) return null;
-                  return {
+                  const updated = {
                     ...prev,
                     channels: [...prev.channels, newChannel],
                   };
+                  persistCachedServerDetails(updated);
+                  return updated;
                 });
                 setActiveChannel(newChannel);
                 if (newChannel.type === 'VOICE') {

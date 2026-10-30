@@ -1,5 +1,12 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
+import {
+  clearStoredAuthSession,
+  getAuthToken,
+  getStoredAuthSync,
+  loadStoredAuthNative,
+  persistAuthSession,
+} from '../lib/authStorage';
 import { User } from '../types';
 
 interface AuthContextType {
@@ -23,42 +30,112 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('discord_token'));
-  const [loading, setLoading] = useState(true);
+  const initialSync = getStoredAuthSync();
+  const [user, setUser] = useState<User | null>(initialSync.user);
+  const [token, setToken] = useState<string | null>(initialSync.token);
+  const [loading, setLoading] = useState<boolean>(() => !(initialSync.token && initialSync.user));
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    async function loadUser() {
-      const savedToken = localStorage.getItem('discord_token');
-      if (!savedToken) {
+    let isMounted = true;
+
+    const clearRetryTimer = () => {
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+
+    async function verifySessionWithServer(activeToken: string) {
+      if (!isMounted || !activeToken) return;
+
+      try {
+        const response = await api.get('/api/auth/me');
+        if (!isMounted) return;
+
+        const loadedUser: User = response.data.user;
+        const refreshedToken: string = response.data.token || activeToken;
+
+        if (
+          loadedUser.approvalStatus === 'PENDING' ||
+          loadedUser.approvalStatus === 'REJECTED' ||
+          !loadedUser.isApproved
+        ) {
+          clearStoredAuthSession();
+          setToken(null);
+          setUser(null);
+        } else {
+          persistAuthSession(refreshedToken, loadedUser);
+          setToken(refreshedToken);
+          setUser(loadedUser);
+        }
+        clearRetryTimer();
+      } catch (err: any) {
+        if (!isMounted) return;
+        const status = err.response?.status;
+        console.warn('[Auth] Falha ao sincronizar sessão com o servidor:', status || err.message);
+
+        // Só desloga se o servidor recusar explicitamente a sessão (401 / 403)
+        if (status === 401 || status === 403) {
+          clearStoredAuthSession();
+          setToken(null);
+          setUser(null);
+          clearRetryTimer();
+        } else {
+          // Falha de rede, timeout ou servidor acordando (Cold Start ao ligar o PC):
+          // mantém o usuário logado localmente e tenta sincronizar novamente em 5 segundos
+          clearRetryTimer();
+          retryTimerRef.current = setTimeout(() => {
+            const currentToken = getAuthToken();
+            if (currentToken && isMounted) {
+              verifySessionWithServer(currentToken);
+            }
+          }, 5000);
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    async function bootstrapAuth() {
+      // 1. Carregar sessão do arquivo físico nativo do Electron (AppData/Roaming/Xolas/auth-session.json)
+      const stored = await loadStoredAuthNative();
+      if (!isMounted) return;
+
+      if (!stored.token) {
         setLoading(false);
         return;
       }
 
-      try {
-        const response = await api.get('/api/auth/me');
-        const loadedUser: User = response.data.user;
-        if (loadedUser.approvalStatus === 'PENDING' || !loadedUser.isApproved) {
-          localStorage.removeItem('discord_token');
-          setToken(null);
-          setUser(null);
-        } else {
-          setUser(loadedUser);
-        }
-      } catch (err: any) {
-        console.error('Falha ao autenticar com token salvo:', err);
-        // Só limpa o token se for erro explícito de autenticação inválida (401 / 403)
-        if (err.response?.status === 401 || err.response?.status === 403) {
-          localStorage.removeItem('discord_token');
-          setToken(null);
-          setUser(null);
-        }
-      } finally {
+      setToken(stored.token);
+      if (stored.user) {
+        // Entrar imediatamente no app com o usuário salvo em disco (sem bloquear na tela de loading)
+        setUser(stored.user);
         setLoading(false);
       }
+
+      // 2. Validar e sincronizar com o servidor em segundo plano (com retentativas automáticas)
+      await verifySessionWithServer(stored.token);
     }
 
-    loadUser();
+    bootstrapAuth();
+
+    const handleOnline = () => {
+      const currentToken = getAuthToken();
+      if (currentToken && isMounted) {
+        verifySessionWithServer(currentToken);
+      }
+    };
+
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      isMounted = false;
+      clearRetryTimer();
+      window.removeEventListener('online', handleOnline);
+    };
   }, []);
 
   const login = async (username: string, password: string) => {
@@ -69,7 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { status: 'PENDING' as const, user: loggedUser };
     }
 
-    localStorage.setItem('discord_token', authToken);
+    persistAuthSession(authToken, loggedUser);
     setToken(authToken);
     setUser(loggedUser);
     return { status: 'APPROVED' as const, user: loggedUser };
@@ -83,7 +160,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { status: 'PENDING' as const, user: registeredUser };
     }
 
-    localStorage.setItem('discord_token', authToken);
+    persistAuthSession(authToken, registeredUser);
     setToken(authToken);
     setUser(registeredUser);
     return { status: 'APPROVED' as const, user: registeredUser };
@@ -92,6 +169,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateProfile = async (data: { username?: string; avatarUrl?: string }): Promise<User> => {
     const response = await api.patch('/api/auth/profile', data);
     const updatedUser: User = response.data.user;
+    const currentToken = getAuthToken() || token;
+    if (currentToken) {
+      persistAuthSession(currentToken, updatedUser);
+    }
     setUser(updatedUser);
     return updatedUser;
   };
@@ -105,7 +186,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
-    localStorage.removeItem('discord_token');
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    clearStoredAuthSession();
     setToken(null);
     setUser(null);
   };

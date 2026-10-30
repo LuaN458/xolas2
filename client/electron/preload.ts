@@ -52,4 +52,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   loadUserSettings: () => ipcRenderer.invoke('load-user-settings'),
   saveUserSettings: (settings: any) => ipcRenderer.invoke('save-user-settings', settings),
+  loadAuthSession: () => ipcRenderer.invoke('load-auth-session'),
+  saveAuthSession: (sessionData: any) => ipcRenderer.invoke('save-auth-session', sessionData),
+  clearAuthSession: (keepLastUsername?: string) => ipcRenderer.invoke('clear-auth-session', keepLastUsername),
 });

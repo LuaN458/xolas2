@@ -99,7 +99,7 @@ router.post('/register', authRateLimiter, async (req, res): Promise<void> => {
     const token = jwt.sign(
       { userId: user.id, username: user.username, email: user.email, role: user.role },
       secret,
-      { algorithm: 'HS256', expiresIn: '7d' }
+      { algorithm: 'HS256', expiresIn: '90d' }
     );
 
     res.status(201).json({
@@ -184,7 +184,7 @@ router.post('/login', authRateLimiter, async (req, res): Promise<void> => {
     const token = jwt.sign(
       { userId: user.id, username: user.username, email: user.email, role: user.role },
       secret,
-      { algorithm: 'HS256', expiresIn: '7d' }
+      { algorithm: 'HS256', expiresIn: '90d' }
     );
 
     res.json({
@@ -225,11 +225,18 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response): Promi
     });
 
     if (!user) {
-      res.status(404).json({ error: 'Usuário não encontrado.' });
+      res.status(401).json({ error: 'Usuário não encontrado.' });
       return;
     }
 
-    res.json({ user });
+    const secret = process.env.JWT_SECRET || 'discord_clone_super_secret_jwt_key_2026';
+    const refreshedToken = jwt.sign(
+      { userId: user.id, username: user.username, email: user.email, role: user.role },
+      secret,
+      { algorithm: 'HS256', expiresIn: '90d' }
+    );
+
+    res.json({ user, token: refreshedToken });
   } catch (error) {
     console.error('Erro ao buscar perfil:', error);
     res.status(500).json({ error: 'Erro ao buscar perfil.' });
