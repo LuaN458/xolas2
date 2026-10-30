@@ -51,6 +51,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     selectedAudioDeviceId,
     setSelectedAudioDeviceId,
     localAudioTrack,
+    rawAudioTrack,
     currentVoiceChannel,
     audioDevices,
     refreshAudioDevices,
@@ -360,7 +361,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     return () => {
       stopMicTest();
     };
-  }, [isOpen, activeTab, selectedAudioDeviceId, localAudioTrack, currentVoiceChannel]);
+  }, [isOpen, activeTab, selectedAudioDeviceId, rawAudioTrack, currentVoiceChannel]);
 
   const startMicTest = async (deviceId: string) => {
     stopMicTest();
@@ -368,10 +369,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     try {
       let stream: MediaStream;
 
-      // Se o usuário já estiver em chamada de voz, reutilizar uma cópia ativa da faixa para o teste não conflitar nem depender do corte
-      if (currentVoiceChannel && localAudioTrack && localAudioTrack.readyState === 'live') {
+      // Se o usuário já estiver em chamada de voz, reutilizar uma cópia ativa da faixa pré-gate para o teste não conflitar nem depender do corte
+      if (currentVoiceChannel && rawAudioTrack && rawAudioTrack.readyState === 'live') {
         isReusingCallTrackRef.current = true;
-        const testTrack = localAudioTrack.clone();
+        const testTrack = rawAudioTrack.clone();
         testTrack.enabled = true;
         stream = new MediaStream([testTrack]);
       } else {
@@ -379,8 +380,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         const constraints: MediaStreamConstraints = {
           audio:
             deviceId && deviceId !== 'default'
-              ? { deviceId: { ideal: deviceId } }
-              : true,
+              ? { deviceId: { ideal: deviceId }, autoGainControl: false }
+              : { autoGainControl: false },
           video: false,
         };
         stream = await navigator.mediaDevices.getUserMedia(constraints);

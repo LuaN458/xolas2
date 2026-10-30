@@ -63,6 +63,7 @@ interface VoiceContextType {
   selectedAudioDeviceId: string;
   setSelectedAudioDeviceId: (id: string, label?: string) => Promise<void>;
   localAudioTrack: MediaStreamTrack | null;
+  rawAudioTrack: MediaStreamTrack | null;
   audioDevices: MediaDeviceInfo[];
   refreshAudioDevices: () => Promise<void>;
   joinVoiceChannel: (channel: Channel) => Promise<void>;
@@ -176,6 +177,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     initialSettings.selectedAudioDeviceId
   );
   const [localAudioTrack, setLocalAudioTrack] = useState<MediaStreamTrack | null>(null);
+  const [rawAudioTrack, setRawAudioTrack] = useState<MediaStreamTrack | null>(null);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [masterVolume, setMasterVolumeState] = useState<number>(initialSettings.masterOutputVolume);
   const [micInputGain, setMicInputGainState] = useState<number>(initialSettings.micInputGain);
@@ -189,7 +191,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Refs mutáveis para acesso imediato em callbacks WebRTC / Socket.io
   const currentChannelRef = useRef<Channel | null>(null);
+  const rawMicStreamRef = useRef<MediaStream | null>(null);
   const localMicStreamRef = useRef<MediaStream | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
+  const micGainNodeRef = useRef<GainNode | null>(null);
+  const vadGateGainNodeRef = useRef<GainNode | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const isMutedRef = useRef<boolean>(false);
   const isDeafenedRef = useRef<boolean>(false);
@@ -260,7 +266,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const ctx = remoteAudioCtxRef.current;
 
     audioElementsRef.current.forEach((el, key) => {
-      if (key.startsWith(`${peerId}-`)) {
+      if (key.startsWith(`${peerId}:::`)) {
         const pipeline = remotePipelinesRef.current.get(key);
         if (gain > 1.0 && ctx && ctx.state !== 'closed' && pipeline) {
           try {
@@ -289,8 +295,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateAllGainNodes = useCallback(() => {
     const seenPeers = new Set<string>();
     audioElementsRef.current.forEach((_, key) => {
-      const peerId = key.split('-')[0];
-      if (!seenPeers.has(peerId)) {
+      const [peerId] = key.split(':::');
+      if (peerId && !seenPeers.has(peerId)) {
         seenPeers.add(peerId);
         applyGainToPeer(peerId);
       }
@@ -410,7 +416,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       document.body.appendChild(container);
     }
 
-    const key = `${peerId}-${track.id}`;
+    const key = `${peerId}:::${track.id}`;
     let audioEl = audioElementsRef.current.get(key);
     if (!audioEl) {
       audioEl = document.createElement('audio');
@@ -476,7 +482,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // Remover pipelines Web Audio associados ao peer
     Array.from(remotePipelinesRef.current.entries()).forEach(([key, pipeline]) => {
-      if (key.startsWith(`${peerId}-`)) {
+      if (key.startsWith(`${peerId}:::`)) {
         try {
           pipeline.source.disconnect();
           pipeline.gainNode.disconnect();
@@ -487,7 +493,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // Remover elementos de áudio associados ao peer
     Array.from(audioElementsRef.current.entries()).forEach(([key, el]) => {
-      if (key.startsWith(`${peerId}-`)) {
+      if (key.startsWith(`${peerId}:::`)) {
         el.pause();
         el.srcObject = null;
         el.remove();
@@ -857,190 +863,282 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender, ensureScreenTracksForPeer]
   );
 
-  // Configura detector de atividade de voz (VAD / Indicador de Fala estilo Discord) para o microfone local
+  // Configura detector de atividade de voz com Voice Activation Gate real (DSP / Web Audio estilo Discord)
   const setupLocalVAD = useCallback(
-    (stream: MediaStream) => {
+    (
+      analyser: AnalyserNode,
+      audioCtx: AudioContext,
+      vadGateGainNode: GainNode,
+      processedTrack: MediaStreamTrack
+    ) => {
       if (vadCleanupRef.current) {
         vadCleanupRef.current();
         vadCleanupRef.current = null;
       }
 
-      try {
-        const micTrack = stream.getAudioTracks()[0];
-        if (!micTrack) return;
+      const samples = new Float32Array(analyser.fftSize);
+      let hangoverTimeout: number | null = null;
 
-        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        const audioCtx: AudioContext = new AudioCtx();
-        if (audioCtx.state === 'suspended') {
-          audioCtx.resume().catch(() => {});
+      const interval = window.setInterval(() => {
+        if (isMutedRef.current || !currentChannelRef.current) {
+          if (hangoverTimeout !== null) {
+            window.clearTimeout(hangoverTimeout);
+            hangoverTimeout = null;
+          }
+          if (audioCtx.state !== 'closed') {
+            try {
+              vadGateGainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            } catch {}
+          }
+          if (processedTrack && processedTrack.enabled) {
+            processedTrack.enabled = false;
+          }
+          if (isLocalSpeakingRef.current) {
+            isLocalSpeakingRef.current = false;
+            syncVoiceState();
+            emitLocalVoiceState();
+          }
+          return;
         }
 
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 512;
-        source.connect(analyser);
+        // Se o usuário estiver ativo na chamada e não mutado, a faixa de áudio processada deve permanecer aberta
+        if (processedTrack && !processedTrack.enabled) {
+          processedTrack.enabled = true;
+        }
 
-        const samples = new Float32Array(analyser.fftSize);
-        let hangoverTimeout: number | null = null;
+        const threshold = voiceActivationThresholdRef.current;
+        const currentGain = micInputGainRef.current;
 
-        const interval = window.setInterval(() => {
-          if (isMutedRef.current || !currentChannelRef.current) {
-            if (hangoverTimeout) {
-              window.clearTimeout(hangoverTimeout);
+        // Se o ganho do microfone estiver zerado, não transmite som
+        if (currentGain === 0) {
+          if (audioCtx.state !== 'closed') {
+            try {
+              vadGateGainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.02);
+            } catch {}
+          }
+          if (isLocalSpeakingRef.current) {
+            isLocalSpeakingRef.current = false;
+            syncVoiceState();
+            emitLocalVoiceState();
+          }
+          return;
+        }
+
+        // Se o limiar for 0% ("Sempre Ativo"), modo de transmissão contínua sem corte
+        if (threshold === 0) {
+          if (hangoverTimeout !== null) {
+            window.clearTimeout(hangoverTimeout);
+            hangoverTimeout = null;
+          }
+          if (audioCtx.state !== 'closed') {
+            try {
+              vadGateGainNode.gain.setTargetAtTime(1.0, audioCtx.currentTime, 0.008);
+            } catch {}
+          }
+          if (!isLocalSpeakingRef.current) {
+            isLocalSpeakingRef.current = true;
+            syncVoiceState();
+            emitLocalVoiceState();
+          }
+          return;
+        }
+
+        if (analyser.getFloatTimeDomainData) {
+          analyser.getFloatTimeDomainData(samples);
+        } else {
+          const byteData = new Uint8Array(analyser.fftSize);
+          analyser.getByteTimeDomainData(byteData);
+          for (let i = 0; i < byteData.length; i++) {
+            samples[i] = (byteData[i] - 128) / 128;
+          }
+        }
+
+        let sumSquares = 0;
+        for (let i = 0; i < samples.length; i++) {
+          sumSquares += samples[i] * samples[i];
+        }
+        const rms = Math.sqrt(sumSquares / samples.length);
+        // Decibéis relativos ao fundo de escala: -60 dB (silêncio) a 0 dB (pico máximo)
+        const db = 20 * Math.log10(rms || 0.00001);
+        // Normaliza de 0 a 100 com base na escala perceptiva de decibéis
+        const normalized = Math.max(0, Math.min(100, Math.round(((db + 60) / 60) * 100)));
+        const currentLevel = Math.max(
+          0,
+          Math.min(100, Math.round(normalized * (currentGain / 100)))
+        );
+
+        const isAboveThreshold = currentLevel >= threshold;
+
+        if (isAboveThreshold) {
+          // O som ultrapassou a barra seletora: abre o portão suavemente (rampa de 8ms)
+          if (hangoverTimeout !== null) {
+            window.clearTimeout(hangoverTimeout);
+            hangoverTimeout = null;
+          }
+          if (audioCtx.state !== 'closed') {
+            try {
+              vadGateGainNode.gain.setTargetAtTime(1.0, audioCtx.currentTime, 0.008);
+            } catch {}
+          }
+          if (!isLocalSpeakingRef.current) {
+            isLocalSpeakingRef.current = true;
+            syncVoiceState();
+            emitLocalVoiceState();
+          }
+        } else {
+          // Som abaixo da barra seletora (ruído de fundo, respiração ou silêncio)
+          if (isLocalSpeakingRef.current && hangoverTimeout === null) {
+            // Sustentação de fala suave de 380ms (padrão Discord) para pausas naturais entre palavras
+            hangoverTimeout = window.setTimeout(() => {
               hangoverTimeout = null;
-            }
-            if (micTrack && micTrack.enabled) {
-              micTrack.enabled = false;
-            }
-            if (isLocalSpeakingRef.current) {
+              if (audioCtx.state !== 'closed') {
+                try {
+                  // Rampa de fechamento suave de 25ms (silêncio absoluto sem cliques na onda sonora)
+                  vadGateGainNode.gain.setTargetAtTime(0.0, audioCtx.currentTime, 0.025);
+                } catch {}
+              }
               isLocalSpeakingRef.current = false;
               syncVoiceState();
               emitLocalVoiceState();
-            }
-            return;
+            }, 380);
           }
+        }
+      }, 30);
 
-          // Se não estiver mutado, garante que a faixa física do microfone continue transmitindo
-          if (micTrack && !micTrack.enabled) {
-            micTrack.enabled = true;
-          }
-
-          const threshold = voiceActivationThresholdRef.current;
-
-          // Se o limiar for 0%, modo de fala contínua sem cálculo de nível
-          if (threshold === 0) {
-            if (hangoverTimeout) {
-              window.clearTimeout(hangoverTimeout);
-              hangoverTimeout = null;
-            }
-            if (!isLocalSpeakingRef.current) {
-              isLocalSpeakingRef.current = true;
-              syncVoiceState();
-              emitLocalVoiceState();
-            }
-            return;
-          }
-
-          if (analyser.getFloatTimeDomainData) {
-            analyser.getFloatTimeDomainData(samples);
-          } else {
-            const byteData = new Uint8Array(analyser.fftSize);
-            analyser.getByteTimeDomainData(byteData);
-            for (let i = 0; i < byteData.length; i++) {
-              samples[i] = (byteData[i] - 128) / 128;
-            }
-          }
-
-          let sumSquares = 0;
-          for (let i = 0; i < samples.length; i++) {
-            sumSquares += samples[i] * samples[i];
-          }
-          const rms = Math.sqrt(sumSquares / samples.length);
-          // Decibéis relativos ao fundo de escala: -60 dB (silêncio) a 0 dB (pico máximo)
-          const db = 20 * Math.log10(rms || 0.00001);
-          // Normaliza de 0 a 100 com base na escala perceptiva de decibéis
-          const normalized = Math.max(0, Math.min(100, Math.round(((db + 60) / 60) * 100)));
-          const currentLevel = Math.max(
-            0,
-            Math.min(100, Math.round(normalized * (micInputGainRef.current / 100)))
-          );
-
-          const isAboveThreshold = currentLevel >= threshold;
-
-          if (isAboveThreshold) {
-            if (hangoverTimeout) {
-              window.clearTimeout(hangoverTimeout);
-              hangoverTimeout = null;
-            }
-            if (!isLocalSpeakingRef.current) {
-              isLocalSpeakingRef.current = true;
-              syncVoiceState();
-              emitLocalVoiceState();
-            }
-          } else {
-            // Cauda de fala suave de 400ms (padrão Discord) para o anel verde de fala
-            if (isLocalSpeakingRef.current && hangoverTimeout === null) {
-              hangoverTimeout = window.setTimeout(() => {
-                hangoverTimeout = null;
-                isLocalSpeakingRef.current = false;
-                syncVoiceState();
-                emitLocalVoiceState();
-              }, 400);
-            }
-          }
-        }, 40);
-
-        vadCleanupRef.current = () => {
-          clearInterval(interval);
-          if (hangoverTimeout) window.clearTimeout(hangoverTimeout);
+      vadCleanupRef.current = () => {
+        clearInterval(interval);
+        if (hangoverTimeout !== null) {
+          window.clearTimeout(hangoverTimeout);
+        }
+        if (audioCtx.state !== 'closed') {
           try {
-            source.disconnect();
-            analyser.disconnect();
-            audioCtx.close().catch(() => {});
+            vadGateGainNode.gain.setValueAtTime(0, audioCtx.currentTime);
           } catch {}
-        };
-      } catch (err) {
-        console.warn('Falha ao iniciar detector de voz local:', err);
-      }
+        }
+      };
     },
     [syncVoiceState, emitLocalVoiceState]
   );
 
-  // Captura microfone local respeitando deviceId selecionado
+  // Captura microfone local com pipeline Web Audio (Ganho manual + Voice Activation Gate)
   const captureLocalMicrophone = useCallback(
     async (deviceId?: string): Promise<MediaStream | null> => {
       const targetId = deviceId ?? selectedAudioDeviceId;
+
+      // Limpar pipeline anterior se existir
+      if (vadCleanupRef.current) {
+        vadCleanupRef.current();
+        vadCleanupRef.current = null;
+      }
+      if (rawMicStreamRef.current) {
+        rawMicStreamRef.current.getTracks().forEach((t) => t.stop());
+        rawMicStreamRef.current = null;
+      }
+      if (localMicStreamRef.current) {
+        localMicStreamRef.current.getTracks().forEach((t) => t.stop());
+        localMicStreamRef.current = null;
+      }
+      if (micAudioCtxRef.current && micAudioCtxRef.current.state !== 'closed') {
+        try {
+          micAudioCtxRef.current.close().catch(() => {});
+        } catch {}
+        micAudioCtxRef.current = null;
+      }
+      micGainNodeRef.current = null;
+      vadGateGainNodeRef.current = null;
+
+      let rawStream: MediaStream;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        rawStream = await navigator.mediaDevices.getUserMedia({
           audio:
             targetId && targetId !== 'default'
               ? {
                   deviceId: { ideal: targetId },
                   echoCancellation: true,
                   noiseSuppression: true,
-                  autoGainControl: true,
+                  autoGainControl: false,
                 }
               : {
                   echoCancellation: true,
                   noiseSuppression: true,
-                  autoGainControl: true,
+                  autoGainControl: false,
                 },
           video: false,
         });
-
-        const track = stream.getAudioTracks()[0] || null;
-        if (track) {
-          track.enabled = !isMutedRef.current;
-        }
-
-        // Parar microfone anterior se existir
-        if (localMicStreamRef.current && localMicStreamRef.current.id !== stream.id) {
-          localMicStreamRef.current.getTracks().forEach((t) => t.stop());
-        }
-
-        localMicStreamRef.current = stream;
-        setLocalAudioTrack(track);
-        setupLocalVAD(stream);
-        return stream;
       } catch (err) {
         console.warn('Falha ao capturar microfone específico, tentando padrão:', err);
         try {
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
+          rawStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: false,
+            },
             video: false,
           });
-          const track = fallbackStream.getAudioTracks()[0] || null;
-          if (track) {
-            track.enabled = !isMutedRef.current;
-          }
-          localMicStreamRef.current = fallbackStream;
-          setLocalAudioTrack(track);
-          setupLocalVAD(fallbackStream);
-          return fallbackStream;
         } catch (fallbackErr) {
           console.error('Não foi possível acessar nenhum microfone:', fallbackErr);
           return null;
         }
+      }
+
+      const rawTrack = rawStream.getAudioTracks()[0] || null;
+      if (!rawTrack) return null;
+
+      rawMicStreamRef.current = rawStream;
+      setRawAudioTrack(rawTrack);
+
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const micAudioCtx: AudioContext = new AudioCtx({ sampleRate: 48000 });
+        if (micAudioCtx.state === 'suspended') {
+          micAudioCtx.resume().catch(() => {});
+        }
+        micAudioCtxRef.current = micAudioCtx;
+
+        const source = micAudioCtx.createMediaStreamSource(rawStream);
+
+        // Analisador para medição de nível e VAD
+        const analyser = micAudioCtx.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+
+        // GainNode para Sensibilidade do Microfone (0% a 100%)
+        const micGainNode = micAudioCtx.createGain();
+        const initialGain = Math.max(0, Math.min(100, micInputGainRef.current)) / 100;
+        micGainNode.gain.setValueAtTime(initialGain, micAudioCtx.currentTime);
+        source.connect(micGainNode);
+        micGainNodeRef.current = micGainNode;
+
+        // GainNode para o Voice Activation Gate (abertura e corte suave da transmissão)
+        const vadGateGainNode = micAudioCtx.createGain();
+        const startOpen = !isMutedRef.current && voiceActivationThresholdRef.current === 0;
+        vadGateGainNode.gain.setValueAtTime(startOpen ? 1.0 : 0.0, micAudioCtx.currentTime);
+        micGainNode.connect(vadGateGainNode);
+        vadGateGainNodeRef.current = vadGateGainNode;
+
+        // Destination node onde a trilha de saída processada é gerada para o WebRTC
+        const dest = micAudioCtx.createMediaStreamDestination();
+        vadGateGainNode.connect(dest);
+
+        const processedTrack = dest.stream.getAudioTracks()[0];
+        if (processedTrack) {
+          processedTrack.enabled = !isMutedRef.current;
+        }
+
+        localMicStreamRef.current = dest.stream;
+        setLocalAudioTrack(processedTrack);
+
+        // Iniciar loop de VAD e controle do Noise Gate
+        setupLocalVAD(analyser, micAudioCtx, vadGateGainNode, processedTrack);
+
+        return dest.stream;
+      } catch (pipelineErr) {
+        console.warn('Falha ao inicializar pipeline Web Audio do microfone, usando stream direto:', pipelineErr);
+        rawTrack.enabled = !isMutedRef.current;
+        localMicStreamRef.current = rawStream;
+        setLocalAudioTrack(rawTrack);
+        return rawStream;
       }
     },
     [selectedAudioDeviceId, setupLocalVAD]
@@ -1146,6 +1244,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     micInputGainRef.current = clamped;
     setMicInputGainState(clamped);
     saveUserSetting('micInputGain', clamped);
+    if (micGainNodeRef.current && micAudioCtxRef.current && micAudioCtxRef.current.state !== 'closed') {
+      try {
+        micGainNodeRef.current.gain.setTargetAtTime(clamped / 100, micAudioCtxRef.current.currentTime, 0.01);
+      } catch {}
+    }
   }, []);
 
   const setVoiceActivationThreshold = useCallback((val: number) => {
@@ -1153,6 +1256,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     voiceActivationThresholdRef.current = clamped;
     setVoiceActivationThresholdState(clamped);
     saveUserSetting('voiceActivationThreshold', clamped);
+    if (clamped === 0 && !isMutedRef.current && vadGateGainNodeRef.current && micAudioCtxRef.current && micAudioCtxRef.current.state !== 'closed') {
+      try {
+        vadGateGainNodeRef.current.gain.setTargetAtTime(1.0, micAudioCtxRef.current.currentTime, 0.008);
+      } catch {}
+    }
   }, []);
 
   const updateScreenQualityPreset = useCallback(
@@ -1659,11 +1767,26 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       screenAudioCleanupRef.current = null;
     }
 
+    if (rawMicStreamRef.current) {
+      rawMicStreamRef.current.getTracks().forEach((t) => t.stop());
+      rawMicStreamRef.current = null;
+    }
+    setRawAudioTrack(null);
+
     if (localMicStreamRef.current) {
       localMicStreamRef.current.getTracks().forEach((t) => t.stop());
       localMicStreamRef.current = null;
     }
     setLocalAudioTrack(null);
+
+    if (micAudioCtxRef.current && micAudioCtxRef.current.state !== 'closed') {
+      try {
+        micAudioCtxRef.current.close().catch(() => {});
+      } catch {}
+      micAudioCtxRef.current = null;
+    }
+    micGainNodeRef.current = null;
+    vadGateGainNodeRef.current = null;
 
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -1715,6 +1838,15 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         localMicStreamRef.current.getAudioTracks().forEach((t) => {
           t.enabled = !next;
         });
+      }
+      if (vadGateGainNodeRef.current && micAudioCtxRef.current && micAudioCtxRef.current.state !== 'closed') {
+        try {
+          if (next) {
+            vadGateGainNodeRef.current.gain.setValueAtTime(0, micAudioCtxRef.current.currentTime);
+          } else if (voiceActivationThresholdRef.current === 0) {
+            vadGateGainNodeRef.current.gain.setTargetAtTime(1.0, micAudioCtxRef.current.currentTime, 0.008);
+          }
+        } catch {}
       }
       if (next) {
         isLocalSpeakingRef.current = false;
@@ -2535,6 +2667,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         selectedAudioDeviceId,
         setSelectedAudioDeviceId,
         localAudioTrack,
+        rawAudioTrack,
         audioDevices,
         refreshAudioDevices,
         joinVoiceChannel,
