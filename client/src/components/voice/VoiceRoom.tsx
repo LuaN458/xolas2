@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Channel } from '../../types';
 import { useVoice, ScreenQualityOptions } from '../../contexts/VoiceContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSocket } from '../../contexts/SocketContext';
 import { ParticipantTile } from './ParticipantTile';
 import { ScreenShareModal } from './ScreenShareModal';
 import { UserAudioContextMenu } from './UserAudioContextMenu';
@@ -39,6 +40,8 @@ interface VoiceRoomProps {
 
 export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, socketParticipants = [] }) => {
   const { user } = useAuth();
+  const { socket } = useSocket();
+  const isAdmin = user?.role === 'ADMIN';
   const {
     isMuted,
     toggleMute,
@@ -515,6 +518,35 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           volume={getUserVolume(contextMenu.userId)}
           isMuted={isUserMuted(contextMenu.userId)}
           hasScreenShare={contextMenu.hasScreenShare}
+          isAdmin={isAdmin}
+          isServerMuted={
+            socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
+          }
+          onDisconnectVoice={
+            isAdmin
+              ? () => {
+                  socket?.emit('admin:disconnect-voice', {
+                    targetUserId: contextMenu.userId,
+                    channelId: channel.id,
+                    serverId: channel.serverId,
+                  });
+                }
+              : undefined
+          }
+          onToggleServerMute={
+            isAdmin
+              ? () => {
+                  const currentMuted =
+                    socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ?? false;
+                  socket?.emit('admin:server-mute-voice', {
+                    targetUserId: contextMenu.userId,
+                    channelId: channel.id,
+                    serverId: channel.serverId,
+                    isMuted: !currentMuted,
+                  });
+                }
+              : undefined
+          }
           onWatchScreenShare={
             contextMenu.hasScreenShare
               ? () => watchScreenShare(contextMenu.shareId || `screen-${contextMenu.userId}`)

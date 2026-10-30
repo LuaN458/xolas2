@@ -1,7 +1,8 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { authMiddleware, AuthRequest } from '../middlewares/auth';
+import { adminMiddleware, authMiddleware, AuthRequest } from '../middlewares/auth';
 import { ensureScalarString, isValidIdentifier, sanitizeText } from '../middlewares/security';
+import { getGlobalIO } from '../sockets/chatHandler';
 
 const router = Router();
 
@@ -89,5 +90,50 @@ router.post('/:id/messages', authMiddleware, async (req: AuthRequest, res: Respo
     res.status(500).json({ error: 'Erro ao salvar mensagem.' });
   }
 });
+
+// Excluir mensagem do canal (Exclusivo para Administradores)
+router.delete(
+  '/:channelId/messages/:messageId',
+  authMiddleware,
+  adminMiddleware,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const channelId = Array.isArray(req.params.channelId) ? req.params.channelId[0] : req.params.channelId;
+      const messageId = Array.isArray(req.params.messageId) ? req.params.messageId[0] : req.params.messageId;
+
+      if (!isValidIdentifier(channelId) || !isValidIdentifier(messageId)) {
+        res.status(400).json({ error: 'Parâmetros inválidos.' });
+        return;
+      }
+
+      const existingMessage = await prisma.message.findFirst({
+        where: { id: messageId, channelId },
+      });
+
+      if (!existingMessage) {
+        res.status(404).json({ error: 'Mensagem não encontrada neste canal.' });
+        return;
+      }
+
+      await prisma.message.delete({
+        where: { id: messageId },
+      });
+
+      // Notificar em tempo real todos os usuários conectados no canal
+      const io = getGlobalIO();
+      if (io) {
+        io.to(`channel:${channelId}`).emit('message-deleted', {
+          channelId,
+          messageId,
+        });
+      }
+
+      res.json({ success: true, messageId });
+    } catch (error) {
+      console.error('Erro ao excluir mensagem:', error);
+      res.status(500).json({ error: 'Erro interno ao excluir mensagem.' });
+    }
+  }
+);
 
 export default router;

@@ -1731,6 +1731,35 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [syncVoiceState, emitLocalVoiceState, updateAllGainNodes]);
 
+  // Ouvintes de Moderação de Administrador (Desconexão forçada da chamada e Silenciamento no servidor)
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleForceDisconnectVoice = (data: { channelId?: string; reason?: string }) => {
+      if (!currentChannelRef.current) return;
+      if (!data?.channelId || data.channelId === currentChannelRef.current.id) {
+        console.warn('[VoiceContext] Desconectado por administrador:', data?.reason);
+        playAudioCue('mute');
+        leaveVoiceChannel();
+      }
+    };
+
+    const handleForceMuteMic = (data: { isMuted?: boolean }) => {
+      const shouldMute = Boolean(data?.isMuted);
+      if (shouldMute !== isMutedRef.current) {
+        toggleMute();
+      }
+    };
+
+    socket.on('force-disconnect-voice', handleForceDisconnectVoice);
+    socket.on('force-mute-mic', handleForceMuteMic);
+
+    return () => {
+      socket.off('force-disconnect-voice', handleForceDisconnectVoice);
+      socket.off('force-mute-mic', handleForceMuteMic);
+    };
+  }, [socket, leaveVoiceChannel, toggleMute]);
+
   // Sincronizar atalhos de teclado globais no Electron
   useEffect(() => {
     const registerHotkeys = (settings: UserAudioSettings) => {

@@ -3,6 +3,7 @@ import { MessageSquareText, Radio, Plus, PhoneOff, Monitor, ChevronDown, Volume2
 import { Server, Channel } from '../../types';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSocket } from '../../contexts/SocketContext';
 import { UserAudioContextMenu } from '../voice/UserAudioContextMenu';
 
 export interface VoiceParticipantInfo {
@@ -33,6 +34,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
   onOpenCreateChannelModal,
 }) => {
   const { user } = useAuth();
+  const { socket } = useSocket();
   const {
     currentVoiceChannel,
     leaveVoiceChannel,
@@ -356,6 +358,35 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
           volume={getUserVolume(contextMenu.userId)}
           isMuted={isUserMuted(contextMenu.userId)}
           hasScreenShare={contextMenu.hasScreenShare}
+          isAdmin={user?.role === 'ADMIN'}
+          isServerMuted={
+            voiceParticipants[contextMenu.channel.id]?.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
+          }
+          onDisconnectVoice={
+            user?.role === 'ADMIN'
+              ? () => {
+                  socket?.emit('admin:disconnect-voice', {
+                    targetUserId: contextMenu.userId,
+                    channelId: contextMenu.channel.id,
+                    serverId: server.id,
+                  });
+                }
+              : undefined
+          }
+          onToggleServerMute={
+            user?.role === 'ADMIN'
+              ? () => {
+                  const currentMuted =
+                    voiceParticipants[contextMenu.channel.id]?.find((p) => p.id === contextMenu.userId)?.isMuted ?? false;
+                  socket?.emit('admin:server-mute-voice', {
+                    targetUserId: contextMenu.userId,
+                    channelId: contextMenu.channel.id,
+                    serverId: server.id,
+                    isMuted: !currentMuted,
+                  });
+                }
+              : undefined
+          }
           onWatchScreenShare={
             contextMenu.hasScreenShare
               ? () => {

@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { api } from '../../lib/api';
 import { useSocket } from '../../contexts/SocketContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { Channel, Message } from '../../types';
 import { MessageItem } from './MessageItem';
 import { MessageSquareText } from 'lucide-react';
@@ -10,10 +11,34 @@ interface MessageAreaProps {
 }
 
 export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
+  const { user } = useAuth();
   const { socket } = useSocket();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const isAdmin = user?.role === 'ADMIN';
+
+  const handleDeleteMessage = useCallback(
+    async (messageId: string) => {
+      if (!isAdmin) return;
+      // Remoção otimista imediata na UI
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+
+      if (socket) {
+        socket.emit('admin:delete-message', {
+          channelId: channel.id,
+          messageId,
+        });
+      }
+
+      try {
+        await api.delete(`/api/channels/${channel.id}/messages/${messageId}`);
+      } catch (err) {
+        console.warn('Exclusão de mensagem via HTTP falhou (ou já processada via socket):', err);
+      }
+    },
+    [isAdmin, socket, channel.id]
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -43,11 +68,19 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
         }
       };
 
+      const handleMessageDeleted = (data: { channelId: string; messageId: string }) => {
+        if (data.channelId === channel.id) {
+          setMessages((prev) => prev.filter((m) => m.id !== data.messageId));
+        }
+      };
+
       socket.on('new-message', handleNewMessage);
+      socket.on('message-deleted', handleMessageDeleted);
 
       return () => {
         socket.emit('leave-channel', channel.id);
         socket.off('new-message', handleNewMessage);
+        socket.off('message-deleted', handleMessageDeleted);
         isMounted = false;
       };
     }
@@ -85,7 +118,12 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
         ) : (
           <div className="space-y-1">
             {messages.map((msg) => (
-              <MessageItem key={msg.id} message={msg} />
+              <MessageItem
+                key={msg.id}
+                message={msg}
+                isAdmin={isAdmin}
+                onDelete={handleDeleteMessage}
+              />
             ))}
           </div>
         )}

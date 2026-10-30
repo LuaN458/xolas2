@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Volume2, Volume1, VolumeX, MicOff, RotateCcw, Monitor } from 'lucide-react';
+import { Volume2, Volume1, VolumeX, MicOff, RotateCcw, Monitor, Shield, PhoneOff } from 'lucide-react';
 
 interface UserAudioContextMenuProps {
   x: number;
@@ -14,6 +14,10 @@ interface UserAudioContextMenuProps {
   onVolumeChange: (newVolume: number) => void;
   onToggleMute: () => void;
   onClose: () => void;
+  isAdmin?: boolean;
+  isServerMuted?: boolean;
+  onDisconnectVoice?: () => void;
+  onToggleServerMute?: () => void;
 }
 
 export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
@@ -29,6 +33,10 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
   onVolumeChange,
   onToggleMute,
   onClose,
+  isAdmin = false,
+  isServerMuted = false,
+  onDisconnectVoice,
+  onToggleServerMute,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -57,7 +65,8 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
 
   // Posicionamento inteligente para evitar corte nas bordas da janela
   const MENU_WIDTH = 260;
-  const MENU_HEIGHT = hasScreenShare && onWatchScreenShare ? 275 : 225;
+  const adminOffset = isAdmin ? 95 : 0;
+  const MENU_HEIGHT = (hasScreenShare && onWatchScreenShare ? 275 : 225) + adminOffset;
   const safeX = Math.max(10, Math.min(x, window.innerWidth - MENU_WIDTH - 16));
   const safeY = Math.max(10, Math.min(y, window.innerHeight - MENU_HEIGHT - 16));
 
@@ -222,6 +231,56 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
           )}
         </div>
       </button>
+
+      {/* Seção de Moderação para Administradores */}
+      {isAdmin && (
+        <>
+          <div className="border-t border-obsidian-border/60 my-2" />
+          <div className="text-[10px] font-bold text-obsidian-accent uppercase tracking-wider px-1 mb-1.5 flex items-center space-x-1">
+            <Shield className="w-3 h-3" />
+            <span>Moderação (Admin)</span>
+          </div>
+
+          <div className="space-y-1.5">
+            {onToggleServerMute && (
+              <button
+                type="button"
+                onClick={() => {
+                  onToggleServerMute();
+                  onClose();
+                }}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  isServerMuted
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                    : 'bg-obsidian-surface hover:bg-white/10 text-obsidian-text-secondary hover:text-white border border-obsidian-border'
+                }`}
+              >
+                <div className="flex items-center space-x-2">
+                  <MicOff className="w-4 h-4 text-amber-400" />
+                  <span>{isServerMuted ? 'Desmutar no Servidor' : 'Silenciar no Servidor'}</span>
+                </div>
+                <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                  Para Todos
+                </span>
+              </button>
+            )}
+
+            {onDisconnectVoice && (
+              <button
+                type="button"
+                onClick={() => {
+                  onDisconnectVoice();
+                  onClose();
+                }}
+                className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 transition-all group"
+              >
+                <PhoneOff className="w-4 h-4 text-rose-400 group-hover:scale-105 transition-transform" />
+                <span>Desconectar da Sala</span>
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };

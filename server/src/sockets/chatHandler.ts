@@ -157,7 +157,7 @@ export function setupSocketHandlers(io: Server): void {
       io.emit('user-status-changed', { userId, status: 'online' });
     }
 
-    // Se o usuário for administrador, insere na sala de administradores e envia contador de pendências
+    // Se o usuário for administrador, insere na sala de administradores e habilita controles de moderação
     if (user.role === 'ADMIN') {
       socket.join('admin-room');
       prisma.user
@@ -173,6 +173,107 @@ export function setupSocketHandlers(io: Server): void {
           socket.emit('admin-pending-count', { pendingCount });
         } catch {}
       });
+
+      // 1. Exclusão de mensagens de chat por Administrador
+      socket.on('admin:delete-message', async (data: { channelId?: unknown; messageId?: unknown }) => {
+        try {
+          const channelId = data?.channelId;
+          const messageId = data?.messageId;
+          if (!isValidIdentifier(channelId) || !isValidIdentifier(messageId)) return;
+
+          const existing = await prisma.message.findFirst({
+            where: { id: messageId, channelId },
+          });
+          if (!existing) return;
+
+          await prisma.message.delete({
+            where: { id: messageId },
+          });
+
+          io.to(`channel:${channelId}`).emit('message-deleted', {
+            channelId,
+            messageId,
+          });
+        } catch (err) {
+          console.error('Erro ao excluir mensagem via admin socket:', err);
+        }
+      });
+
+      // 2. Desconexão forçada de participante de voz por Administrador
+      socket.on(
+        'admin:disconnect-voice',
+        async (data: { targetUserId?: unknown; channelId?: unknown; serverId?: unknown }) => {
+          try {
+            const targetUserId = data?.targetUserId;
+            const channelId = data?.channelId;
+            const serverId = data?.serverId;
+            if (
+              !isValidIdentifier(targetUserId) ||
+              !isValidIdentifier(channelId) ||
+              !isValidIdentifier(serverId)
+            ) {
+              return;
+            }
+
+            removeSpecificUserFromVoice(targetUserId, channelId, serverId);
+
+            sendToUser(targetUserId, 'force-disconnect-voice', {
+              channelId,
+              serverId,
+              reason: 'Você foi desconectado da chamada por um administrador.',
+            });
+          } catch (err) {
+            console.error('Erro ao desconectar usuário da voz via admin socket:', err);
+          }
+        }
+      );
+
+      // 3. Silenciamento no servidor (Server Mute) por Administrador
+      socket.on(
+        'admin:server-mute-voice',
+        async (data: {
+          targetUserId?: unknown;
+          channelId?: unknown;
+          serverId?: unknown;
+          isMuted?: unknown;
+        }) => {
+          try {
+            const targetUserId = data?.targetUserId;
+            const channelId = data?.channelId;
+            const serverId = data?.serverId;
+            const isMuted = Boolean(data?.isMuted);
+
+            if (
+              !isValidIdentifier(targetUserId) ||
+              !isValidIdentifier(channelId) ||
+              !isValidIdentifier(serverId)
+            ) {
+              return;
+            }
+
+            const room = voiceRooms.get(channelId);
+            if (room && room.has(targetUserId)) {
+              const p = room.get(targetUserId)!;
+              p.isMuted = isMuted;
+            }
+
+            const statePayload = {
+              channelId,
+              userId: targetUserId,
+              isMuted,
+            };
+            io.to(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
+            io.to(`server:${serverId}`).emit('voice-user-state-updated', statePayload);
+
+            sendToUser(targetUserId, 'force-mute-mic', {
+              channelId,
+              isMuted,
+            });
+          } catch (err) {
+            console.error('Erro ao silenciar usuário no servidor via admin socket:', err);
+          }
+        }
+      );
     }
 
     // Enviar lista de usuários online imediatamente para quem acabou de conectar
@@ -242,20 +343,33 @@ export function setupSocketHandlers(io: Server): void {
       }
     };
 
-    // Função auxiliar para remover usuário de canal de voz
-    const removeUserFromVoice = (channelId: string, serverId: string) => {
-      if (!isValidIdentifier(channelId) || !isValidIdentifier(serverId)) return;
-      socket.leave(`voice:${channelId}`);
+    // Função auxiliar para remover qualquer usuário de canal de voz
+    const removeSpecificUserFromVoice = (targetUserId: string, channelId: string, serverId: string) => {
+      if (!isValidIdentifier(channelId) || !isValidIdentifier(serverId) || !isValidIdentifier(targetUserId)) return;
+
+      const targetSocketIds = userSockets.get(targetUserId);
+      if (targetSocketIds) {
+        targetSocketIds.forEach((sid) => {
+          const s = io.sockets.sockets.get(sid) as AuthenticatedSocket | undefined;
+          if (s) {
+            s.leave(`voice:${channelId}`);
+            if (s.currentVoice?.channelId === channelId) {
+              s.currentVoice = undefined;
+            }
+          }
+        });
+      }
+
       const room = voiceRooms.get(channelId);
       if (room) {
-        room.delete(user.userId);
+        room.delete(targetUserId);
         if (room.size === 0) {
           voiceRooms.delete(channelId);
         }
       }
       io.to(`voice:${channelId}`).emit('voice-peer-left', {
         channelId,
-        userId: user.userId,
+        userId: targetUserId,
       });
       const updatedUsers = getChannelVoiceParticipants(channelId);
       io.to(`server:${serverId}`).emit('voice-channel-updated', {
@@ -263,6 +377,11 @@ export function setupSocketHandlers(io: Server): void {
         users: updatedUsers,
         participants: updatedUsers,
       });
+    };
+
+    // Função auxiliar para remover usuário atual de canal de voz
+    const removeUserFromVoice = (channelId: string, serverId: string) => {
+      removeSpecificUserFromVoice(user.userId, channelId, serverId);
     };
 
     // Conectar em canal de voz
