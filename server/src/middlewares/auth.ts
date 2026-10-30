@@ -68,15 +68,26 @@ export async function adminMiddleware(
   try {
     const dbUser = await prisma.user.findUnique({
       where: { id: userId },
-      select: { role: true, isApproved: true, approvalStatus: true },
+      select: {
+        role: true,
+        isApproved: true,
+        approvalStatus: true,
+        customRole: { select: { permissions: true } },
+      },
     });
 
-    if (!dbUser || dbUser.role !== 'ADMIN' || !dbUser.isApproved) {
+    const isSystemAdmin = dbUser?.role === 'ADMIN';
+    const hasAdminPerm =
+      dbUser?.customRole?.permissions?.some((p) =>
+        ['manage_users', 'manage_channels', 'delete_messages'].includes(p)
+      );
+
+    if (!dbUser || (!isSystemAdmin && !hasAdminPerm) || !dbUser.isApproved) {
       res.status(403).json({ error: 'Acesso restrito a administradores do sistema.' });
       return;
     }
 
-    req.user!.role = 'ADMIN';
+    req.user!.role = dbUser.role;
     next();
   } catch (err) {
     console.error('Erro na verificação de admin:', err);

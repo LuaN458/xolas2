@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware, adminMiddleware, AuthRequest } from '../middlewares/auth';
 import { ensureScalarString, isValidIdentifier, sanitizeText } from '../middlewares/security';
-import { notifyAdminsPendingUpdate, notifyUserApprovalStatus } from '../sockets/chatHandler';
+import { notifyAdminsPendingUpdate, notifyUserApprovalStatus, getGlobalIO } from '../sockets/chatHandler';
 
 const router = Router();
 
@@ -260,6 +260,15 @@ router.patch('/users/:id/role', async (req: AuthRequest, res: Response): Promise
       },
     });
 
+    const io = getGlobalIO();
+    if (io) {
+      io.emit('user:role-updated', {
+        userId: updatedUser.id,
+        customRoleId: updatedUser.customRoleId,
+        customRole: updatedUser.customRole,
+      });
+    }
+
     res.json({ success: true, user: updatedUser });
   } catch (error) {
     console.error('Erro ao alterar papel do usuário:', error);
@@ -327,7 +336,13 @@ router.post('/roles', async (req: AuthRequest, res: Response): Promise<void> => 
       },
     });
 
-    res.status(201).json({ role: { ...role, userCount: 0 } });
+    const createdPayload = { ...role, userCount: 0 };
+    const io = getGlobalIO();
+    if (io) {
+      io.emit('role:created', { role: createdPayload });
+    }
+
+    res.status(201).json({ role: createdPayload });
   } catch (error) {
     console.error('Erro ao criar cargo:', error);
     res.status(500).json({ error: 'Erro interno ao criar cargo.' });
@@ -376,15 +391,22 @@ router.patch('/roles/:id', async (req: AuthRequest, res: Response): Promise<void
       },
     });
 
+    const rolePayload = {
+      id: updatedRole.id,
+      name: updatedRole.name,
+      color: updatedRole.color,
+      permissions: updatedRole.permissions,
+      isDefault: updatedRole.isDefault,
+      userCount: updatedRole._count.users,
+    };
+
+    const io = getGlobalIO();
+    if (io) {
+      io.emit('role:updated', { role: rolePayload });
+    }
+
     res.json({
-      role: {
-        id: updatedRole.id,
-        name: updatedRole.name,
-        color: updatedRole.color,
-        permissions: updatedRole.permissions,
-        isDefault: updatedRole.isDefault,
-        userCount: updatedRole._count.users,
-      },
+      role: rolePayload,
     });
   } catch (error) {
     console.error('Erro ao atualizar cargo:', error);
@@ -404,6 +426,11 @@ router.delete('/roles/:id', async (req: AuthRequest, res: Response): Promise<voi
     await prisma.customRole.delete({
       where: { id },
     });
+
+    const io = getGlobalIO();
+    if (io) {
+      io.emit('role:deleted', { roleId: id });
+    }
 
     res.json({ success: true, id });
   } catch (error) {
@@ -451,6 +478,15 @@ router.patch('/users/:id/custom-role', async (req: AuthRequest, res: Response): 
         isApproved: true,
       },
     });
+
+    const io = getGlobalIO();
+    if (io) {
+      io.emit('user:role-updated', {
+        userId: updatedUser.id,
+        customRoleId: updatedUser.customRoleId,
+        customRole: updatedUser.customRole,
+      });
+    }
 
     res.json({ success: true, user: updatedUser });
   } catch (error) {

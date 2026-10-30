@@ -18,6 +18,7 @@ import {
   securitySanitizerMiddleware,
   createRateLimiter,
 } from './middlewares/security';
+import { authMiddleware } from './middlewares/auth';
 
 const app = express();
 app.disable('x-powered-by');
@@ -54,6 +55,31 @@ app.get('/api/health', (req, res) => {
     time: new Date().toISOString(),
     livekitConfigured: Boolean(process.env.LIVEKIT_URL && !process.env.LIVEKIT_URL.includes('your-livekit-url')),
   });
+});
+
+// Listar cargos customizados (para usuários autenticados)
+app.get('/api/roles', authMiddleware, async (req, res) => {
+  try {
+    const roles = await prisma.customRole.findMany({
+      include: {
+        _count: {
+          select: { users: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    res.json({
+      success: true,
+      roles: roles.map((r) => ({
+        ...r,
+        userCount: r._count.users,
+      })),
+    });
+  } catch (error) {
+    console.error('Erro ao listar cargos públicos:', error);
+    res.status(500).json({ error: 'Erro ao buscar cargos.' });
+  }
 });
 
 // Rotas da API

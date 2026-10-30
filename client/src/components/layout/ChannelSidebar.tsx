@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { MessageSquareText, Radio, Plus, PhoneOff, Monitor, ChevronDown, Volume2, MicOff } from 'lucide-react';
-import { Server, Channel } from '../../types';
+import { Server, Channel, CustomRole } from '../../types';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
@@ -23,6 +23,8 @@ interface ChannelSidebarProps {
   onSelectChannel: (channel: Channel) => void;
   onDisconnectVoice?: () => void;
   onOpenCreateChannelModal: (type: 'TEXT' | 'VOICE') => void;
+  roles?: CustomRole[];
+  onAssignCustomRole?: (userId: string, customRoleId: string | null) => Promise<void>;
 }
 
 export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
@@ -32,6 +34,8 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
   onSelectChannel,
   onDisconnectVoice,
   onOpenCreateChannelModal,
+  roles = [],
+  onAssignCustomRole,
 }) => {
   const { user } = useAuth();
   const { socket } = useSocket();
@@ -359,6 +363,16 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
           isMuted={isUserMuted(contextMenu.userId)}
           hasScreenShare={contextMenu.hasScreenShare}
           isAdmin={Boolean(user?.role === 'ADMIN' || user?.customRole?.permissions?.some((p) => ['disconnect_voice', 'server_mute'].includes(p)))}
+          isSelf={contextMenu.userId === user?.id}
+          roles={roles}
+          currentRoleId={server?.members?.find((m) => m.user.id === contextMenu.userId || m.userId === contextMenu.userId)?.user?.customRole?.id || server?.members?.find((m) => m.user.id === contextMenu.userId || m.userId === contextMenu.userId)?.user?.customRoleId}
+          canManageRoles={Boolean(user?.role === 'ADMIN' || user?.customRole?.permissions?.includes('manage_users'))}
+          onAssignRole={
+            onAssignCustomRole && (user?.role === 'ADMIN' || user?.customRole?.permissions?.includes('manage_users'))
+              ? (rId) => onAssignCustomRole(contextMenu.userId, rId)
+              : undefined
+          }
+          inVoiceChannelName={contextMenu.channel.name}
           isServerMuted={
             voiceParticipants[contextMenu.channel.id]?.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
           }

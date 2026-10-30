@@ -9,7 +9,7 @@ import {
   persistCachedServerDetails,
   persistCachedServers,
 } from './lib/authStorage';
-import { Server, Channel } from './types';
+import { Server, Channel, CustomRole } from './types';
 
 import { ServerSidebar } from './components/layout/ServerSidebar';
 import { ChannelSidebar, VoiceParticipantInfo } from './components/layout/ChannelSidebar';
@@ -54,6 +54,7 @@ export const App: React.FC = () => {
   });
   const [voiceParticipants, setVoiceParticipants] = useState<Record<string, VoiceParticipantInfo[]>>({});
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
+  const [roles, setRoles] = useState<CustomRole[]>([]);
 
   // Modais
   const [isCreateServerOpen, setIsCreateServerOpen] = useState(false);
@@ -309,6 +310,114 @@ export const App: React.FC = () => {
     };
   }, [socket]);
 
+  // Buscar cargos customizados do sistema
+  const fetchRoles = useCallback(async () => {
+    try {
+      const res = await api.get('/api/roles');
+      if (res.data?.success && Array.isArray(res.data.roles)) {
+        setRoles(res.data.roles);
+      }
+    } catch (err) {
+      console.warn('Não foi possível sincronizar lista de cargos:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchRoles();
+    }
+  }, [user, fetchRoles]);
+
+  // Sincronizar atualizações de cargos e papéis em tempo real via WebSocket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleUserRoleUpdated = (data: {
+      userId: string;
+      customRoleId: string | null;
+      customRole: CustomRole | null;
+    }) => {
+      setActiveServerDetails((prev) => {
+        if (!prev || !prev.members) return prev;
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.userId === data.userId || m.user.id === data.userId
+              ? {
+                  ...m,
+                  user: {
+                    ...m.user,
+                    customRoleId: data.customRoleId,
+                    customRole: data.customRole,
+                  },
+                }
+              : m
+          ),
+        };
+      });
+    };
+
+    const handleRoleCreated = (data: { role: CustomRole }) => {
+      if (!data?.role) return;
+      setRoles((prev) => {
+        if (prev.some((r) => r.id === data.role.id)) return prev;
+        return [...prev, data.role];
+      });
+    };
+
+    const handleRoleUpdated = (data: { role: CustomRole }) => {
+      if (!data?.role) return;
+      setRoles((prev) =>
+        prev.map((r) => (r.id === data.role.id ? data.role : r))
+      );
+    };
+
+    const handleRoleDeleted = (data: { roleId: string }) => {
+      if (!data?.roleId) return;
+      setRoles((prev) => prev.filter((r) => r.id !== data.roleId));
+    };
+
+    socket.on('user:role-updated', handleUserRoleUpdated);
+    socket.on('role:created', handleRoleCreated);
+    socket.on('role:updated', handleRoleUpdated);
+    socket.on('role:deleted', handleRoleDeleted);
+
+    return () => {
+      socket.off('user:role-updated', handleUserRoleUpdated);
+      socket.off('role:created', handleRoleCreated);
+      socket.off('role:updated', handleRoleUpdated);
+      socket.off('role:deleted', handleRoleDeleted);
+    };
+  }, [socket]);
+
+  // Atribuir cargo customizado a um usuário
+  const handleAssignCustomRole = async (userId: string, customRoleId: string | null) => {
+    try {
+      await api.patch(`/api/admin/users/${userId}/custom-role`, { customRoleId });
+      const assignedRole = roles.find((r) => r.id === customRoleId) || null;
+      setActiveServerDetails((prev) => {
+        if (!prev || !prev.members) return prev;
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.userId === userId || m.user.id === userId
+              ? {
+                  ...m,
+                  user: {
+                    ...m.user,
+                    customRoleId,
+                    customRole: assignedRole,
+                  },
+                }
+              : m
+          ),
+        };
+      });
+    } catch (err: any) {
+      console.error('Falha ao atribuir cargo ao usuário:', err);
+    }
+  };
+
   // Redirecionar para o chat geral (ou primeiro canal de texto disponível)
   const redirectToGeneralChat = useCallback(() => {
     if (!activeServerDetails?.channels || activeServerDetails.channels.length === 0) return;
@@ -395,6 +504,8 @@ export const App: React.FC = () => {
                 setCreateChannelType(type);
                 setIsCreateChannelOpen(true);
               }}
+              roles={roles}
+              onAssignCustomRole={handleAssignCustomRole}
             />
             <UserControlsFooter onOpenSettings={() => setIsSettingsOpen(true)} />
           </div>
@@ -438,6 +549,10 @@ export const App: React.FC = () => {
             <MemberList
               members={activeServerDetails.members || []}
               onlineUserIds={onlineUserIds}
+              server={activeServerDetails}
+              voiceParticipants={voiceParticipants}
+              roles={roles}
+              onAssignCustomRole={handleAssignCustomRole}
             />
           )}
 
