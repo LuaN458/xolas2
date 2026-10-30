@@ -26,6 +26,8 @@ import {
   RotateCcw,
   VolumeX,
   MicOff,
+  Monitor,
+  MonitorOff,
 } from 'lucide-react';
 import {
   getUserSettings,
@@ -67,7 +69,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   // Estados de Teclas de Atalho
   const [keybindings, setKeybindings] = useState<UserKeybindings>(() => getUserSettings().keybindings);
-  const [recordingAction, setRecordingAction] = useState<'toggleMute' | 'toggleDeafen' | null>(null);
+  const [recordingAction, setRecordingAction] = useState<keyof UserKeybindings | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const lastModifierRef = useRef<string | null>(null);
   const nonModifierPressedRef = useRef<boolean>(false);
@@ -166,7 +168,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     };
   }, [recordingAction, keybindings]);
 
-  const handleClearKeybinding = (action: 'toggleMute' | 'toggleDeafen') => {
+  const handleClearKeybinding = (action: keyof UserKeybindings) => {
     const updated: UserKeybindings = {
       ...keybindings,
       [action]: '',
@@ -179,7 +181,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }
   };
 
-  const handleResetKeybinding = (action: 'toggleMute' | 'toggleDeafen') => {
+  const handleResetKeybinding = (action: keyof UserKeybindings) => {
     const updated: UserKeybindings = {
       ...keybindings,
       [action]: DEFAULT_USER_KEYBINDINGS[action],
@@ -1377,6 +1379,86 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       onClick={() => handleResetKeybinding('toggleDeafen')}
                       className="p-2 rounded-xl bg-obsidian-surface hover:bg-obsidian-card border border-obsidian-border text-obsidian-text-muted hover:text-white transition-colors"
                       title="Restaurar padrão (Ctrl+Shift+D)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Card 3: Parar Transmissão de Tela */}
+                <div className="p-4 bg-obsidian-card/40 rounded-2xl border border-obsidian-border flex items-center justify-between space-x-4 hover:border-obsidian-border-light transition-all">
+                  <div className="flex items-center space-x-3.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
+                      <MonitorOff className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-bold text-white tracking-tight">Parar Transmissão de Tela</h4>
+                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                        Encerra imediatamente o compartilhamento de tela ou janela ativo no canal de voz.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setRecordingAction(recordingAction === 'stopScreenShare' ? null : 'stopScreenShare')}
+                      className={`min-w-[150px] px-3.5 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
+                        recordingAction === 'stopScreenShare'
+                          ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 ring-2 ring-indigo-500/40 animate-pulse'
+                          : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-white hover:border-obsidian-accent/50'
+                      }`}
+                    >
+                      {recordingAction === 'stopScreenShare' ? (
+                        pendingKey ? (
+                          <div className="flex items-center space-x-1 animate-pulse">
+                            {formatAcceleratorForDisplay(pendingKey).map((key, i) => (
+                              <kbd
+                                key={i}
+                                className="px-2 py-0.5 bg-indigo-600/30 border border-indigo-400 text-indigo-200 rounded-md text-[11px] font-mono font-bold shadow-sm"
+                              >
+                                {key}
+                              </kbd>
+                            ))}
+                            <span className="text-[10px] text-indigo-300 ml-1">solte para fixar</span>
+                          </div>
+                        ) : (
+                          <span className="font-semibold text-indigo-300 animate-pulse">
+                            Pressione a tecla...
+                          </span>
+                        )
+                      ) : keybindings.stopScreenShare ? (
+                        <div className="flex items-center space-x-1">
+                          {formatAcceleratorForDisplay(keybindings.stopScreenShare).map((key, i) => (
+                            <React.Fragment key={i}>
+                              {i > 0 && <span className="text-obsidian-text-muted text-[10px]">+</span>}
+                              <kbd className="px-2 py-0.5 bg-obsidian-card border border-obsidian-border rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
+                                {key}
+                              </kbd>
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-obsidian-text-muted italic">Nenhum atalho</span>
+                      )}
+                    </button>
+
+                    {keybindings.stopScreenShare && (
+                      <button
+                        type="button"
+                        onClick={() => handleClearKeybinding('stopScreenShare')}
+                        className="p-2 rounded-xl bg-obsidian-surface hover:bg-rose-500/10 border border-obsidian-border hover:border-rose-500/30 text-obsidian-text-muted hover:text-rose-400 transition-colors"
+                        title="Limpar atalho"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleResetKeybinding('stopScreenShare')}
+                      className="p-2 rounded-xl bg-obsidian-surface hover:bg-obsidian-card border border-obsidian-border text-obsidian-text-muted hover:text-white transition-colors"
+                      title="Restaurar padrão (Ctrl+Shift+S)"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                     </button>

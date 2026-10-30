@@ -1,6 +1,7 @@
 export interface UserKeybindings {
   toggleMute: string;
   toggleDeafen: string;
+  stopScreenShare: string;
 }
 
 export interface UserAudioSettings {
@@ -23,6 +24,7 @@ const SETTINGS_EVENT_NAME = 'xolas_settings_updated';
 export const DEFAULT_USER_KEYBINDINGS: UserKeybindings = {
   toggleMute: 'CommandOrControl+Shift+M',
   toggleDeafen: 'CommandOrControl+Shift+D',
+  stopScreenShare: 'CommandOrControl+Shift+S',
 };
 
 export const DEFAULT_USER_SETTINGS: UserAudioSettings = {
@@ -154,6 +156,7 @@ function sanitizeUserSettings(parsed: any): UserAudioSettings {
   const keybindings: UserKeybindings = {
     toggleMute: rawKeybindings.toggleMute !== undefined ? rawKeybindings.toggleMute : DEFAULT_USER_KEYBINDINGS.toggleMute,
     toggleDeafen: rawKeybindings.toggleDeafen !== undefined ? rawKeybindings.toggleDeafen : DEFAULT_USER_KEYBINDINGS.toggleDeafen,
+    stopScreenShare: rawKeybindings.stopScreenShare !== undefined ? rawKeybindings.stopScreenShare : DEFAULT_USER_KEYBINDINGS.stopScreenShare,
   };
 
   return {

@@ -1760,95 +1760,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [socket, leaveVoiceChannel, toggleMute]);
 
-  // Sincronizar atalhos de teclado globais no Electron
-  useEffect(() => {
-    const registerHotkeys = (settings: UserAudioSettings) => {
-      if (window.electronAPI?.registerGlobalHotkeys && settings.keybindings) {
-        window.electronAPI.registerGlobalHotkeys({
-          toggleMute: settings.keybindings.toggleMute,
-          toggleDeafen: settings.keybindings.toggleDeafen,
-        }).catch(() => {});
-      }
-    };
-
-    registerHotkeys(getUserSettings());
-
-    const unsubscribe = subscribeToSettingsChange((newSettings) => {
-      registerHotkeys(newSettings);
-    });
-
-    return unsubscribe;
-  }, []);
-
-  // Ouvinte de disparo de atalhos globais via IPC do Electron
-  useEffect(() => {
-    if (!window.electronAPI?.onHotkeyTrigger) return;
-
-    const unreg = window.electronAPI.onHotkeyTrigger((action: string) => {
-      if (action === 'toggleMute') {
-        toggleMute();
-      } else if (action === 'toggleDeafen') {
-        toggleDeafen();
-      }
-    });
-
-    return unreg;
-  }, [toggleMute, toggleDeafen]);
-
-  // Ouvinte de atalhos in-app via teclado (ativo em foco tanto na web quanto no Electron para resposta instantânea)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isInput =
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.isContentEditable);
-
-      const settings = getUserSettings();
-      const muteKey = settings.keybindings?.toggleMute;
-      const deafenKey = settings.keybindings?.toggleDeafen;
-
-      const currentAcc = keyboardEventToAccelerator(e);
-      if (!currentAcc) return;
-
-      const hasModifiers = e.ctrlKey || e.metaKey || e.altKey;
-      if (isInput && !hasModifiers) return;
-
-      const matchesKey = (targetShortcut?: string): boolean => {
-        if (!targetShortcut) return false;
-        const normTarget = targetShortcut.trim().toLowerCase();
-        const normAcc = (currentAcc || '').toLowerCase();
-        const normCode = (e.code || '').toLowerCase();
-        const normKey = (e.key || '').toLowerCase();
-        if (normAcc === normTarget || normCode === normTarget || normKey === normTarget) return true;
-        if (normTarget === 'shift' && (normCode === 'shiftleft' || normCode === 'shiftright')) return true;
-        if (normTarget === 'shiftright' && normCode === 'shiftright') return true;
-        if (normTarget === 'shiftleft' && normCode === 'shiftleft') return true;
-        if ((normTarget === 'ctrl' || normTarget === 'control') && (normCode === 'controlleft' || normCode === 'controlright')) return true;
-        if (normTarget === 'controlright' && normCode === 'controlright') return true;
-        if (normTarget === 'controlleft' && normCode === 'controlleft') return true;
-        if (normTarget === 'alt' && (normCode === 'altleft' || normCode === 'altright')) return true;
-        if (normTarget === 'altright' && normCode === 'altright') return true;
-        if (normTarget === 'altleft' && normCode === 'altleft') return true;
-        return false;
-      };
-
-      if (matchesKey(muteKey)) {
-        e.preventDefault();
-        toggleMute();
-      } else if (matchesKey(deafenKey)) {
-        e.preventDefault();
-        toggleDeafen();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [toggleMute, toggleDeafen]);
-
   const stopScreenShare = useCallback(() => {
     const ch = currentChannelRef.current;
 
@@ -1886,6 +1797,102 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     syncVoiceState();
     emitLocalVoiceState();
   }, [sendOffer, syncVoiceState, emitLocalVoiceState]);
+
+  // Sincronizar atalhos de teclado globais no Electron
+  useEffect(() => {
+    const registerHotkeys = (settings: UserAudioSettings) => {
+      if (window.electronAPI?.registerGlobalHotkeys && settings.keybindings) {
+        window.electronAPI.registerGlobalHotkeys({
+          toggleMute: settings.keybindings.toggleMute,
+          toggleDeafen: settings.keybindings.toggleDeafen,
+          stopScreenShare: settings.keybindings.stopScreenShare,
+        }).catch(() => {});
+      }
+    };
+
+    registerHotkeys(getUserSettings());
+
+    const unsubscribe = subscribeToSettingsChange((newSettings) => {
+      registerHotkeys(newSettings);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Ouvinte de disparo de atalhos globais via IPC do Electron
+  useEffect(() => {
+    if (!window.electronAPI?.onHotkeyTrigger) return;
+
+    const unreg = window.electronAPI.onHotkeyTrigger((action: string) => {
+      if (action === 'toggleMute') {
+        toggleMute();
+      } else if (action === 'toggleDeafen') {
+        toggleDeafen();
+      } else if (action === 'stopScreenShare') {
+        stopScreenShare();
+      }
+    });
+
+    return unreg;
+  }, [toggleMute, toggleDeafen, stopScreenShare]);
+
+  // Ouvinte de atalhos in-app via teclado (ativo em foco tanto na web quanto no Electron para resposta instantânea)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+
+      const settings = getUserSettings();
+      const muteKey = settings.keybindings?.toggleMute;
+      const deafenKey = settings.keybindings?.toggleDeafen;
+      const stopScreenKey = settings.keybindings?.stopScreenShare;
+
+      const currentAcc = keyboardEventToAccelerator(e);
+      if (!currentAcc) return;
+
+      const hasModifiers = e.ctrlKey || e.metaKey || e.altKey;
+      if (isInput && !hasModifiers) return;
+
+      const matchesKey = (targetShortcut?: string): boolean => {
+        if (!targetShortcut) return false;
+        const normTarget = targetShortcut.trim().toLowerCase();
+        const normAcc = (currentAcc || '').toLowerCase();
+        const normCode = (e.code || '').toLowerCase();
+        const normKey = (e.key || '').toLowerCase();
+        if (normAcc === normTarget || normCode === normTarget || normKey === normTarget) return true;
+        if (normTarget === 'shift' && (normCode === 'shiftleft' || normCode === 'shiftright')) return true;
+        if (normTarget === 'shiftright' && normCode === 'shiftright') return true;
+        if (normTarget === 'shiftleft' && normCode === 'shiftleft') return true;
+        if ((normTarget === 'ctrl' || normTarget === 'control') && (normCode === 'controlleft' || normCode === 'controlright')) return true;
+        if (normTarget === 'controlright' && normCode === 'controlright') return true;
+        if (normTarget === 'controlleft' && normCode === 'controlleft') return true;
+        if (normTarget === 'alt' && (normCode === 'altleft' || normCode === 'altright')) return true;
+        if (normTarget === 'altright' && normCode === 'altright') return true;
+        if (normTarget === 'altleft' && normCode === 'altleft') return true;
+        return false;
+      };
+
+      if (matchesKey(muteKey)) {
+        e.preventDefault();
+        toggleMute();
+      } else if (matchesKey(deafenKey)) {
+        e.preventDefault();
+        toggleDeafen();
+      } else if (matchesKey(stopScreenKey)) {
+        e.preventDefault();
+        stopScreenShare();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [toggleMute, toggleDeafen, stopScreenShare]);
 
   // Cria uma MediaStreamTrack de áudio 100% isolada via WASAPI Process Loopback:
   // - Ao compartilhar uma janela (window:HWND:0): captura APENAS o som daquele aplicativo (ex: Chrome/Opera/Jogo)
