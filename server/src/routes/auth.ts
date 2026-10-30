@@ -140,6 +140,11 @@ router.post('/login', authRateLimiter, async (req, res): Promise<void> => {
           { email: `${identifier.toLowerCase().replace(/[^a-z0-9_]/g, '')}@xolas.local` },
         ],
       },
+      include: {
+        customRole: {
+          select: { id: true, name: true, color: true, permissions: true },
+        },
+      },
     });
 
     if (!user) {
@@ -195,6 +200,8 @@ router.post('/login', authRateLimiter, async (req, res): Promise<void> => {
         avatarUrl: user.avatarUrl,
         status: user.status,
         role: user.role,
+        customRoleId: user.customRoleId,
+        customRole: user.customRole,
         approvalStatus: user.approvalStatus,
         isApproved: user.isApproved,
         createdAt: user.createdAt,
@@ -218,6 +225,15 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response): Promi
         avatarUrl: true,
         status: true,
         role: true,
+        customRoleId: true,
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            permissions: true,
+          },
+        },
         approvalStatus: true,
         isApproved: true,
         createdAt: true,

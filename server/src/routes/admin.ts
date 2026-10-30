@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware, adminMiddleware, AuthRequest } from '../middlewares/auth';
-import { isValidIdentifier } from '../middlewares/security';
+import { ensureScalarString, isValidIdentifier, sanitizeText } from '../middlewares/security';
 import { notifyAdminsPendingUpdate, notifyUserApprovalStatus } from '../sockets/chatHandler';
 
 const router = Router();
@@ -34,6 +34,15 @@ router.get('/users', async (req: AuthRequest, res: Response): Promise<void> => {
         email: true,
         avatarUrl: true,
         role: true,
+        customRoleId: true,
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            permissions: true,
+          },
+        },
         approvalStatus: true,
         isApproved: true,
         status: true,
@@ -237,6 +246,15 @@ router.patch('/users/:id/role', async (req: AuthRequest, res: Response): Promise
         username: true,
         email: true,
         role: true,
+        customRoleId: true,
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            permissions: true,
+          },
+        },
         approvalStatus: true,
         isApproved: true,
       },
@@ -246,6 +264,198 @@ router.patch('/users/:id/role', async (req: AuthRequest, res: Response): Promise
   } catch (error) {
     console.error('Erro ao alterar papel do usuário:', error);
     res.status(500).json({ error: 'Erro ao alterar papel.' });
+  }
+});
+
+// Listar todos os cargos do sistema com contagem de usuários
+router.get('/roles', async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const roles = await prisma.customRole.findMany({
+      include: {
+        _count: {
+          select: { users: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const formatted = roles.map((r) => ({
+      id: r.id,
+      name: r.name,
+      color: r.color,
+      permissions: r.permissions,
+      isDefault: r.isDefault,
+      userCount: r._count.users,
+      createdAt: r.createdAt,
+    }));
+
+    res.json({ roles: formatted });
+  } catch (error) {
+    console.error('Erro ao listar cargos:', error);
+    res.status(500).json({ error: 'Erro ao buscar cargos.' });
+  }
+});
+
+// Criar novo cargo
+router.post('/roles', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const rawName = ensureScalarString(req.body?.name, 32);
+    const rawColor = ensureScalarString(req.body?.color, 16) || '#6366f1';
+    const permissions = Array.isArray(req.body?.permissions)
+      ? req.body.permissions.filter((p: unknown) => typeof p === 'string' && p.length <= 64)
+      : [];
+
+    const cleanName = sanitizeText(rawName || '', 32);
+    if (!cleanName || cleanName.length < 2) {
+      res.status(400).json({ error: 'O nome do cargo deve ter entre 2 e 32 caracteres.' });
+      return;
+    }
+
+    const existing = await prisma.customRole.findFirst({
+      where: { name: cleanName },
+    });
+    if (existing) {
+      res.status(400).json({ error: 'Já existe um cargo com esse nome.' });
+      return;
+    }
+
+    const role = await prisma.customRole.create({
+      data: {
+        name: cleanName,
+        color: rawColor,
+        permissions,
+      },
+    });
+
+    res.status(201).json({ role: { ...role, userCount: 0 } });
+  } catch (error) {
+    console.error('Erro ao criar cargo:', error);
+    res.status(500).json({ error: 'Erro interno ao criar cargo.' });
+  }
+});
+
+// Atualizar cargo (nome, cor ou permissões)
+router.patch('/roles/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!isValidIdentifier(id)) {
+      res.status(400).json({ error: 'ID de cargo inválido.' });
+      return;
+    }
+
+    const updateData: { name?: string; color?: string; permissions?: string[] } = {};
+    if (req.body?.name) {
+      const cleanName = sanitizeText(req.body.name, 32);
+      if (cleanName.length < 2) {
+        res.status(400).json({ error: 'O nome do cargo deve ter entre 2 e 32 caracteres.' });
+        return;
+      }
+      const existing = await prisma.customRole.findFirst({
+        where: { name: cleanName, NOT: { id } },
+      });
+      if (existing) {
+        res.status(400).json({ error: 'Já existe outro cargo com esse nome.' });
+        return;
+      }
+      updateData.name = cleanName;
+    }
+    if (req.body?.color && typeof req.body.color === 'string') {
+      updateData.color = req.body.color.slice(0, 16);
+    }
+    if (Array.isArray(req.body?.permissions)) {
+      updateData.permissions = req.body.permissions.filter(
+        (p: unknown) => typeof p === 'string' && p.length <= 64
+      );
+    }
+
+    const updatedRole = await prisma.customRole.update({
+      where: { id },
+      data: updateData,
+      include: {
+        _count: { select: { users: true } },
+      },
+    });
+
+    res.json({
+      role: {
+        id: updatedRole.id,
+        name: updatedRole.name,
+        color: updatedRole.color,
+        permissions: updatedRole.permissions,
+        isDefault: updatedRole.isDefault,
+        userCount: updatedRole._count.users,
+      },
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar cargo:', error);
+    res.status(500).json({ error: 'Erro ao atualizar cargo.' });
+  }
+});
+
+// Excluir cargo
+router.delete('/roles/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!isValidIdentifier(id)) {
+      res.status(400).json({ error: 'ID de cargo inválido.' });
+      return;
+    }
+
+    await prisma.customRole.delete({
+      where: { id },
+    });
+
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Erro ao excluir cargo:', error);
+    res.status(500).json({ error: 'Erro ao excluir cargo.' });
+  }
+});
+
+// Atribuir cargo customizado a um usuário
+router.patch('/users/:id/custom-role', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { customRoleId } = req.body;
+
+    if (!isValidIdentifier(id)) {
+      res.status(400).json({ error: 'ID de usuário inválido.' });
+      return;
+    }
+
+    if (customRoleId && !isValidIdentifier(customRoleId)) {
+      res.status(400).json({ error: 'ID de cargo inválido.' });
+      return;
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        customRoleId: customRoleId || null,
+      },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        role: true,
+        customRoleId: true,
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            permissions: true,
+          },
+        },
+        approvalStatus: true,
+        isApproved: true,
+      },
+    });
+
+    res.json({ success: true, user: updatedUser });
+  } catch (error) {
+    console.error('Erro ao atribuir cargo ao usuário:', error);
+    res.status(500).json({ error: 'Erro ao atribuir cargo.' });
   }
 });
 

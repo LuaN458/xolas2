@@ -79,6 +79,7 @@ interface AuthenticatedSocket extends Socket {
     username: string;
     email: string;
     role?: string;
+    permissions?: string[];
   };
   currentVoice?: {
     serverId: string;
@@ -109,10 +110,16 @@ export function setupSocketHandlers(io: Server): void {
         return next(new Error('Token de sessão inválido'));
       }
 
-      // Buscar papel atualizado no banco
+      // Buscar papel e permissões atualizadas no banco
       const dbUser = await prisma.user.findUnique({
         where: { id: decoded.userId },
-        select: { role: true, isApproved: true },
+        select: {
+          role: true,
+          isApproved: true,
+          customRole: {
+            select: { permissions: true },
+          },
+        },
       });
 
       socket.user = {
@@ -120,6 +127,7 @@ export function setupSocketHandlers(io: Server): void {
         username: sanitizeText(decoded.username, 32) || 'Usuário',
         email: typeof decoded.email === 'string' ? decoded.email : '',
         role: dbUser?.role || decoded.role || 'USER',
+        permissions: dbUser?.customRole?.permissions || [],
       };
       next();
     } catch {
@@ -157,8 +165,12 @@ export function setupSocketHandlers(io: Server): void {
       io.emit('user-status-changed', { userId, status: 'online' });
     }
 
-    // Se o usuário for administrador, insere na sala de administradores e habilita controles de moderação
-    if (user.role === 'ADMIN') {
+    // Verificador de permissões: ADMIN total ou permissão específica via cargo customizado
+    const hasPermission = (perm: string) =>
+      user.role === 'ADMIN' || (Array.isArray(user.permissions) && user.permissions.includes(perm));
+
+    // Se o usuário puder gerenciar usuários, insere na sala de administradores e envia contador de pendências
+    if (hasPermission('manage_users')) {
       socket.join('admin-room');
       prisma.user
         .count({ where: { approvalStatus: 'PENDING' } })
@@ -173,8 +185,10 @@ export function setupSocketHandlers(io: Server): void {
           socket.emit('admin-pending-count', { pendingCount });
         } catch {}
       });
+    }
 
-      // 1. Exclusão de mensagens de chat por Administrador
+    // 1. Exclusão de mensagens de chat (Admin ou permissão delete_messages)
+    if (hasPermission('delete_messages')) {
       socket.on('admin:delete-message', async (data: { channelId?: unknown; messageId?: unknown }) => {
         try {
           const channelId = data?.channelId;
@@ -198,8 +212,10 @@ export function setupSocketHandlers(io: Server): void {
           console.error('Erro ao excluir mensagem via admin socket:', err);
         }
       });
+    }
 
-      // 2. Desconexão forçada de participante de voz por Administrador
+    // 2. Desconexão forçada de participante de voz (Admin ou permissão disconnect_voice)
+    if (hasPermission('disconnect_voice')) {
       socket.on(
         'admin:disconnect-voice',
         async (data: { targetUserId?: unknown; channelId?: unknown; serverId?: unknown }) => {
@@ -227,8 +243,10 @@ export function setupSocketHandlers(io: Server): void {
           }
         }
       );
+    }
 
-      // 3. Silenciamento no servidor (Server Mute) por Administrador
+    // 3. Silenciamento no servidor (Admin ou permissão server_mute)
+    if (hasPermission('server_mute')) {
       socket.on(
         'admin:server-mute-voice',
         async (data: {

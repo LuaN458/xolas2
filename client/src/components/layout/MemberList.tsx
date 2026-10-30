@@ -60,11 +60,23 @@ export const MemberList: React.FC<MemberListProps> = ({ members, onlineUserIds =
         >
           {member.user.username}
         </span>
-        {member.role === 'ADMIN' && (
+        {member.role === 'ADMIN' ? (
           <span title="Administrador">
             <Shield className="w-3 h-3 text-obsidian-accent shrink-0" />
           </span>
-        )}
+        ) : member.user.customRole ? (
+          <span
+            style={{
+              backgroundColor: `${member.user.customRole.color}25`,
+              color: member.user.customRole.color,
+              borderColor: `${member.user.customRole.color}50`,
+            }}
+            className="px-1.5 py-0.2 rounded text-[9px] font-bold border truncate max-w-[75px]"
+            title={`Cargo: ${member.user.customRole.name}`}
+          >
+            {member.user.customRole.name}
+          </span>
+        ) : null}
       </div>
     </div>
   );

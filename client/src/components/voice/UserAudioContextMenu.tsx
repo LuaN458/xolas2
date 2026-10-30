@@ -65,7 +65,8 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
 
   // Posicionamento inteligente para evitar corte nas bordas da janela
   const MENU_WIDTH = 260;
-  const adminOffset = isAdmin ? 95 : 0;
+  const hasAdminActions = Boolean(isAdmin || onDisconnectVoice || onToggleServerMute);
+  const adminOffset = hasAdminActions ? 95 : 0;
   const MENU_HEIGHT = (hasScreenShare && onWatchScreenShare ? 275 : 225) + adminOffset;
   const safeX = Math.max(10, Math.min(x, window.innerWidth - MENU_WIDTH - 16));
   const safeY = Math.max(10, Math.min(y, window.innerHeight - MENU_HEIGHT - 16));
@@ -232,13 +233,13 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
         </div>
       </button>
 
-      {/* Seção de Moderação para Administradores */}
-      {isAdmin && (
+      {/* Seção de Moderação para Administradores / Cargos com Permissão */}
+      {hasAdminActions && (
         <>
           <div className="border-t border-obsidian-border/60 my-2" />
           <div className="text-[10px] font-bold text-obsidian-accent uppercase tracking-wider px-1 mb-1.5 flex items-center space-x-1">
             <Shield className="w-3 h-3" />
-            <span>Moderação (Admin)</span>
+            <span>Moderação</span>
           </div>
 
           <div className="space-y-1.5">

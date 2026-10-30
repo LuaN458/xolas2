@@ -16,11 +16,13 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const isAdmin = user?.role === 'ADMIN';
+  const canDelete = Boolean(
+    user?.role === 'ADMIN' || user?.customRole?.permissions?.includes('delete_messages')
+  );
 
   const handleDeleteMessage = useCallback(
     async (messageId: string) => {
-      if (!isAdmin) return;
+      if (!canDelete) return;
       // Remoção otimista imediata na UI
       setMessages((prev) => prev.filter((m) => m.id !== messageId));
 
@@ -37,7 +39,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
         console.warn('Exclusão de mensagem via HTTP falhou (ou já processada via socket):', err);
       }
     },
-    [isAdmin, socket, channel.id]
+    [canDelete, socket, channel.id]
   );
 
   useEffect(() => {
@@ -121,7 +123,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
               <MessageItem
                 key={msg.id}
                 message={msg}
-                isAdmin={isAdmin}
+                isAdmin={canDelete}
                 onDelete={handleDeleteMessage}
               />
             ))}

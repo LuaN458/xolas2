@@ -1,3 +1,13 @@
+export interface CustomRole {
+  id: string;
+  name: string;
+  color: string;
+  permissions: string[];
+  isDefault?: boolean;
+  userCount?: number;
+  createdAt?: string;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -5,6 +15,8 @@ export interface User {
   avatarUrl?: string;
   status?: string;
   role?: 'ADMIN' | 'USER';
+  customRoleId?: string | null;
+  customRole?: CustomRole | null;
   approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
   isApproved?: boolean;
   createdAt?: string;

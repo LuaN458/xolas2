@@ -358,12 +358,12 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
           volume={getUserVolume(contextMenu.userId)}
           isMuted={isUserMuted(contextMenu.userId)}
           hasScreenShare={contextMenu.hasScreenShare}
-          isAdmin={user?.role === 'ADMIN'}
+          isAdmin={Boolean(user?.role === 'ADMIN' || user?.customRole?.permissions?.some((p) => ['disconnect_voice', 'server_mute'].includes(p)))}
           isServerMuted={
             voiceParticipants[contextMenu.channel.id]?.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
           }
           onDisconnectVoice={
-            user?.role === 'ADMIN'
+            user?.role === 'ADMIN' || user?.customRole?.permissions?.includes('disconnect_voice')
               ? () => {
                   socket?.emit('admin:disconnect-voice', {
                     targetUserId: contextMenu.userId,
@@ -374,7 +374,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
               : undefined
           }
           onToggleServerMute={
-            user?.role === 'ADMIN'
+            user?.role === 'ADMIN' || user?.customRole?.permissions?.includes('server_mute')
               ? () => {
                   const currentMuted =
                     voiceParticipants[contextMenu.channel.id]?.find((p) => p.id === contextMenu.userId)?.isMuted ?? false;

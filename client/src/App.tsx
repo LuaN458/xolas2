@@ -63,9 +63,12 @@ export const App: React.FC = () => {
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [createChannelType, setCreateChannelType] = useState<'TEXT' | 'VOICE'>('TEXT');
 
+  const canAccessAdmin =
+    user?.role === 'ADMIN' || Boolean(user?.customRole?.permissions?.includes('manage_users'));
+
   // Escutar atualizações de pendências do painel de administração via WebSocket
   useEffect(() => {
-    if (!socket || user?.role !== 'ADMIN') return;
+    if (!socket || !canAccessAdmin) return;
 
     socket.emit('admin:get-pending-count');
 
@@ -79,7 +82,7 @@ export const App: React.FC = () => {
     return () => {
       socket.off('admin-pending-count', handlePendingCount);
     };
-  }, [socket, user?.role]);
+  }, [socket, canAccessAdmin]);
 
   // Carregar servidores do usuário (com suporte a cache offline e retentativa automática na inicialização)
   useEffect(() => {
@@ -375,7 +378,7 @@ export const App: React.FC = () => {
             activeServerId={activeServerId}
             onSelectServer={(id) => setActiveServerId(id)}
             onOpenCreateModal={() => setIsCreateServerOpen(true)}
-            isAdmin={user?.role === 'ADMIN'}
+            isAdmin={canAccessAdmin}
             pendingApprovalsCount={pendingApprovalsCount}
             onOpenAdminModal={() => setIsAdminModalOpen(true)}
           />

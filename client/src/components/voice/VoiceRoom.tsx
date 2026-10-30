@@ -518,12 +518,12 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           volume={getUserVolume(contextMenu.userId)}
           isMuted={isUserMuted(contextMenu.userId)}
           hasScreenShare={contextMenu.hasScreenShare}
-          isAdmin={isAdmin}
+          isAdmin={Boolean(isAdmin || user?.customRole?.permissions?.some((p) => ['disconnect_voice', 'server_mute'].includes(p)))}
           isServerMuted={
             socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
           }
           onDisconnectVoice={
-            isAdmin
+            isAdmin || user?.customRole?.permissions?.includes('disconnect_voice')
               ? () => {
                   socket?.emit('admin:disconnect-voice', {
                     targetUserId: contextMenu.userId,
@@ -534,7 +534,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
               : undefined
           }
           onToggleServerMute={
-            isAdmin
+            isAdmin || user?.customRole?.permissions?.includes('server_mute')
               ? () => {
                   const currentMuted =
                     socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ?? false;
