@@ -546,8 +546,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             result.push(line);
           }
         } else if (currentSection === 'audio') {
-          // Otimizar codec Opus: Estéreo de estúdio, 128 kbps e Forward Error Correction (FEC)
-          // useinbandfec=1 permite ao receptor reconstruir pacotes de áudio perdidos sem cortes
+          // Otimizar codec Opus: Estéreo de estúdio (256 kbps), CBR sem DTX (elimina pipocadas em passagens silenciosas) e FEC
           if (line.startsWith('a=fmtp:') && line.toLowerCase().includes('minptime=')) {
             let opusLine = line;
             if (!opusLine.includes('stereo=')) {
@@ -556,11 +555,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (!opusLine.includes('useinbandfec=')) {
               opusLine += ';useinbandfec=1';
             }
+            if (!opusLine.includes('usedtx=')) {
+              opusLine += ';usedtx=0';
+            }
             if (!opusLine.includes('maxaveragebitrate=')) {
-              opusLine += ';maxaveragebitrate=128000';
+              opusLine += ';maxaveragebitrate=256000';
             }
             if (!opusLine.includes('cbr=')) {
-              opusLine += ';cbr=0';
+              opusLine += ';cbr=1';
             }
             result.push(opusLine);
           } else {
@@ -575,6 +577,21 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     },
     []
   );
+
+  // Configura o RTCRtpSender de áudio da tela para alta fidelidade contínua sem micro-cortes
+  const configureScreenAudioSender = useCallback(async (sender: RTCRtpSender) => {
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [{}];
+      }
+      params.encodings[0].maxBitrate = 256_000;
+      (params.encodings[0] as any).priority = 'high';
+      (params.encodings[0] as any).networkPriority = 'high';
+      (params.encodings[0] as any).dtx = 'disabled';
+      await sender.setParameters(params);
+    } catch {}
+  }, []);
 
   // Configura o RTCRtpSender de vídeo para priorizar codificação por GPU (H.264) e manter reprodução suave
   const configureScreenVideoSender = useCallback(
@@ -652,6 +669,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         senders.forEach((s) => {
           if (s.track?.kind === 'video') {
             configureScreenVideoSender(pc, s, screenQualityRef.current);
+          } else if (s.track?.kind === 'audio') {
+            configureScreenAudioSender(s);
           }
         });
 
@@ -668,7 +687,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         makingOfferRef.current.set(remoteUserId, false);
       }
     },
-    [socket, optimizeWebRtcSdp, configureScreenVideoSender]
+    [socket, optimizeWebRtcSdp, configureScreenVideoSender, configureScreenAudioSender]
   );
 
   // Garante que as faixas da transmissão de tela local estejam anexadas aos senders do peer
@@ -690,6 +709,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const sender = pc.addTrack(track, screenStreamRef.current!);
           if (track.kind === 'video') {
             configureScreenVideoSender(pc, sender, screenQualityRef.current);
+          } else if (track.kind === 'audio') {
+            configureScreenAudioSender(sender);
           }
           newSenders.push(sender);
         });
@@ -698,7 +719,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       return false;
     },
-    [configureScreenVideoSender]
+    [configureScreenVideoSender, configureScreenAudioSender]
   );
 
   // Cria ou retorna a RTCPeerConnection para um participante remoto
@@ -1255,13 +1276,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           screenStreamId: p.screenStreamId ?? existing?.screenStreamId ?? null,
           audioTrack: existing?.audioTrack,
           screenTrack: p.isScreenSharing === false ? undefined : existing?.screenTrack,
+          screenAudioTrack: p.isScreenSharing === false ? undefined : existing?.screenAudioTrack,
           screenStream: p.isScreenSharing === false ? undefined : existing?.screenStream,
         });
 
         const { pc, isNew } = getOrCreatePeerConnection(p.id, channelId);
         if (screenStreamRef.current) {
-          ensureScreenTracksForPeer(p.id, pc);
-          sendOffer(p.id, channelId);
+          const tracksAdded = ensureScreenTracksForPeer(p.id, pc);
+          if (tracksAdded || isNew) {
+            sendOffer(p.id, channelId);
+          }
         } else if (isNew && String(user?.id || '') < String(p.id)) {
           sendOffer(p.id, channelId);
         }
@@ -1927,22 +1951,173 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       try {
         const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-        const audioCtx: AudioContext = new AudioCtx({ sampleRate: 48000 });
+        const audioCtx: AudioContext = new AudioCtx({
+          sampleRate: 48000,
+          latencyHint: 'playback',
+        });
         if (audioCtx.state === 'suspended') {
           await audioCtx.resume().catch(() => {});
         }
 
-        // Ring buffer circular para 48kHz Estéreo (2 segundos de capacidade para absorver variações de IPC e carga de GPU)
+        const dest = audioCtx.createMediaStreamDestination();
+        const silentOutGain = audioCtx.createGain();
+        silentOutGain.gain.value = 0;
+        silentOutGain.connect(audioCtx.destination);
+
+        let leftover = new Uint8Array(0);
+        let workletNode: AudioWorkletNode | null = null;
+        let workletUrl: string | null = null;
+
+        // Tentar inicializar AudioWorkletNode em thread de áudio dedicada (tempo real, zero interferência da UI/60fps)
+        if (audioCtx.audioWorklet) {
+          try {
+            const workletCode = `
+              class XolasLoopbackProcessor extends AudioWorkletProcessor {
+                constructor() {
+                  super();
+                  this.RING_SIZE = 96000;
+                  this.PREROLL_FRAMES = 3840;      // 80ms de pré-roll seguro contra jitter de IPC
+                  this.MAX_BUFFERED_FRAMES = 14400; // 300ms teto máximo
+                  this.TARGET_RESET_FRAMES = 5760;  // 120ms alvo de estabilização
+                  this.CROSSFADE_LEN = 128;         // 2.66ms crossfade suave sem estalos
+                  this.FADE_IN_LEN = 64;            // 1.33ms rampa de entrada suave
+
+                  this.ringLeft = new Float32Array(this.RING_SIZE);
+                  this.ringRight = new Float32Array(this.RING_SIZE);
+                  this.writeIdx = 0;
+                  this.readIdx = 0;
+                  this.availableFrames = 0;
+                  this.isPreRollDone = false;
+                  this.lastL = 0;
+                  this.lastR = 0;
+                  this.fadeInRemaining = this.FADE_IN_LEN;
+                  this.emptyTicks = 0;
+
+                  this.port.onmessage = (e) => {
+                    const data = e.data;
+                    if (!data || !data.left || !data.right) return;
+                    const left = data.left;
+                    const right = data.right;
+                    const len = left.length;
+
+                    for (let i = 0; i < len; i++) {
+                      this.ringLeft[this.writeIdx] = left[i];
+                      this.ringRight[this.writeIdx] = right[i];
+                      this.writeIdx = (this.writeIdx + 1) % this.RING_SIZE;
+                    }
+
+                    this.availableFrames += len;
+
+                    if (this.availableFrames > this.MAX_BUFFERED_FRAMES) {
+                      const excess = this.availableFrames - this.TARGET_RESET_FRAMES;
+                      const newReadIdx = (this.readIdx + excess) % this.RING_SIZE;
+                      // Aplicar crossfade linear de 128 amostras entre a posição antiga e a nova para zero pipocadas
+                      for (let k = 0; k < this.CROSSFADE_LEN; k++) {
+                        const alpha = k / this.CROSSFADE_LEN;
+                        const oldIdx = (this.readIdx + k) % this.RING_SIZE;
+                        const dstIdx = (newReadIdx + k) % this.RING_SIZE;
+                        this.ringLeft[dstIdx] = this.ringLeft[oldIdx] * (1 - alpha) + this.ringLeft[dstIdx] * alpha;
+                        this.ringRight[dstIdx] = this.ringRight[oldIdx] * (1 - alpha) + this.ringRight[dstIdx] * alpha;
+                      }
+                      this.readIdx = newReadIdx;
+                      this.availableFrames = this.TARGET_RESET_FRAMES;
+                    }
+
+                    if (!this.isPreRollDone && this.availableFrames >= this.PREROLL_FRAMES) {
+                      this.isPreRollDone = true;
+                      this.fadeInRemaining = this.FADE_IN_LEN;
+                    }
+                  };
+                }
+
+                process(inputs, outputs) {
+                  const output = outputs[0];
+                  if (!output || output.length < 2) return true;
+                  const outL = output[0];
+                  const outR = output[1];
+                  const framesNeeded = outL.length;
+
+                  if (!this.isPreRollDone) {
+                    for (let i = 0; i < framesNeeded; i++) {
+                      outL[i] = 0;
+                      outR[i] = 0;
+                    }
+                    return true;
+                  }
+
+                  for (let i = 0; i < framesNeeded; i++) {
+                    if (this.availableFrames > 0) {
+                      let sL = this.ringLeft[this.readIdx];
+                      let sR = this.ringRight[this.readIdx];
+                      this.readIdx = (this.readIdx + 1) % this.RING_SIZE;
+                      this.availableFrames--;
+                      this.emptyTicks = 0;
+
+                      if (this.fadeInRemaining > 0) {
+                        const gain = (this.FADE_IN_LEN - this.fadeInRemaining) / this.FADE_IN_LEN;
+                        sL *= gain;
+                        sR *= gain;
+                        this.fadeInRemaining--;
+                      }
+
+                      outL[i] = sL;
+                      outR[i] = sR;
+                      this.lastL = sL;
+                      this.lastR = sR;
+                    } else {
+                      // Underrun momentâneo: decaimento suave exponencial em vez de degrau abrupto para 0.0
+                      this.lastL *= 0.95;
+                      this.lastR *= 0.95;
+                      if (Math.abs(this.lastL) < 1e-5) this.lastL = 0;
+                      if (Math.abs(this.lastR) < 1e-5) this.lastR = 0;
+                      outL[i] = this.lastL;
+                      outR[i] = this.lastR;
+                      this.fadeInRemaining = this.FADE_IN_LEN;
+                      this.emptyTicks++;
+                      // Se ficar mais de 80ms sem receber pacotes (silêncio real do app), rearmar pré-roll
+                      if (this.emptyTicks > 3840) {
+                        this.isPreRollDone = false;
+                        this.emptyTicks = 0;
+                      }
+                    }
+                  }
+                  return true;
+                }
+              }
+              registerProcessor('xolas-loopback-worklet', XolasLoopbackProcessor);
+            `;
+            const blob = new Blob([workletCode], { type: 'application/javascript' });
+            workletUrl = URL.createObjectURL(blob);
+            await audioCtx.audioWorklet.addModule(workletUrl);
+            workletNode = new AudioWorkletNode(audioCtx, 'xolas-loopback-worklet', {
+              numberOfInputs: 0,
+              numberOfOutputs: 1,
+              outputChannelCount: [2],
+            });
+            workletNode.connect(dest);
+            workletNode.connect(silentOutGain);
+          } catch (workletErr) {
+            console.warn('[WASAPI] AudioWorklet indisponível, usando fallback suavizado:', workletErr);
+            workletNode = null;
+          }
+        }
+
+        // Fallback suavizado caso AudioWorklet não esteja disponível
         const RING_SIZE = 96000;
-        const MAX_BUFFERED_FRAMES = 14400; // 300ms de tolerância máxima
-        const TARGET_RESET_FRAMES = 7200;  // 150ms ao estabilizar
+        const PREROLL_FRAMES = 3840;
+        const MAX_BUFFERED_FRAMES = 14400;
+        const TARGET_RESET_FRAMES = 5760;
+        const CROSSFADE_LEN = 128;
+        const FADE_IN_LEN = 64;
         const ringLeft = new Float32Array(RING_SIZE);
         const ringRight = new Float32Array(RING_SIZE);
         let writeIdx = 0;
         let readIdx = 0;
         let availableFrames = 0;
-        let leftover = new Uint8Array(0);
         let isPreRollDone = false;
+        let lastL = 0;
+        let lastR = 0;
+        let fadeInRemaining = FADE_IN_LEN;
 
         const removeChunkListener = window.electronAPI.onProcessAudioChunk((rawChunk: Uint8Array) => {
           const chunk =
@@ -1977,77 +2152,112 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             usableFrames * 4
           );
 
+          if (workletNode) {
+            const leftArr = new Float32Array(usableFrames);
+            const rightArr = new Float32Array(usableFrames);
+            for (let i = 0; i < usableFrames; i++) {
+              leftArr[i] = view.getInt16(i * 4, true) / 32768.0;
+              rightArr[i] = view.getInt16(i * 4 + 2, true) / 32768.0;
+            }
+            workletNode.port.postMessage(
+              { left: leftArr, right: rightArr },
+              [leftArr.buffer, rightArr.buffer]
+            );
+            return;
+          }
+
           for (let i = 0; i < usableFrames; i++) {
-            const sL = view.getInt16(i * 4, true) / 32768.0;
-            const sR = view.getInt16(i * 4 + 2, true) / 32768.0;
-            ringLeft[writeIdx] = sL;
-            ringRight[writeIdx] = sR;
+            ringLeft[writeIdx] = view.getInt16(i * 4, true) / 32768.0;
+            ringRight[writeIdx] = view.getInt16(i * 4 + 2, true) / 32768.0;
             writeIdx = (writeIdx + 1) % RING_SIZE;
           }
 
           availableFrames += usableFrames;
           if (availableFrames > MAX_BUFFERED_FRAMES) {
             const excess = availableFrames - TARGET_RESET_FRAMES;
-            readIdx = (readIdx + excess) % RING_SIZE;
+            const newReadIdx = (readIdx + excess) % RING_SIZE;
+            for (let k = 0; k < CROSSFADE_LEN; k++) {
+              const alpha = k / CROSSFADE_LEN;
+              const oldIdx = (readIdx + k) % RING_SIZE;
+              const dstIdx = (newReadIdx + k) % RING_SIZE;
+              ringLeft[dstIdx] = ringLeft[oldIdx] * (1 - alpha) + ringLeft[dstIdx] * alpha;
+              ringRight[dstIdx] = ringRight[oldIdx] * (1 - alpha) + ringRight[dstIdx] * alpha;
+            }
+            readIdx = newReadIdx;
             availableFrames = TARGET_RESET_FRAMES;
           }
 
-          if (!isPreRollDone && availableFrames >= 2048) {
+          if (!isPreRollDone && availableFrames >= PREROLL_FRAMES) {
             isPreRollDone = true;
+            fadeInRemaining = FADE_IN_LEN;
           }
         });
 
         const res = await window.electronAPI.startProcessAudioCapture(sourceId);
         if (!res?.started) {
           removeChunkListener();
+          if (workletUrl) URL.revokeObjectURL(workletUrl);
           audioCtx.close().catch(() => {});
           return null;
         }
 
-        // Nó de clock silencioso para garantir que o ScriptProcessor nunca seja suspenso quando o Xolas estiver minimizado
-        const osc = audioCtx.createOscillator();
-        const silentInGain = audioCtx.createGain();
-        silentInGain.gain.value = 0;
-        osc.connect(silentInGain);
-        osc.start();
+        let osc: OscillatorNode | null = null;
+        let silentInGain: GainNode | null = null;
+        let scriptNode: ScriptProcessorNode | null = null;
 
-        // Buffer de 2048 frames (42.6ms) para reduzir interrupções na thread principal e eliminar cliques
-        const scriptNode = audioCtx.createScriptProcessor(2048, 2, 2);
-        const dest = audioCtx.createMediaStreamDestination();
-        const silentOutGain = audioCtx.createGain();
-        silentOutGain.gain.value = 0;
+        if (!workletNode) {
+          osc = audioCtx.createOscillator();
+          silentInGain = audioCtx.createGain();
+          silentInGain.gain.value = 0;
+          osc.connect(silentInGain);
+          osc.start();
 
-        scriptNode.onaudioprocess = (e: AudioProcessingEvent) => {
-          const outL = e.outputBuffer.getChannelData(0);
-          const outR = e.outputBuffer.getChannelData(1);
-          const framesNeeded = outL.length;
+          scriptNode = audioCtx.createScriptProcessor(1024, 2, 2);
+          scriptNode.onaudioprocess = (e: AudioProcessingEvent) => {
+            const outL = e.outputBuffer.getChannelData(0);
+            const outR = e.outputBuffer.getChannelData(1);
+            const framesNeeded = outL.length;
 
-          // Se ainda estiver acumulando o pré-roll inicial, manter silêncio sem consumir buffer
-          if (!isPreRollDone || availableFrames < framesNeeded) {
+            if (!isPreRollDone) {
+              for (let i = 0; i < framesNeeded; i++) {
+                outL[i] = 0;
+                outR[i] = 0;
+              }
+              return;
+            }
+
             for (let i = 0; i < framesNeeded; i++) {
-              outL[i] = 0;
-              outR[i] = 0;
-            }
-            return;
-          }
+              if (availableFrames > 0) {
+                let sL = ringLeft[readIdx];
+                let sR = ringRight[readIdx];
+                readIdx = (readIdx + 1) % RING_SIZE;
+                availableFrames--;
 
-          for (let i = 0; i < framesNeeded; i++) {
-            if (availableFrames > 0) {
-              outL[i] = ringLeft[readIdx];
-              outR[i] = ringRight[readIdx];
-              readIdx = (readIdx + 1) % RING_SIZE;
-              availableFrames--;
-            } else {
-              outL[i] = 0;
-              outR[i] = 0;
-            }
-          }
-        };
+                if (fadeInRemaining > 0) {
+                  const gain = (FADE_IN_LEN - fadeInRemaining) / FADE_IN_LEN;
+                  sL *= gain;
+                  sR *= gain;
+                  fadeInRemaining--;
+                }
 
-        silentInGain.connect(scriptNode);
-        scriptNode.connect(dest);
-        scriptNode.connect(silentOutGain);
-        silentOutGain.connect(audioCtx.destination);
+                outL[i] = sL;
+                outR[i] = sR;
+                lastL = sL;
+                lastR = sR;
+              } else {
+                lastL *= 0.95;
+                lastR *= 0.95;
+                outL[i] = lastL;
+                outR[i] = lastR;
+                fadeInRemaining = FADE_IN_LEN;
+              }
+            }
+          };
+
+          silentInGain.connect(scriptNode);
+          scriptNode.connect(dest);
+          scriptNode.connect(silentOutGain);
+        }
 
         const track = dest.stream.getAudioTracks()[0] || null;
         if (track) {
@@ -2064,11 +2274,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             window.electronAPI?.stopProcessAudioCapture?.();
           } catch {}
           try {
-            scriptNode.onaudioprocess = null;
-            silentInGain.disconnect();
-            scriptNode.disconnect();
+            if (workletNode) {
+              workletNode.port.onmessage = null;
+              workletNode.disconnect();
+            }
+            if (workletUrl) {
+              URL.revokeObjectURL(workletUrl);
+            }
+            if (scriptNode) {
+              scriptNode.onaudioprocess = null;
+              scriptNode.disconnect();
+            }
+            if (silentInGain) silentInGain.disconnect();
+            if (osc) osc.stop();
             silentOutGain.disconnect();
-            osc.stop();
           } catch {}
           try {
             audioCtx.close().catch(() => {});
@@ -2217,6 +2436,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               const sender = pc.addTrack(track, stream);
               if (track.kind === 'video') {
                 configureScreenVideoSender(pc, sender, activeQuality);
+              } else if (track.kind === 'audio') {
+                configureScreenAudioSender(sender);
               }
               newSenders.push(sender);
             });
@@ -2236,6 +2457,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       emitLocalVoiceState,
       sendOffer,
       configureScreenVideoSender,
+      configureScreenAudioSender,
     ]
   );
 

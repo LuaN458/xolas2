@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -319,7 +320,7 @@ namespace XolasAudioLoopback
                 int hr = audioClient.Initialize(
                     AUDCLNT_SHAREMODE_SHARED,
                     flags,
-                    200000,
+                    1000000, // 100ms de buffer interno no kernel WASAPI para zero overflow sob carga de jogos
                     0,
                     ref fmt,
                     IntPtr.Zero);
@@ -349,6 +350,13 @@ namespace XolasAudioLoopback
 
         static int Main(string[] args)
         {
+            try
+            {
+                Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.High;
+                Thread.CurrentThread.Priority = ThreadPriority.Highest;
+            }
+            catch { }
+
             uint targetPid = 0;
             uint fallbackExcludePid = 0;
             int loopbackMode = 0; // 0 = INCLUDE, 1 = EXCLUDE
