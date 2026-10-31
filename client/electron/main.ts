@@ -532,41 +532,25 @@ ipcMain.handle('register-global-hotkeys', (_event, hotkeys: Record<string, strin
       return { success: true, registered: [] };
     }
 
-    const helperArgs: string[] = [];
+    const isWin = process.platform === 'win32';
+    const exePath = isWin ? getHotkeyHelperPath() : '';
+    const hasHelper = isWin && fs.existsSync(exePath);
 
-    for (const [action, accelerator] of Object.entries(hotkeys)) {
-      if (!accelerator || typeof accelerator !== 'string' || !accelerator.trim()) {
-        continue;
-      }
-
-      const cleanAcc = accelerator.trim();
-      // Teclas modificadoras isoladas (ShiftLeft, ControlRight, etc.) não são registradas pelo globalShortcut do Electron
-      const isSingleModifier = /^(ShiftLeft|ShiftRight|ControlLeft|ControlRight|AltLeft|AltRight|Shift|Control|Alt)$/i.test(cleanAcc);
-
-      let ok = false;
-      if (!isSingleModifier) {
-        try {
-          ok = globalShortcut.register(cleanAcc, () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('hotkey-trigger', action);
-            }
-          });
-        } catch {
-          ok = false;
+    if (hasHelper) {
+      // No Windows, delegar TODOS os atalhos para o hotkey-helper nativo baseado em GetAsyncKeyState.
+      // Desta forma, as teclas NUNCA são capturadas com exclusividade (RegisterHotKey),
+      // permitindo que continuem funcionando normalmente em jogos, navegadores e em todo o computador!
+      const helperArgs: string[] = [];
+      for (const [action, accelerator] of Object.entries(hotkeys)) {
+        if (!accelerator || typeof accelerator !== 'string' || !accelerator.trim()) {
+          continue;
         }
-      }
-
-      if (ok) {
-        registered.push(action);
-      } else {
-        // Envia para o helper nativo de hook global de baixo nível (WH_KEYBOARD_LL)
+        const cleanAcc = accelerator.trim();
         helperArgs.push(`--${action}`, cleanAcc);
+        registered.push(action);
       }
-    }
 
-    if (helperArgs.length > 0) {
-      const exePath = getHotkeyHelperPath();
-      if (fs.existsSync(exePath)) {
+      if (helperArgs.length > 0) {
         try {
           const child = spawn(exePath, helperArgs, {
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -599,15 +583,32 @@ ipcMain.handle('register-global-hotkeys', (_event, hotkeys: Record<string, strin
               hotkeyHelperProcess = null;
             }
           });
-
-          for (let i = 0; i < helperArgs.length; i += 2) {
-            registered.push(helperArgs[i].replace(/^--/, ''));
-          }
         } catch (hErr) {
           console.warn('[HotkeyHelper] Erro ao iniciar processo nativo:', hErr);
         }
-      } else {
-        console.warn('[HotkeyHelper] Executável não encontrado em:', exePath);
+      }
+
+      return { success: true, registered };
+    }
+
+    // Fallback padrão para macOS/Linux via globalShortcut do Electron
+    for (const [action, accelerator] of Object.entries(hotkeys)) {
+      if (!accelerator || typeof accelerator !== 'string' || !accelerator.trim()) {
+        continue;
+      }
+
+      const cleanAcc = accelerator.trim();
+      try {
+        const ok = globalShortcut.register(cleanAcc, () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('hotkey-trigger', action);
+          }
+        });
+        if (ok) {
+          registered.push(action);
+        }
+      } catch {
+        // Ignorar aceleradores incompatíveis
       }
     }
 
