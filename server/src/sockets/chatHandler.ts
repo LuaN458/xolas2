@@ -123,6 +123,52 @@ interface AuthenticatedSocket extends Socket {
     serverId: string;
     channelId: string;
   };
+  _voiceJoinSeq?: number;
+}
+
+export function terminateUserSocketsAndVoice(userId: string): void {
+  if (!isValidIdentifier(userId)) return;
+
+  // 1. Remover o usuário de todas as salas de voz em memória
+  for (const [channelId, room] of voiceRooms.entries()) {
+    if (room.has(userId)) {
+      room.delete(userId);
+      if (room.size === 0) {
+        voiceRooms.delete(channelId);
+      }
+      if (globalIO) {
+        globalIO.to(`voice:${channelId}`).emit('voice-peer-left', {
+          channelId,
+          userId,
+        });
+        const updatedUsers = getChannelVoiceParticipants(channelId);
+        globalIO.emit('voice-channel-updated', {
+          channelId,
+          users: updatedUsers,
+          participants: updatedUsers,
+        });
+      }
+    }
+  }
+
+  // 2. Desconectar forçadamente todos os sockets ativos do usuário
+  const targetSocketIds = userSockets.get(userId);
+  if (targetSocketIds && globalIO) {
+    const socketIdsArray = Array.from(targetSocketIds);
+    socketIdsArray.forEach((sid) => {
+      const s = globalIO!.sockets.sockets.get(sid) as AuthenticatedSocket | undefined;
+      if (s) {
+        if (s.currentVoice) {
+          s.leave(`voice:${s.currentVoice.channelId}`);
+          s.currentVoice = undefined;
+        }
+        s.disconnect(true);
+      }
+    });
+  }
+
+  // 3. Limpar registro de sockets do usuário
+  userSockets.delete(userId);
 }
 
 export function setupSocketHandlers(io: Server): void {
@@ -366,7 +412,7 @@ export function setupSocketHandlers(io: Server): void {
             isMuted,
           };
           io.to(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
-          io.to(`server:${serverId}`).emit('voice-user-state-updated', statePayload);
+          io.to(`server:${serverId}`).except(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
 
           sendToUser(targetUserId, 'force-mute-mic', {
             channelId,
@@ -449,6 +495,48 @@ export function setupSocketHandlers(io: Server): void {
           io.to(sid).emit(event, payload);
         });
       }
+    };
+
+    // Auxiliar para enviar evento WebRTC exclusivamente aos sockets do usuário naquele canal de voz,
+    // com suporte a direcionamento de socket específico e prevenção de multi-tab glare.
+    const sendToUserInChannel = (
+      targetUserId: string,
+      channelId: string,
+      event: string,
+      payload: any,
+      targetSocketId?: unknown
+    ) => {
+      if (!isValidIdentifier(targetUserId) || !isValidIdentifier(channelId)) return;
+      const targetSocketIds = userSockets.get(targetUserId);
+      if (!targetSocketIds || targetSocketIds.size === 0) return;
+
+      // 1. Se um socket específico foi solicitado, validar e direcionar diretamente a ele
+      if (typeof targetSocketId === 'string' && targetSocketIds.has(targetSocketId)) {
+        const s = io.sockets.sockets.get(targetSocketId) as AuthenticatedSocket | undefined;
+        if (s && s.connected && (s.rooms.has(`voice:${channelId}`) || s.currentVoice?.channelId === channelId)) {
+          io.to(targetSocketId).emit(event, payload);
+          return;
+        }
+      }
+
+      // 2. Localizar sockets ativos do usuário que pertençam a este canal de voz
+      const activeVoiceSockets: string[] = [];
+      for (const sid of targetSocketIds) {
+        const s = io.sockets.sockets.get(sid) as AuthenticatedSocket | undefined;
+        if (s && s.connected && (s.rooms.has(`voice:${channelId}`) || s.currentVoice?.channelId === channelId)) {
+          activeVoiceSockets.push(sid);
+        }
+      }
+
+      if (activeVoiceSockets.length === 0) {
+        console.debug(`[WebRTC] Nenhum socket ativo encontrado para o usuário ${targetUserId} no canal ${channelId}`);
+        return;
+      }
+
+      // 3. Prevenir multi-socket glare: se houver mais de um socket do usuário no mesmo canal,
+      // direcionar ao primeiro ativo para evitar respostas concorrentes (InvalidStateError)
+      const chosenSocketId = activeVoiceSockets[0];
+      io.to(chosenSocketId).emit(event, payload);
     };
 
     // Verifica se o usuário ainda possui outro socket ativo e conectado nesta sala de voz
@@ -538,75 +626,136 @@ export function setupSocketHandlers(io: Server): void {
     };
 
     // Conectar em canal de voz
-    socket.on('join-voice', async (data: { serverId?: unknown; channelId?: unknown }) => {
-      try {
-        const serverId = data?.serverId;
-        const channelId = data?.channelId;
-        if (!isValidIdentifier(serverId) || !isValidIdentifier(channelId)) return;
+    socket.on(
+      'join-voice',
+      async (data: {
+        serverId?: unknown;
+        channelId?: unknown;
+        isMuted?: unknown;
+        isSpeaking?: unknown;
+        isScreenSharing?: unknown;
+        screenStreamId?: unknown;
+      }) => {
+        try {
+          const serverId = data?.serverId;
+          const channelId = data?.channelId;
+          if (!isValidIdentifier(serverId) || !isValidIdentifier(channelId)) return;
 
-        // Se já estava em outro canal de voz, sai dele antes
-        if (socket.currentVoice && socket.currentVoice.channelId !== channelId) {
-          const prevVoice = socket.currentVoice;
-          socket.leave(`voice:${prevVoice.channelId}`);
-          socket.currentVoice = undefined;
-          removeUserFromVoice(prevVoice.channelId, prevVoice.serverId, socket.id);
+          // Incrementar sequência atômica de transição de voz para este socket
+          const joinSeq = (socket._voiceJoinSeq = (socket._voiceJoinSeq || 0) + 1);
+
+          // 1. Limpeza síncrona e atômica do canal anterior associado a este socket
+          if (socket.currentVoice && socket.currentVoice.channelId !== channelId) {
+            const prevVoice = socket.currentVoice;
+            socket.leave(`voice:${prevVoice.channelId}`);
+            socket.currentVoice = undefined;
+            removeUserFromVoice(prevVoice.channelId, prevVoice.serverId, socket.id);
+          }
+
+          // 2. Garantir isolamento mútuo: remover qualquer ocorrência prévia deste usuário em outras salas de voz
+          for (const [otherChannelId, members] of voiceRooms.entries()) {
+            if (otherChannelId !== channelId && members.has(user.userId)) {
+              removeSpecificUserFromVoice(user.userId, otherChannelId, serverId as string, {
+                excludeSocketId: socket.id,
+              });
+              if (voiceRooms.get(otherChannelId)?.has(user.userId)) {
+                voiceRooms.get(otherChannelId)!.delete(user.userId);
+                if (voiceRooms.get(otherChannelId)!.size === 0) {
+                  voiceRooms.delete(otherChannelId);
+                }
+                io.to(`voice:${otherChannelId}`).emit('voice-peer-left', {
+                  channelId: otherChannelId,
+                  userId: user.userId,
+                });
+                const remParticipants = getChannelVoiceParticipants(otherChannelId);
+                io.to(`server:${serverId}`).emit('voice-channel-updated', {
+                  channelId: otherChannelId,
+                  users: remParticipants,
+                  participants: remParticipants,
+                });
+              }
+            }
+          }
+
+          // 3. Buscar avatar atualizado do usuário no banco de dados
+          const dbUser = await prisma.user.findUnique({
+            where: { id: user.userId },
+            select: { id: true, username: true, avatarUrl: true },
+          });
+
+          // 4. Se o socket foi desconectado ou se uma transição mais recente foi iniciada, abortar
+          if (!socket.connected || socket._voiceJoinSeq !== joinSeq) {
+            return;
+          }
+
+          // 5. Preservação de estado e recuperação de transmissão de tela na reconexão
+          const existingRoom = voiceRooms.get(channelId as string);
+          const existingEntry = existingRoom?.get(user.userId);
+
+          const safeUsername = dbUser?.username || user.username;
+
+          const isMuted =
+            typeof data?.isMuted === 'boolean'
+              ? data.isMuted
+              : (existingEntry?.isMuted ?? false);
+
+          const isSpeaking =
+            typeof data?.isSpeaking === 'boolean'
+              ? data.isSpeaking
+              : (existingEntry?.isSpeaking ?? false);
+
+          const isScreenSharing =
+            typeof data?.isScreenSharing === 'boolean'
+              ? data.isScreenSharing
+              : (existingEntry?.isScreenSharing ?? false);
+
+          const rawStreamId = data?.screenStreamId;
+          const safeScreenStreamId =
+            rawStreamId === null
+              ? null
+              : (ensureScalarString(rawStreamId, 128) ?? existingEntry?.screenStreamId ?? null);
+
+          const participant: VoiceParticipant = {
+            id: user.userId,
+            username: safeUsername,
+            avatarUrl:
+              dbUser?.avatarUrl ||
+              `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(safeUsername)}`,
+            isMuted,
+            isSpeaking,
+            isScreenSharing,
+            screenStreamId: safeScreenStreamId,
+          };
+
+          if (!voiceRooms.has(channelId as string)) {
+            voiceRooms.set(channelId as string, new Map());
+          }
+          voiceRooms.get(channelId as string)!.set(user.userId, participant);
+
+          socket.currentVoice = { serverId: serverId as string, channelId: channelId as string };
+          socket.join(`voice:${channelId}`);
+
+          const updatedUsers = getChannelVoiceParticipants(channelId as string);
+
+          // Notificar demais participantes da sala de voz para iniciar negociação WebRTC
+          socket.to(`voice:${channelId}`).emit('voice-peer-joined', {
+            channelId,
+            peer: participant,
+            participant,
+          });
+
+          // Notifica todos no servidor (inclusive o próprio usuário)
+          io.to(`server:${serverId}`).emit('voice-channel-updated', {
+            channelId,
+            users: updatedUsers,
+            participants: updatedUsers,
+          });
+        } catch (err) {
+          console.error('[Socket] Erro ao conectar no canal de voz:', err);
+          socket.emit('voice-error', { message: 'Erro ao ingressar no canal de voz. Tente novamente.' });
         }
-
-        // Buscar avatar atualizado do usuário no banco de dados
-        const dbUser = await prisma.user.findUnique({
-          where: { id: user.userId },
-          select: { id: true, username: true, avatarUrl: true },
-        });
-
-        // Verificar se socket ainda está conectado após await no banco
-        if (!socket.connected) {
-          return;
-        }
-
-        const existingRoom = voiceRooms.get(channelId);
-        const existingEntry = existingRoom?.get(user.userId);
-
-        const safeUsername = dbUser?.username || user.username;
-        const participant: VoiceParticipant = {
-          id: user.userId,
-          username: safeUsername,
-          avatarUrl:
-            dbUser?.avatarUrl ||
-            `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(safeUsername)}`,
-          isMuted: existingEntry?.isMuted ?? false,
-          isSpeaking: existingEntry?.isSpeaking ?? false,
-          isScreenSharing: existingEntry?.isScreenSharing ?? false,
-          screenStreamId: existingEntry?.screenStreamId ?? null,
-        };
-
-        if (!voiceRooms.has(channelId)) {
-          voiceRooms.set(channelId, new Map());
-        }
-        voiceRooms.get(channelId)!.set(user.userId, participant);
-
-        socket.currentVoice = { serverId, channelId };
-        socket.join(`voice:${channelId}`);
-
-        const updatedUsers = getChannelVoiceParticipants(channelId);
-
-        // Notificar demais participantes da sala de voz para iniciar negociação WebRTC
-        socket.to(`voice:${channelId}`).emit('voice-peer-joined', {
-          channelId,
-          peer: participant,
-          participant,
-        });
-
-        // Notifica todos no servidor (inclusive o próprio usuário)
-        io.to(`server:${serverId}`).emit('voice-channel-updated', {
-          channelId,
-          users: updatedUsers,
-          participants: updatedUsers,
-        });
-      } catch (err) {
-        console.error('[Socket] Erro ao conectar no canal de voz:', err);
-        socket.emit('voice-error', { message: 'Erro ao ingressar no canal de voz. Tente novamente.' });
       }
-    });
+    );
 
     // Sair de canal de voz
     socket.on('leave-voice', (data: { serverId?: unknown; channelId?: unknown }) => {
@@ -627,23 +776,45 @@ export function setupSocketHandlers(io: Server): void {
         toUserId?: unknown;
         targetUserId?: unknown;
         channelId?: unknown;
+        targetSocketId?: unknown;
+        toSocketId?: unknown;
         sdp?: any;
         screenStreamId?: unknown;
       }) => {
-        if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
-        const targetId = data?.toUserId || data?.targetUserId;
-        const channelId = data?.channelId;
-        if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
-        if (!socket.rooms.has(`voice:${channelId}`)) return;
-        if (!data?.sdp || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
+        try {
+          if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
+          const targetId = data?.toUserId || data?.targetUserId;
+          const channelId = data?.channelId;
+          if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
+          if (targetId === user.userId) return;
+          if (!socket.rooms.has(`voice:${channelId}`)) return;
 
-        sendToUser(targetId as string, 'webrtc-offer', {
-          fromUserId: user.userId,
-          fromUsername: user.username,
-          channelId,
-          sdp: { type: data.sdp.type === 'offer' ? 'offer' : 'offer', sdp: data.sdp.sdp },
-          screenStreamId: ensureScalarString(data.screenStreamId, 128) || null,
-        });
+          // Validação de isolamento de sala: verificar se o usuário de destino está presente na sala de voz
+          const room = voiceRooms.get(channelId as string);
+          if (!room || !room.has(targetId as string)) {
+            console.debug(`[WebRTC] Discarding webrtc-offer: target ${targetId} not in voice channel ${channelId}`);
+            return;
+          }
+
+          if (!data?.sdp || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
+
+          sendToUserInChannel(
+            targetId as string,
+            channelId as string,
+            'webrtc-offer',
+            {
+              fromUserId: user.userId,
+              fromUsername: user.username,
+              fromSocketId: socket.id,
+              channelId,
+              sdp: { type: data.sdp.type === 'offer' ? 'offer' : 'offer', sdp: data.sdp.sdp },
+              screenStreamId: ensureScalarString(data.screenStreamId, 128) || null,
+            },
+            data?.targetSocketId || data?.toSocketId
+          );
+        } catch (err) {
+          console.warn('[WebRTC] Erro ao processar webrtc-offer:', err);
+        }
       }
     );
 
@@ -653,57 +824,132 @@ export function setupSocketHandlers(io: Server): void {
         toUserId?: unknown;
         targetUserId?: unknown;
         channelId?: unknown;
+        targetSocketId?: unknown;
+        toSocketId?: unknown;
         sdp?: any;
         screenStreamId?: unknown;
       }) => {
-        if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
-        const targetId = data?.toUserId || data?.targetUserId;
-        const channelId = data?.channelId;
-        if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
-        if (!socket.rooms.has(`voice:${channelId}`)) return;
-        if (!data?.sdp || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
+        try {
+          if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
+          const targetId = data?.toUserId || data?.targetUserId;
+          const channelId = data?.channelId;
+          if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
+          if (targetId === user.userId) return;
+          if (!socket.rooms.has(`voice:${channelId}`)) return;
 
-        sendToUser(targetId as string, 'webrtc-answer', {
-          fromUserId: user.userId,
-          fromUsername: user.username,
-          channelId,
-          sdp: { type: 'answer', sdp: data.sdp.sdp },
-          screenStreamId: ensureScalarString(data.screenStreamId, 128) || null,
-        });
+          // Validação de isolamento de sala: verificar se o usuário de destino está presente na sala de voz
+          const room = voiceRooms.get(channelId as string);
+          if (!room || !room.has(targetId as string)) {
+            console.debug(`[WebRTC] Discarding webrtc-answer: target ${targetId} not in voice channel ${channelId}`);
+            return;
+          }
+
+          if (!data?.sdp || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
+
+          sendToUserInChannel(
+            targetId as string,
+            channelId as string,
+            'webrtc-answer',
+            {
+              fromUserId: user.userId,
+              fromUsername: user.username,
+              fromSocketId: socket.id,
+              channelId,
+              sdp: { type: 'answer', sdp: data.sdp.sdp },
+              screenStreamId: ensureScalarString(data.screenStreamId, 128) || null,
+            },
+            data?.targetSocketId || data?.toSocketId
+          );
+        } catch (err) {
+          console.warn('[WebRTC] Erro ao processar webrtc-answer:', err);
+        }
       }
     );
 
     socket.on(
       'webrtc-ice-candidate',
-      (data: { toUserId?: unknown; targetUserId?: unknown; channelId?: unknown; candidate?: any }) => {
-        if (!allowSocketEvent('webrtc-ice', 300, 10_000)) return;
-        const targetId = data?.toUserId || data?.targetUserId;
-        const channelId = data?.channelId;
-        if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
-        if (!socket.rooms.has(`voice:${channelId}`)) return;
-        if (!data?.candidate || typeof data.candidate !== 'object') return;
+      (data: {
+        toUserId?: unknown;
+        targetUserId?: unknown;
+        channelId?: unknown;
+        targetSocketId?: unknown;
+        toSocketId?: unknown;
+        candidate?: any;
+      }) => {
+        try {
+          if (!allowSocketEvent('webrtc-ice', 300, 10_000)) return;
+          const targetId = data?.toUserId || data?.targetUserId;
+          const channelId = data?.channelId;
+          if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
+          if (targetId === user.userId) return;
+          if (!socket.rooms.has(`voice:${channelId}`)) return;
 
-        sendToUser(targetId as string, 'webrtc-ice-candidate', {
-          fromUserId: user.userId,
-          channelId,
-          candidate: data.candidate,
-        });
+          // Validação de isolamento de sala: verificar se o usuário de destino está presente na sala de voz
+          const room = voiceRooms.get(channelId as string);
+          if (!room || !room.has(targetId as string)) {
+            console.debug(`[WebRTC] Discarding webrtc-ice-candidate: target ${targetId} not in voice channel ${channelId}`);
+            return;
+          }
+
+          // Candidato pode ser um objeto RTCIceCandidateInit válido ou null (sinal W3C end-of-candidates)
+          if (data?.candidate !== null && (typeof data?.candidate !== 'object' || !data?.candidate)) return;
+
+          sendToUserInChannel(
+            targetId as string,
+            channelId as string,
+            'webrtc-ice-candidate',
+            {
+              fromUserId: user.userId,
+              fromSocketId: socket.id,
+              channelId,
+              candidate: data.candidate,
+            },
+            data?.targetSocketId || data?.toSocketId
+          );
+        } catch (err) {
+          console.warn('[WebRTC] Erro ao processar webrtc-ice-candidate:', err);
+        }
       }
     );
 
     socket.on(
       'request-screen-stream',
-      (data: { toUserId?: unknown; targetUserId?: unknown; channelId?: unknown }) => {
-        if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
-        const targetId = data?.toUserId || data?.targetUserId;
-        const channelId = data?.channelId;
-        if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
-        if (!socket.rooms.has(`voice:${channelId}`)) return;
+      (data: {
+        toUserId?: unknown;
+        targetUserId?: unknown;
+        channelId?: unknown;
+        targetSocketId?: unknown;
+        toSocketId?: unknown;
+      }) => {
+        try {
+          if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
+          const targetId = data?.toUserId || data?.targetUserId;
+          const channelId = data?.channelId;
+          if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
+          if (targetId === user.userId) return;
+          if (!socket.rooms.has(`voice:${channelId}`)) return;
 
-        sendToUser(targetId as string, 'request-screen-stream', {
-          fromUserId: user.userId,
-          channelId,
-        });
+          // Validação de isolamento de sala: verificar se o usuário transmissor está presente na sala de voz
+          const room = voiceRooms.get(channelId as string);
+          if (!room || !room.has(targetId as string)) {
+            console.debug(`[WebRTC] Discarding request-screen-stream: target ${targetId} not in voice channel ${channelId}`);
+            return;
+          }
+
+          sendToUserInChannel(
+            targetId as string,
+            channelId as string,
+            'request-screen-stream',
+            {
+              fromUserId: user.userId,
+              fromSocketId: socket.id,
+              channelId,
+            },
+            data?.targetSocketId || data?.toSocketId
+          );
+        } catch (err) {
+          console.warn('[WebRTC] Erro ao processar request-screen-stream:', err);
+        }
       }
     );
 
@@ -717,44 +963,49 @@ export function setupSocketHandlers(io: Server): void {
         isScreenSharing?: unknown;
         screenStreamId?: unknown;
       }) => {
-        if (!allowSocketEvent('voice-state', 120, 10_000)) return;
-        const channelId = data?.channelId;
-        if (!isValidIdentifier(channelId)) return;
-        if (!socket.rooms.has(`voice:${channelId}`)) return;
+        try {
+          if (!allowSocketEvent('voice-state', 120, 10_000)) return;
+          const channelId = data?.channelId;
+          if (!isValidIdentifier(channelId)) return;
+          if (!socket.rooms.has(`voice:${channelId}`)) return;
 
-        const room = voiceRooms.get(channelId);
-        const safeScreenStreamId =
-          data.screenStreamId === null
-            ? null
-            : ensureScalarString(data.screenStreamId, 128) ?? undefined;
+          const room = voiceRooms.get(channelId);
+          const safeScreenStreamId =
+            data.screenStreamId === null
+              ? null
+              : ensureScalarString(data.screenStreamId, 128) ?? undefined;
 
-        if (room && room.has(user.userId)) {
-          const p = room.get(user.userId)!;
-          if (typeof data.isMuted === 'boolean') p.isMuted = data.isMuted;
-          if (typeof data.isSpeaking === 'boolean') p.isSpeaking = data.isSpeaking;
-          if (typeof data.isScreenSharing === 'boolean') p.isScreenSharing = data.isScreenSharing;
-          if (safeScreenStreamId !== undefined) p.screenStreamId = safeScreenStreamId;
-        }
+          if (room && room.has(user.userId)) {
+            const p = room.get(user.userId)!;
+            if (typeof data.isMuted === 'boolean') p.isMuted = data.isMuted;
+            if (typeof data.isSpeaking === 'boolean') p.isSpeaking = data.isSpeaking;
+            if (typeof data.isScreenSharing === 'boolean') p.isScreenSharing = data.isScreenSharing;
+            if (safeScreenStreamId !== undefined) p.screenStreamId = safeScreenStreamId;
+          }
 
-        const statePayload = {
-          channelId,
-          userId: user.userId,
-          username: user.username,
-          isMuted: typeof data.isMuted === 'boolean' ? data.isMuted : undefined,
-          isSpeaking: typeof data.isSpeaking === 'boolean' ? data.isSpeaking : undefined,
-          isScreenSharing:
-            typeof data.isScreenSharing === 'boolean' ? data.isScreenSharing : undefined,
-          screenStreamId: safeScreenStreamId,
-        };
+          const statePayload = {
+            channelId,
+            userId: user.userId,
+            username: user.username,
+            isMuted: typeof data.isMuted === 'boolean' ? data.isMuted : undefined,
+            isSpeaking: typeof data.isSpeaking === 'boolean' ? data.isSpeaking : undefined,
+            isScreenSharing:
+              typeof data.isScreenSharing === 'boolean' ? data.isScreenSharing : undefined,
+            screenStreamId: safeScreenStreamId,
+          };
 
-        // Notificar tanto os membros no canal de voz quanto no servidor
-        socket.to(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
+          // Notificar membros na sala de voz (exceto o próprio remetente)
+          socket.to(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
 
-        const targetServerId = isValidIdentifier(data?.serverId)
-          ? data.serverId
-          : socket.currentVoice?.serverId;
-        if (targetServerId) {
-          io.to(`server:${targetServerId}`).emit('voice-user-state-updated', statePayload);
+          // Notificar membros no servidor que NÃO estejam nesta sala de voz (desduplicação de eventos)
+          const targetServerId = isValidIdentifier(data?.serverId)
+            ? data.serverId
+            : socket.currentVoice?.serverId;
+          if (targetServerId) {
+            io.to(`server:${targetServerId}`).except(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
+          }
+        } catch (err) {
+          console.warn('[WebRTC] Erro ao processar voice-user-state:', err);
         }
       }
     );
@@ -824,6 +1075,25 @@ export function setupSocketHandlers(io: Server): void {
         if (sockets.size === 0) {
           userSockets.delete(userId);
           io.emit('user-status-changed', { userId, status: 'offline' });
+
+          // Limpeza defensiva de quaisquer salas de voz remanescentes para este usuário
+          for (const [cId, room] of voiceRooms.entries()) {
+            if (room.has(userId)) {
+              room.delete(userId);
+              if (room.size === 0) {
+                voiceRooms.delete(cId);
+              }
+              io.to(`voice:${cId}`).emit('voice-peer-left', { channelId: cId, userId });
+              const updated = getChannelVoiceParticipants(cId);
+              if (currentVoice?.serverId) {
+                io.to(`server:${currentVoice.serverId}`).emit('voice-channel-updated', {
+                  channelId: cId,
+                  users: updated,
+                  participants: updated,
+                });
+              }
+            }
+          }
         }
       }
 

@@ -75,6 +75,13 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
     } else {
       el.srcObject = null;
     }
+
+    return () => {
+      if (el) {
+        el.pause();
+        el.srcObject = null;
+      }
+    };
   }, [stream, videoTrack, isLocal, isScreenShare]);
 
   // Economizar GPU do transmissor pausando a pintura do preview local quando o Xolas estiver minimizado/em segundo plano

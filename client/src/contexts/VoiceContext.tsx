@@ -237,8 +237,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     mode: initialSettings.screenStreamMode || 'fluidity',
     maxBitrateKbps: initialSettings.screenMaxBitrateKbps || 8500,
   });
-  const currentScreenSourceIdRef = useRef<string | undefined>(undefined);
+  const currentScreenSourceIdRef = useRef<string | null | undefined>(undefined);
   const isRecoveringScreenShareRef = useRef<boolean>(false);
+  const localAudioTrackRef = useRef<MediaStreamTrack | null>(null);
+  const localVideoPreviewStreamRef = useRef<MediaStream | null>(null);
 
   const streamVolumeRef = useRef<number>(initialSettings.streamVolume);
   const isStreamMutedRef = useRef<boolean>(initialSettings.isStreamMuted);
@@ -414,14 +416,22 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (currentScreen && currentScreen.getVideoTracks().length > 0) {
       // Importante: O preview local NUNCA deve incluir a faixa de áudio para evitar auto-reprodução/loop
-      const videoOnlyLocalStream = new MediaStream(currentScreen.getVideoTracks());
+      const currentTrack = currentScreen.getVideoTracks()[0];
+      let videoOnlyLocalStream = localVideoPreviewStreamRef.current;
+      const cachedTracks = videoOnlyLocalStream?.getVideoTracks() || [];
+      if (!videoOnlyLocalStream || cachedTracks.length === 0 || cachedTracks[0] !== currentTrack) {
+        videoOnlyLocalStream = new MediaStream([currentTrack]);
+        localVideoPreviewStreamRef.current = videoOnlyLocalStream;
+      }
       shares.push({
         id: 'local-screen',
         participantName: user?.username || 'Você',
         isLocal: true,
         stream: videoOnlyLocalStream,
-        track: currentScreen.getVideoTracks()[0],
+        track: currentTrack,
       });
+    } else {
+      localVideoPreviewStreamRef.current = null;
     }
 
     remoteParticipantsRef.current.forEach((p) => {
@@ -676,7 +686,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         audioElementsRef.current.delete(key);
       }
     });
-  }, []);
+    syncVoiceState();
+  }, [syncVoiceState]);
 
   // Otimiza o SDP para vídeo adaptativo de alta fidelidade e áudio Opus com FEC (sem perdas e sem travadas)
   const optimizeWebRtcSdp = useCallback(
@@ -753,6 +764,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (currentSection === 'video') {
+          // Descartar cabeçalhos b=AS e b=TIAS pré-existentes para evitar duplicações no SDP
+          if (line.startsWith('b=AS') || line.startsWith('b=TIAS')) {
+            continue;
+          }
+
           // Injetar limites adaptativos em todos os codecs de vídeo (H.264, VP8, VP9)
           if (
             line.startsWith('a=fmtp:') &&
@@ -1514,6 +1530,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         localMicStreamRef.current = dest.stream;
+        localAudioTrackRef.current = processedTrack;
         setLocalAudioTrack(processedTrack);
 
         // Iniciar loop de VAD e controle do Noise Gate
@@ -1524,6 +1541,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         console.warn('Falha ao inicializar pipeline Web Audio do microfone, usando stream direto:', pipelineErr);
         rawTrack.enabled = !isMutedRef.current;
         localMicStreamRef.current = rawStream;
+        localAudioTrackRef.current = rawTrack;
         setLocalAudioTrack(rawTrack);
         return rawStream;
       }
@@ -1599,10 +1617,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const newStream = await captureLocalMicrophone(id);
         const newTrack = newStream?.getAudioTracks()[0];
         if (newTrack) {
+          const oldMicTrack = localAudioTrackRef.current || localMicStreamRef.current?.getAudioTracks()[0];
+          localAudioTrackRef.current = newTrack;
           peersRef.current.forEach((pc, peerId) => {
+            const screenSenders = screenSendersRef.current.get(peerId) || [];
             const audioSender = pc
               .getSenders()
-              .find((s) => s.track && s.track.kind === 'audio');
+              .find(
+                (s) =>
+                  s.track &&
+                  s.track.kind === 'audio' &&
+                  (s.track === oldMicTrack || !screenSenders.includes(s))
+              );
             if (audioSender) {
               audioSender.replaceTrack(newTrack).catch(() => {});
             } else if (newStream) {
@@ -2200,6 +2226,48 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [socket]);
 
+  const stopScreenShare = useCallback(() => {
+    const ch = currentChannelRef.current;
+
+    if (screenAudioCleanupRef.current) {
+      screenAudioCleanupRef.current();
+      screenAudioCleanupRef.current = null;
+    }
+
+    // Remover senders de tela de todas as conexões WebRTC ativas e renegociar
+    peersRef.current.forEach((pc, peerId) => {
+      const senders = screenSendersRef.current.get(peerId) || [];
+      senders.forEach((sender) => {
+        try {
+          pc.removeTrack(sender);
+        } catch {}
+      });
+      screenSendersRef.current.delete(peerId);
+      if (ch) {
+        sendOffer(peerId, ch.id);
+      }
+    });
+
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => {
+        track.onended = null;
+        track.stop();
+      });
+      screenStreamRef.current = null;
+    }
+
+    localVideoPreviewStreamRef.current = null;
+    isScreenSharingRef.current = false;
+    currentScreenSourceIdRef.current = undefined;
+    isRecoveringScreenShareRef.current = false;
+    setScreenStream(null);
+    setIsScreenSharing(false);
+    setSelectedScreenShareId((prev) => (prev === 'local-screen' ? null : prev));
+
+    syncVoiceState();
+    emitLocalVoiceState();
+  }, [sendOffer, syncVoiceState, emitLocalVoiceState]);
+
   // Conectar a um canal de voz com WebRTC Mesh nativo
   const joinVoiceChannel = useCallback(
     async (channel: Channel) => {
@@ -2207,6 +2275,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       setIsConnecting(true);
       try {
+        // Encerra compartilhamento de tela ativo ao trocar de canal
+        if (isScreenSharingRef.current) {
+          stopScreenShare();
+        }
+
         // Limpar conexões de canal anterior se houver
         Array.from(peersRef.current.keys()).forEach((peerId) => cleanupPeer(peerId));
 
@@ -2236,7 +2309,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsConnecting(false);
       }
     },
-    [selectedAudioDeviceId, socket, cleanupPeer, captureLocalMicrophone, syncVoiceState]
+    [selectedAudioDeviceId, socket, cleanupPeer, captureLocalMicrophone, syncVoiceState, stopScreenShare]
   );
 
   const leaveVoiceChannel = useCallback(() => {
@@ -2470,47 +2543,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       socket.off('force-mute-mic', handleForceMuteMic);
     };
   }, [socket, leaveVoiceChannel, toggleMute]);
-
-  const stopScreenShare = useCallback(() => {
-    const ch = currentChannelRef.current;
-
-    if (screenAudioCleanupRef.current) {
-      screenAudioCleanupRef.current();
-      screenAudioCleanupRef.current = null;
-    }
-
-    // Remover senders de tela de todas as conexões WebRTC ativas e renegociar
-    peersRef.current.forEach((pc, peerId) => {
-      const senders = screenSendersRef.current.get(peerId) || [];
-      senders.forEach((sender) => {
-        try {
-          pc.removeTrack(sender);
-        } catch {}
-      });
-      screenSendersRef.current.delete(peerId);
-      if (ch) {
-        sendOffer(peerId, ch.id);
-      }
-    });
-
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((track) => {
-        track.onended = null;
-        track.stop();
-      });
-      screenStreamRef.current = null;
-    }
-
-    isScreenSharingRef.current = false;
-    currentScreenSourceIdRef.current = undefined;
-    isRecoveringScreenShareRef.current = false;
-    setScreenStream(null);
-    setIsScreenSharing(false);
-    setSelectedScreenShareId((prev) => (prev === 'local-screen' ? null : prev));
-
-    syncVoiceState();
-    emitLocalVoiceState();
-  }, [sendOffer, syncVoiceState, emitLocalVoiceState]);
 
   // Função unificada acionada pela hotkey (espectador ou streamer):
   // - Se for o streamer compartilhando sua própria tela, encerra a transmissão
@@ -2968,6 +3000,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         screenAudioCleanupRef.current = () => {
           try {
+            dest.stream.getAudioTracks().forEach((t) => {
+              try {
+                t.stop();
+              } catch {}
+            });
+            if (track) {
+              try {
+                track.stop();
+              } catch {}
+            }
+          } catch {}
+          try {
             removeChunkListener();
           } catch {}
           try {
@@ -3031,12 +3075,27 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             },
           });
         } catch {
-          newStream = await (navigator.mediaDevices as any).getUserMedia({
-            audio: false,
-            video: {
-              mandatory: videoMandatory,
-            },
-          });
+          try {
+            newStream = await (navigator.mediaDevices as any).getUserMedia({
+              audio: false,
+              video: {
+                mandatory: videoMandatory,
+              },
+            });
+          } catch {
+            const relaxedMandatory: any = {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId,
+              maxWidth: width,
+              maxHeight: height,
+            };
+            newStream = await (navigator.mediaDevices as any).getUserMedia({
+              audio: false,
+              video: {
+                mandatory: relaxedMandatory,
+              },
+            });
+          }
         }
 
         const newVideoTrack = newStream.getVideoTracks()[0];
@@ -3132,9 +3191,32 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } finally {
           isRecoveringScreenShareRef.current = false;
         }
+      } else if (sourceId && (!isWindow || !window.electronAPI?.checkWindowExists)) {
+        // Monitor share resilience against transient display events (DPI changes, display wake, UAC prompt)
+        try {
+          isRecoveringScreenShareRef.current = true;
+          console.log(
+            '[ScreenShare] videoTrack.onended disparou em monitor/display (glitch de DPI/UAC/display wake). Tentando auto-recuperação...'
+          );
+
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            if (!isScreenSharingRef.current) break;
+            await new Promise((resolve) => setTimeout(resolve, attempt * 400));
+            const recovered = await reacquireWindowVideoTrack(sourceId, screenQualityRef.current);
+            if (recovered) {
+              console.log(`[ScreenShare] Transmissão de tela (monitor) recuperada com sucesso na tentativa ${attempt}!`);
+              isRecoveringScreenShareRef.current = false;
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('[ScreenShare] Erro na recuperação de transmissão de monitor/display:', err);
+        } finally {
+          isRecoveringScreenShareRef.current = false;
+        }
       }
 
-      console.log('[ScreenShare] A janela foi realmente fechada pelo usuário ou não está mais acessível. Encerrando compartilhamento.');
+      console.log('[ScreenShare] A janela ou tela foi realmente encerrada ou não está mais acessível. Encerrando compartilhamento.');
       stopScreenShare();
     },
     [reacquireWindowVideoTrack, stopScreenShare]
@@ -3304,7 +3386,22 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
         }
       } catch (error) {
-        console.error('Falha ao iniciar compartilhamento de tela:', error);
+        console.warn('[ScreenShare] Compartilhamento de tela cancelado ou permissão negada:', error);
+        currentScreenSourceIdRef.current = null;
+        if (screenAudioCleanupRef.current) {
+          try {
+            screenAudioCleanupRef.current();
+          } catch {}
+          screenAudioCleanupRef.current = null;
+        }
+        if (!screenStreamRef.current) {
+          isScreenSharingRef.current = false;
+          setIsScreenSharing(false);
+          setScreenStream(null);
+          setSelectedScreenShareId((prev) => (prev === 'local-screen' ? null : prev));
+          syncVoiceState();
+          emitLocalVoiceState();
+        }
       }
     },
     [

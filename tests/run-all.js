@@ -21,6 +21,7 @@ const testSuites = [
   { tier: 'Tier 2', name: 'Unapproved User Rejection', file: 'tests/tier2_boundaries/03_unapproved_users.test.js' },
   { tier: 'Tier 2', name: 'Duplicate Joins & Deduplication', file: 'tests/tier2_boundaries/04_duplicate_joins.test.js' },
   { tier: 'Tier 2', name: 'Invalid Signaling Room Targets', file: 'tests/tier2_boundaries/05_invalid_screen_targets.test.js' },
+  { tier: 'Tier 2', name: 'Signaling Room Isolation & Deduplication', file: 'tests/tier2_boundaries/06_transmission_signaling_isolation.test.js' },
 
   // Tier 3: Cross-Feature & Reconnection
   { tier: 'Tier 3', name: 'Network Disconnect & Reconnect', file: 'tests/tier3_reconnection/01_network_reconnect.test.js' },
@@ -28,6 +29,7 @@ const testSuites = [
 
   // Tier 4: Real-World Multi-Participant
   { tier: 'Tier 4', name: 'Multi-User Voice, Screen & Renegotiation', file: 'tests/tier4_multi_participant/01_multi_user_voice.test.js' },
+  { tier: 'Tier 4', name: 'Transmission Reconnect & Admin Teardown', file: 'tests/tier4_multi_participant/02_transmission_lifecycle.test.js' },
 ];
 
 console.log('='.repeat(75));

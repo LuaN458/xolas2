@@ -8,6 +8,7 @@ import {
   getGlobalIO,
   updateUserSocketPermissions,
   syncUsersWithRole,
+  terminateUserSocketsAndVoice,
 } from '../sockets/chatHandler';
 
 const router = Router();
@@ -186,6 +187,7 @@ router.post('/users/:id/reject', async (req: AuthRequest, res: Response): Promis
       status: 'REJECTED',
       user: updatedUser,
     });
+    terminateUserSocketsAndVoice(id);
 
     res.json({ success: true, user: updatedUser });
   } catch (error) {
@@ -214,6 +216,7 @@ router.delete('/users/:id', async (req: AuthRequest, res: Response): Promise<voi
 
     await notifyAdminsPendingUpdate();
     notifyUserApprovalStatus(id, { status: 'DELETED' });
+    terminateUserSocketsAndVoice(id);
 
     res.json({ success: true });
   } catch (error) {

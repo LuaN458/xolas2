@@ -536,9 +536,9 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                     hasScreenShare={p.hasScreenShare}
                     onWatchScreenShare={
                       remoteShare
-                        ? () => setSelectedScreenShareId(remoteShare.id)
+                        ? () => watchScreenShare(remoteShare.id)
                         : p.isLocal && screenStream
-                        ? () => setSelectedScreenShareId('local-screen')
+                        ? () => watchScreenShare('local-screen')
                         : undefined
                     }
                     isLocal={p.isLocal}

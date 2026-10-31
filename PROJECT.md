@@ -1,7 +1,7 @@
-# Project: Xolas Production-Grade Socket, Channels, Voice & Transmission Refactoring
+# Project: Xolas Production-Grade Socket, Channels, Voice & WebRTC Transmission Refactoring
 
 ## Architecture
-The application is a Discord-like communication desktop & web app featuring text channels, WebRTC voice channels, and screen streaming.
+The application is a Discord-like communication desktop & web app featuring text channels, WebRTC voice channels, and high-performance screen/media streaming.
 - **Server**: Node.js + TypeScript + Express + Socket.io + Prisma ORM (SQLite).
 - **Client**: React + TypeScript + Vite + Tailwind CSS + Socket.io-client + native browser WebRTC full-mesh + Electron for desktop capabilities.
 - **Signaling & State**: Socket.io transports chat messages, room membership, voice presence, and WebRTC SDP/ICE signaling for audio/video mesh.
@@ -19,89 +19,91 @@ The application is a Discord-like communication desktop & web app featuring text
 
 ---
 
-## Feature Inventory
-All features and issues mapped during Phase 0 Survey:
+## Phase 1 (Baseline Refactoring — Released v1.0.63)
+- M1 (Server Sockets & Channels): Completed & verified.
+- M2 (Client Sockets & Channels): Completed & verified.
+- M3 (Media & Voice Hardening): Completed & verified.
+- M4 (E2E Test Suites): 14 suites, 4 tiers, all passing 100%.
+- M5 (Release): v1.0.63 tagged and pushed.
+
+---
+
+## Phase 2: Production Refactoring of WebRTC Transmissions (Screen Share & Streaming)
+
+### Feature Inventory (Transmission Refactoring)
 | # | Feature / Issue | Description | Milestone | Source |
 |---|-----------------|-------------|-----------|--------|
-| 1 | Server Disconnect Reconnection Race | Old socket ping-timeout disconnect forcibly purging user from voiceRooms and resetting new active socket voice state | M1 | Survey (Explorer 1) |
-| 2 | Socket Auth Approval Verification | Server auth middleware selects `isApproved` but fails to reject unapproved/rejected accounts | M1 | Survey (Explorer 1) |
-| 3 | Safe Async Handlers in Sockets | Wrap `join-voice` and other async DB lookups in try/catch to prevent unhandled rejections / server crashes | M1 | Survey (Explorer 1) |
-| 4 | WebRTC Signaling Relays Room Verification | Verify sender is an active member in target voice room before forwarding SDP/ICE/screen requests | M1 | Survey (Explorer 1) |
-| 5 | Server-side `leave-server` Support | Allow client to leave server rooms to prevent monotonic room accumulation on server switching | M1 | Survey (Explorer 1 & 2) |
-| 6 | Client Channel Reconnection Rejoin | `MessageArea.tsx` missing socket `connect` listener, dropping incoming messages on reconnect | M2 | Survey (Explorer 2) |
-| 7 | Client Reconnection Lifecycle State | `SocketContext` lacking `connect_error`, `reconnect`, `reconnect_failed` handling & UI feedback | M2 | Survey (Explorer 2) |
-| 8 | Client Stale Closures in Role Handlers | `App.tsx` role/user handlers capturing stale `user` and `token` closures | M2 | Survey (Explorer 2) |
-| 9 | Client Active Server Room Cleanup | Emit `leave-server` on server switch to prevent duplicate broadcasts | M2 | Survey (Explorer 2) |
-| 10| Dead Listener Cleanup | Remove dead `member-joined` listener in `App.tsx` | M2 | Survey (Explorer 2) |
-| 11| Screen Share ID Prefix Bug | `watchScreenShare` regex `/^screen-/` fails on `remote-screen-<id>`, breaking screen viewing | M3 | Survey (Explorer 3) |
-| 12| Logout Media & Process Cleanup | `AuthContext` logout leaving mic tracks, RTCPeerConnections, and `wasapi-loopback.exe` orphaned | M3 | Survey (Explorer 3) |
-| 13| DOM Audio Element & Context Leak | Reconnecting peers leaking `<audio>` elements in `#xolas-remote-audio-container` and AudioContexts | M3 | Survey (Explorer 3) |
-| 14| Screen Audio Cutoff in Grid View | Screen share audio tied to spotlight video DOM element; lost when switching to grid view | M3 | Survey (Explorer 3) |
-| 15| Voice Signaling Offer Collision & Sync | Glare/collision handling in `handleVoicePeerJoined` and voice state re-sync on socket reconnect | M3 | Survey (Explorer 3) |
-| 16| Automated Test Infrastructure | Opaque-box automated test suite for socket events, channel joins, chat, and voice/screen signaling | M4 | Survey (E2E Track) |
-| 17| Final Build, Hardening & Release Protocol | 100% test pass, adversarial audit, version bump, commit, push, git tag per GEMINI.md | M5 | User Request & GEMINI.md |
+| T1 | Room Isolation in WebRTC Signaling | Server forwards SDP/ICE/request-screen without verifying `targetUserId` is present in `voiceRooms.get(channelId)` | TM1 | Survey (Explorer T2) |
+| T2 | Multi-Socket Glare & SDP Collision | `sendToUser` broadcasts WebRTC signals to all active sockets of a user, causing concurrent answers and `InvalidStateError` | TM1 | Survey (Explorer T2) |
+| T3 | Race Condition & Ghost Participants in `join-voice` | Async `prisma.user.findUnique` before setting `socket.currentVoice` leaves ghost entries in `voiceRooms` on rapid channel switches | TM1 | Survey (Explorer T2) |
+| T4 | Screen Share State Loss on Reconnect | Server ignores `isScreenSharing` and `screenStreamId` in `join-voice`, resetting active broadcast state on transient reconnects | TM1 | Survey (Explorer T2) |
+| T5 | Duplicate State Broadcasts | `voice-user-state` emits `voice-user-state-updated` to both channel room and server room | TM1 | Survey (Explorer T2) |
+| T6 | DOM `<video>` Element Unmount Leak | `ParticipantTile.tsx` `useEffect` lacks cleanup return (`el.srcObject = null; el.pause()`), leaking GPU decoders | TM2 | Survey (Explorer T1, T3) |
+| T7 | Screen Share Abrupt Drop on Monitor Sleep/UAC | `handleTrackEnded` in `VoiceContext.tsx` only attempts recovery for window shares, dropping monitor shares on transient events | TM2 | Survey (Explorer T3) |
+| T8 | WASAPI Audio Destination Track Leak | `createIsolatedProcessAudioTrack` destination track is never stopped with `track.stop()`, leaking Chromium audio pipelines | TM2 | Survey (Explorer T3) |
+| T9 | `MediaStream` GC Churn in `syncVoiceState` | Allocating `new MediaStream` on every voice state tick (every 30ms) causes GC spikes and breaks referential equality | TM2 | Survey (Explorer T1, T3) |
+| T10| React State Desync in `cleanupPeer` | `cleanupPeer` deletes peer connection and refs but never calls `syncVoiceState()`, leaving phantom participants in UI | TM2 | Survey (Explorer T1) |
+| T11| `watchScreenShare` Bypass in Grid View | Grid participant tile invokes raw state setter instead of `watchScreenShare`, failing to send `request-screen-stream` | TM2 | Survey (Explorer T1) |
+| T12| Audio Sender Collision on Device Switch | `setSelectedAudioDeviceId` finds first audio sender, which may overwrite screen audio sender with microphone track | TM2 | Survey (Explorer T1) |
+| T13| Screen Share Termination on Channel Switch | Switching voice channels without leaving does not terminate active screen share, leaking stream to new channel | TM2 | Survey (Explorer T1) |
+| T14| SDP Bandwidth Header Duplication | Incompatible duplicate `b=AS` and `b=TIAS` headers injected into SDP without stripping existing entries | TM2 | Survey (Explorer T1) |
+| T15| Automated WebRTC Transmission Test Suite | Test suite verifying signaling validation, track cleanup, error recovery, and resource teardown | TM3 | Survey (Explorer T3) |
+| T16| Release Protocol & Finalization | Dual Reviewers, Dual Challengers, Forensic Auditor, Build Validation, Version Patch Bump, Commit, Push, Tag | TM4 | GEMINI.md |
 
 ---
 
-## Milestones
+## Phase 2 Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Server-Side Socket & Channels Robustness | Fix reconnect disconnect race in `chatHandler.ts`, enforce auth `isApproved`, wrap async DB queries in try/catch, add `leave-server`, validate signaling room membership | none | DONE |
-| M2 | Client-Side Socket & Channel Lifecycle | Reconnection re-joining in `MessageArea.tsx`, `SocketContext` reconnect states, fix stale closures in `App.tsx`, emit `leave-server`, prune dead listeners | none | DONE |
-| M3 | WebRTC Voice & Screen Transmission Hardening | Fix `watchScreenShare` prefix bug, logout media/process teardown, DOM `<audio>` tag leak pruning, background screen audio in grid view, signaling collision & reconnect sync | none | DONE |
-| M4 | E2E & Integration Testing Track | Automated test runner and multi-tier test cases verifying socket connection, channel operations, voice/screen signaling, reconnection isolation, and leak prevention | none | DONE |
-| M5 | Final Integration, 100% E2E Pass, Hardening & Release | Verify 100% E2E test pass, adversarial verification, client & server build validation, version bump in `package.json` & `client/package.json`, git commit, push main, git tag v1.0.X | M1, M2, M3, M4 | IN_PROGRESS |
+| TM1 | Server Transmission Signaling & Room Concurrency | Fix room isolation check for targetUserId in `chatHandler.ts`, resolve multi-tab glare, fix `join-voice` async race condition, preserve screen share state on reconnect, eliminate duplicate state emissions | none | DONE (Verified build & 14 test suites passed) |
+| TM2 | Client WebRTC Transmission & Track Lifecycle | Add `<video>` unmount cleanup in `ParticipantTile.tsx`, stop monitor share abrupt drops in `handleTrackEnded`, stop WASAPI tracks explicitly, eliminate `MediaStream` churn in `syncVoiceState`, call `syncVoiceState` in `cleanupPeer`, fix grid `watchScreenShare`, guard audio sender device switch, stop screen on channel switch, sanitize SDP bandwidth | none | DONE (Verified client build passed with code 0) |
+| TM3 | Automated Transmission Test Suite | Implement headless WebRTC signaling and media lifecycle unit & integration tests covering room isolation, multi-socket glare, track termination, resource cleanup, and reconnection resilience | TM1, TM2 | DONE (16 suites across 4 tiers passing 100%) |
+| TM4 | Multi-Agent Verification, Hardening & Release | 2 Reviewers (APPROVE), 2 Challengers (PASS), Forensic Auditor (CLEAN), client & server builds pass, version bump (`package.json` & `client/package.json`), git commit, push, git tag v1.0.X | TM1, TM2, TM3 | DONE (v1.0.64 validated, 16 test suites & adversarial probes passed 100%) |
 
 ---
 
-## Interface Contracts
+## Interface Contracts (Phase 2 Additions)
 
-### 1. Client ↔ Server Socket Events Contract (Preserved & Enhanced)
-- `join-channel`: `(channelId: string)`
-- `leave-channel`: `(channelId: string)`
-- `join-server`: `(serverId: string)`
-- `leave-server`: `(serverId: string)` — New backward-compatible server event to cleanly depart `server:${serverId}`
-- `send-message`: `(data: { serverId: string; channelId: string; content?: string; fileUrl?: string; fileName?: string; fileType?: string; fileSize?: number; fileExtension?: string; tempId?: string })`
-- `new-message`: `(message: Message)`
-- `join-voice`: `(data: { serverId: string; channelId: string; isMuted?: boolean; isScreenSharing?: boolean; screenStreamId?: string | null })`
-- `leave-voice`: `(data: { channelId: string; serverId: string })`
-- `voice-peer-joined`: `(data: { channelId: string; userId: string; username?: string; avatarUrl?: string; isMuted?: boolean; isScreenSharing?: boolean; screenStreamId?: string | null })`
-- `voice-peer-left`: `(data: { channelId: string; userId: string })`
-- `voice-user-state`: `(data: { channelId: string; serverId: string; isMuted?: boolean; isDeafened?: boolean; isScreenSharing?: boolean; screenStreamId?: string | null; isSpeaking?: boolean })`
-- `voice-user-state-updated`: `(data: { channelId: string; userId: string; ... })`
-- `webrtc-offer`: `(data: { toUserId: string; channelId?: string; offer: RTCSessionDescriptionInit })`
-- `webrtc-answer`: `(data: { toUserId: string; channelId?: string; answer: RTCSessionDescriptionInit })`
-- `webrtc-ice-candidate`: `(data: { toUserId: string; channelId?: string; candidate: RTCIceCandidateInit })`
-- `request-screen-stream`: `(data: { channelId: string; targetUserId?: string; toUserId: string })`
+### 1. Signaling Target Room Isolation (Server)
+For all WebRTC signaling events (`webrtc-offer`, `webrtc-answer`, `webrtc-ice-candidate`, `request-screen-stream`):
+- Sender MUST be in `voice:${channelId}`.
+- Target (`toUserId` / `targetUserId`) MUST be in `voiceRooms.get(channelId)`.
+- If target is not present in the channel, discard message immediately with debug log.
 
-### 2. Disconnect Rule (Server)
-When a socket disconnects:
-- Remove socket from `userSockets.get(userId)`.
-- If `socket.currentVoice` exists:
-  - Check if `userSockets.get(userId)` still has other active sockets that are currently in `voice:${channelId}`.
-  - ONLY IF no other active socket exists for that user in that voice channel, remove the user from `voiceRooms.get(channelId)` and broadcast `voice-peer-left`.
-  - Under NO circumstance should a disconnecting stale socket clear `currentVoice` on remaining active sockets.
+### 2. Screen Share Persistence Contract (Client ↔ Server)
+- On `join-voice`:
+  - Client sends `{ serverId, channelId, isMuted, isScreenSharing, screenStreamId }`.
+  - Server MUST store `isScreenSharing` and `screenStreamId` in the channel participant record and broadcast them in `voice-peer-joined`.
+- On `leave-voice` or disconnect:
+  - When the last active socket for a broadcasting user leaves, server MUST clear transmission record and emit `voice-user-state-updated` / `voice-peer-left`.
 
-### 3. Screen Share Target ID Contract (Client)
-- `watchScreenShare(shareId)`:
-  - Must strip all known prefixes (`remote-screen-`, `screen-`) using `shareId.replace(/^(remote-)?screen-/, '')` to reliably isolate `targetUserId`.
+### 3. Media Element Lifecycle Contract (Client DOM)
+- Any component binding `stream` or `videoTrack` to an HTML `<video>` or `<audio>` element MUST provide an unmount/cleanup effect:
+  ```typescript
+  return () => {
+    if (el) {
+      el.pause();
+      el.srcObject = null;
+    }
+  };
+  ```
+
+### 4. Audio Sender Disambiguation Contract (Client WebRTC)
+- When updating microphone track (`setSelectedAudioDeviceId`):
+  - Differentiate voice microphone sender from screen audio sender using track metadata or transceiver identity:
+    `const micSender = pc.getSenders().find((s) => s.track && s.track === localAudioTrackRef.current);`
 
 ---
 
 ## Code Layout
-- Server files owned by M1:
+- Server files owned by TM1:
   - `server/src/sockets/chatHandler.ts`
-  - `server/src/index.ts`
-- Client files owned by M2:
-  - `client/src/contexts/SocketContext.tsx`
-  - `client/src/components/chat/MessageArea.tsx`
-  - `client/src/App.tsx`
-- Media files owned by M3:
+  - `server/src/routes/admin.ts`
+- Client files owned by TM2:
   - `client/src/contexts/VoiceContext.tsx`
+  - `client/src/components/voice/ParticipantTile.tsx`
   - `client/src/components/voice/VoiceRoom.tsx`
-  - `client/src/contexts/AuthContext.tsx`
-- Test files owned by M4:
-  - `tests/` or `server/tests/` / `client/tests/` (autonomous test runner and suites)
-  - `TEST_INFRA.md`, `TEST_READY.md`
-- Finalization owned by M5:
-  - `package.json`, `client/package.json`, Git repository operations per GEMINI.md
+- Test files owned by TM3:
+  - `tests/` and test scripts
+- Release files owned by TM4:
+  - `package.json`, `client/package.json`, Git repository operations
