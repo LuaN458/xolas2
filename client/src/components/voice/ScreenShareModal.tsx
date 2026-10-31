@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { ScreenSource } from '../../types';
 import { useVoice, ScreenQualityOptions } from '../../contexts/VoiceContext';
-import { Monitor, X, AppWindow, Check, Sparkles, RefreshCw, Volume2, VolumeX, Gamepad2 } from 'lucide-react';
+import { Monitor, X, AppWindow, Check, Sparkles, RefreshCw, Volume2, VolumeX, Gamepad2, Zap, FileText } from 'lucide-react';
 
 interface ScreenShareModalProps {
   isOpen: boolean;
@@ -20,10 +20,20 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
   const [activeTab, setActiveTab] = useState<'screens' | 'windows'>('screens');
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
 
-  // Opções de Qualidade e Áudio (inicializadas a partir das preferências salvas localmente)
+  // Opções de Qualidade, Perfil e Áudio (inicializadas a partir das preferências salvas localmente)
   const [resolution, setResolution] = useState<'720p' | '1080p'>(screenQuality.resolution);
   const [fps, setFps] = useState<30 | 60>(screenQuality.fps);
   const [includeAudio, setIncludeAudio] = useState(screenQuality.includeAudio ?? true);
+  const [streamMode, setStreamMode] = useState<'fluidity' | 'balanced' | 'detail'>(
+    screenQuality.mode || 'fluidity'
+  );
+
+  const estimatedBitrateLabel = useMemo(() => {
+    if (resolution === '1080p') {
+      return fps === 60 ? '5.5 Mbps' : '3.8 Mbps';
+    }
+    return fps === 60 ? '3.2 Mbps' : '1.8 Mbps';
+  }, [resolution, fps]);
 
   // Sincronizar com as preferências ao abrir
   useEffect(() => {
@@ -31,32 +41,41 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
       setResolution(screenQuality.resolution);
       setFps(screenQuality.fps);
       setIncludeAudio(screenQuality.includeAudio ?? true);
+      setStreamMode(screenQuality.mode || 'fluidity');
     }
   }, [isOpen, screenQuality]);
 
   const handleResolutionChange = useCallback(
     (newRes: '720p' | '1080p') => {
       setResolution(newRes);
-      updateScreenQualityPreset({ resolution: newRes, fps, includeAudio });
+      updateScreenQualityPreset({ resolution: newRes, fps, includeAudio, mode: streamMode });
     },
-    [fps, includeAudio, updateScreenQualityPreset]
+    [fps, includeAudio, streamMode, updateScreenQualityPreset]
   );
 
   const handleFpsChange = useCallback(
     (newFps: 30 | 60) => {
       setFps(newFps);
-      updateScreenQualityPreset({ resolution, fps: newFps, includeAudio });
+      updateScreenQualityPreset({ resolution, fps: newFps, includeAudio, mode: streamMode });
     },
-    [resolution, includeAudio, updateScreenQualityPreset]
+    [resolution, includeAudio, streamMode, updateScreenQualityPreset]
+  );
+
+  const handleModeChange = useCallback(
+    (newMode: 'fluidity' | 'balanced' | 'detail') => {
+      setStreamMode(newMode);
+      updateScreenQualityPreset({ resolution, fps, includeAudio, mode: newMode });
+    },
+    [resolution, fps, includeAudio, updateScreenQualityPreset]
   );
 
   const handleToggleAudio = useCallback(() => {
     setIncludeAudio((prev) => {
       const next = !prev;
-      updateScreenQualityPreset({ resolution, fps, includeAudio: next });
+      updateScreenQualityPreset({ resolution, fps, includeAudio: next, mode: streamMode });
       return next;
     });
-  }, [resolution, fps, updateScreenQualityPreset]);
+  }, [resolution, fps, streamMode, updateScreenQualityPreset]);
 
   const fetchSources = async () => {
     setLoading(true);
@@ -96,8 +115,8 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
   const windows = sources.filter((s) => s.id.startsWith('window:'));
 
   const handleStartShare = () => {
-    updateScreenQualityPreset({ resolution, fps, includeAudio });
-    onSelectSource(selectedSourceId || undefined, { resolution, fps, includeAudio });
+    updateScreenQualityPreset({ resolution, fps, includeAudio, mode: streamMode });
+    onSelectSource(selectedSourceId || undefined, { resolution, fps, includeAudio, mode: streamMode });
     onClose();
   };
 
@@ -185,8 +204,51 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
             </button>
           </div>
 
-          {/* Seletores de Resolução e FPS de Alto Contraste */}
-          <div className="flex items-center space-x-2.5">
+          {/* Seletores de Perfil, Resolução e FPS */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Seletor de Perfil de Transmissão */}
+            <div className="flex items-center bg-obsidian-card p-1 rounded-xl border border-obsidian-border shadow-sm">
+              <button
+                type="button"
+                onClick={() => handleModeChange('fluidity')}
+                title="Fluidez máxima para jogos 3D dinâmicos (Valorant, CS2, etc.) sem quedas de FPS"
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center space-x-1.5 ${
+                  streamMode === 'fluidity'
+                    ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                    : 'text-obsidian-text-secondary hover:text-white'
+                }`}
+              >
+                <Gamepad2 className="w-3.5 h-3.5" />
+                <span>Fluidez (Jogos)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('balanced')}
+                title="Ajuste automático balanceado de taxa de quadros e resolução"
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center space-x-1.5 ${
+                  streamMode === 'balanced'
+                    ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                    : 'text-obsidian-text-secondary hover:text-white'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Equilibrado</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('detail')}
+                title="Prioriza nitidez estática máxima para textos, código ou documentos"
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center space-x-1.5 ${
+                  streamMode === 'detail'
+                    ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                    : 'text-obsidian-text-secondary hover:text-white'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Nitidez</span>
+              </button>
+            </div>
+
             <div className="flex items-center bg-obsidian-card p-1 rounded-xl border border-obsidian-border shadow-sm">
               <button
                 onClick={() => handleResolutionChange('720p')}
@@ -390,7 +452,15 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
           <div className="flex items-center space-x-2 text-xs text-obsidian-text-muted">
             <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
             <span>
-              Transmitindo em <strong>{resolution}</strong> a <strong>{fps} FPS</strong>
+              Transmitindo em <strong>{resolution}</strong> a <strong>{fps} FPS</strong> •{' '}
+              <span className="text-emerald-400 font-medium">
+                {streamMode === 'fluidity'
+                  ? 'Fluidez Máxima'
+                  : streamMode === 'balanced'
+                  ? 'Equilibrado'
+                  : 'Nitidez'}
+              </span>{' '}
+              <span className="font-mono text-obsidian-text-secondary">({estimatedBitrateLabel})</span>
             </span>
           </div>
 

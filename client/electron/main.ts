@@ -34,11 +34,13 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('force-high-performance-gpu');
+app.commandLine.appendSwitch('webrtc-max-cpu-consumption-percentage', '100');
 app.commandLine.appendSwitch('enable-webrtc-hw-encoding');
 app.commandLine.appendSwitch('enable-webrtc-hw-decoding');
 app.commandLine.appendSwitch(
   'enable-features',
-  'AllowWgcScreenCapturer,AllowWgcWindowCapturer,MediaFoundationD3D11VideoCapture,MediaFoundationVideoEncodeAcceleration,MediaFoundationVideoDecodeAcceleration,D3D11VideoDecoder,PlatformHEVCDecoderSupport'
+  'AllowWgcScreenCapturer,AllowWgcWindowCapturer,MediaFoundationD3D11VideoCapture,MediaFoundationVideoEncodeAcceleration,MediaFoundationVideoDecodeAcceleration,D3D11VideoDecoder,PlatformHEVCDecoderSupport,ZeroCopyTabCapture,WebRtcUseMinMaxVEADimensions'
 );
 
 const __filename = fileURLToPath(import.meta.url);

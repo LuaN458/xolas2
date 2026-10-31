@@ -15,6 +15,7 @@ export interface ScreenQualityOptions {
   resolution: '720p' | '1080p';
   fps: 30 | 60;
   includeAudio?: boolean;
+  mode?: 'fluidity' | 'balanced' | 'detail';
 }
 
 export interface ActiveParticipant {
@@ -172,6 +173,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     resolution: initialSettings.screenResolution,
     fps: initialSettings.screenFps,
     includeAudio: initialSettings.screenIncludeAudio,
+    mode: initialSettings.screenStreamMode || 'fluidity',
   });
   const [selectedAudioDeviceId, setSelectedAudioDeviceIdState] = useState<string>(
     initialSettings.selectedAudioDeviceId
@@ -209,6 +211,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     resolution: initialSettings.screenResolution,
     fps: initialSettings.screenFps,
     includeAudio: initialSettings.screenIncludeAudio,
+    mode: initialSettings.screenStreamMode || 'fluidity',
   });
 
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -524,13 +527,43 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!sdp) return sdp;
       const currentQuality = quality || screenQualityRef.current;
       const is1080 = currentQuality.resolution === '1080p';
+      const is60fps = currentQuality.fps === 60;
 
-      // Parâmetros adaptativos de vídeo:
-      // min-bitrate suficiente para evitar congelamento durante quedas temporárias de rede
-      const minVideoBitrate = is1080 ? 800 : 500;
-      const startVideoBitrate = is1080 ? 3000 : 1800;
-      const maxVideoBitrate = is1080 ? 7000 : 4000;
-      const bAsBandwidth = is1080 ? 7000 : 4000;
+      // Parâmetros adaptativos de vídeo calibrados para WebRTC Mesh:
+      // 1080p 60fps: 5500 kbps (início suave 2200 kbps, min 1200 kbps para não congelar)
+      // 1080p 30fps: 3800 kbps (início suave 1800 kbps, min 800 kbps)
+      // 720p 60fps: 3200 kbps (início suave 1800 kbps, min 800 kbps)
+      // 720p 30fps: 1800 kbps (início suave 1000 kbps, min 500 kbps)
+      let minVideoBitrate = 800;
+      let startVideoBitrate = 1800;
+      let maxVideoBitrate = 3800;
+      let bAsBandwidth = 3800;
+
+      if (is1080) {
+        if (is60fps) {
+          minVideoBitrate = 1200;
+          startVideoBitrate = 2200;
+          maxVideoBitrate = 5500;
+          bAsBandwidth = 5500;
+        } else {
+          minVideoBitrate = 800;
+          startVideoBitrate = 1800;
+          maxVideoBitrate = 3800;
+          bAsBandwidth = 3800;
+        }
+      } else {
+        if (is60fps) {
+          minVideoBitrate = 800;
+          startVideoBitrate = 1800;
+          maxVideoBitrate = 3200;
+          bAsBandwidth = 3200;
+        } else {
+          minVideoBitrate = 500;
+          startVideoBitrate = 1000;
+          maxVideoBitrate = 1800;
+          bAsBandwidth = 1800;
+        }
+      }
 
       const lines = sdp.split('\r\n');
       let currentSection: 'none' | 'audio' | 'video' = 'none';
@@ -546,7 +579,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } else if (line.startsWith('m=video ')) {
           currentSection = 'video';
           result.push(line);
-          // Injetar b=AS e b=TIAS para sinalizar largura de banda ao WebRTC
+          // Injetar b=AS e b=TIAS na seção de vídeo conforme RFC 4566
           result.push(`b=AS:${bAsBandwidth}`);
           result.push(`b=TIAS:${bAsBandwidth * 1000}`);
           continue;
@@ -555,11 +588,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (currentSection === 'video') {
-          // Injetar limites adaptativos nos codecs de vídeo (sem travar em 2500 kbps mínimo)
+          // Injetar limites adaptativos nos codecs VP8/VP9 (evitar H.264 para não violar RFC 6184)
           if (
             line.startsWith('a=fmtp:') &&
             !line.includes('apt=') &&
-            !line.includes('x-google-max-bitrate')
+            !line.includes('x-google-max-bitrate') &&
+            (line.toLowerCase().includes('vp8') || line.toLowerCase().includes('vp9'))
           ) {
             result.push(
               `${line};x-google-min-bitrate=${minVideoBitrate};x-google-start-bitrate=${startVideoBitrate};x-google-max-bitrate=${maxVideoBitrate}`
@@ -615,7 +649,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {}
   }, []);
 
-  // Configura o RTCRtpSender de vídeo para priorizar codificação por GPU (H.264) e manter reprodução suave
+  // Configura o RTCRtpSender de vídeo para priorizar codificação por GPU (H.264) e manter reprodução suave a 60 FPS
   const configureScreenVideoSender = useCallback(
     async (pc: RTCPeerConnection, sender: RTCRtpSender, quality: ScreenQualityOptions) => {
       try {
@@ -630,19 +664,38 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             transceiver &&
             typeof transceiver.setCodecPreferences === 'function'
           ) {
-            const h264Codecs = capabilities.codecs.filter(
-              (c) => c.mimeType.toLowerCase() === 'video/h264'
+            // Priorizar H.264 com packetization-mode=1 (aceleração por hardware GPU NVENC / QuickSync)
+            const h264Mode1 = capabilities.codecs.filter(
+              (c) =>
+                c.mimeType.toLowerCase() === 'video/h264' &&
+                c.sdpFmtpLine?.includes('packetization-mode=1')
+            );
+            const h264Other = capabilities.codecs.filter(
+              (c) =>
+                c.mimeType.toLowerCase() === 'video/h264' &&
+                !c.sdpFmtpLine?.includes('packetization-mode=1')
+            );
+            const vp8Codecs = capabilities.codecs.filter(
+              (c) => c.mimeType.toLowerCase() === 'video/vp8'
             );
             const otherCodecs = capabilities.codecs.filter(
-              (c) => c.mimeType.toLowerCase() !== 'video/h264'
+              (c) =>
+                c.mimeType.toLowerCase() !== 'video/h264' &&
+                c.mimeType.toLowerCase() !== 'video/vp8'
             );
-            if (h264Codecs.length > 0) {
-              transceiver.setCodecPreferences([...h264Codecs, ...otherCodecs]);
+
+            if (h264Mode1.length > 0 || vp8Codecs.length > 0) {
+              transceiver.setCodecPreferences([
+                ...h264Mode1,
+                ...h264Other,
+                ...vp8Codecs,
+                ...otherCodecs,
+              ]);
             }
           }
         }
       } catch (err) {
-        console.warn('Não foi possível priorizar codec H264 no transceiver:', err);
+        console.warn('Não foi possível priorizar codecs no transceiver:', err);
       }
 
       try {
@@ -651,11 +704,30 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           params.encodings = [{}];
         }
         const is1080 = quality.resolution === '1080p';
-        const targetBitrate = is1080 ? 7_000_000 : 4_000_000;
+        const is60fps = quality.fps === 60;
         const targetFps = quality.fps || 60;
 
-        // 'maintain-resolution' garante que o WebRTC nunca rebaixe 1080p para 720p sob variações de banda
-        (params as any).degradationPreference = 'maintain-resolution';
+        // Bitrates calibrados (evita bufferbloat e congestionamento em redes residenciais P2P)
+        let targetBitrate = 3_200_000;
+        if (is1080) {
+          targetBitrate = is60fps ? 5_500_000 : 3_800_000;
+        } else {
+          targetBitrate = is60fps ? 3_200_000 : 1_800_000;
+        }
+
+        // degradationPreference:
+        // 'maintain-framerate' (padrão): NUNCA derruba o FPS em jogos e cenas 3D, garantindo fluidez contínua a 60 FPS
+        // 'balanced': ajuste equilibrado automático
+        // 'maintain-resolution': prioriza nitidez estática máxima em textos/código
+        const streamMode = quality.mode || 'fluidity';
+        const degradationPref =
+          streamMode === 'detail'
+            ? 'maintain-resolution'
+            : streamMode === 'balanced'
+            ? 'balanced'
+            : 'maintain-framerate';
+
+        (params as any).degradationPreference = degradationPref;
         params.encodings[0].scaleResolutionDownBy = 1.0;
         params.encodings[0].maxBitrate = targetBitrate;
         params.encodings[0].maxFramerate = targetFps;
@@ -678,6 +750,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       try {
         makingOfferRef.current.set(remoteUserId, true);
+
+        // Configurar senders e preferências de codec ANTES de gerar a oferta SDP
+        const senders = screenSendersRef.current.get(remoteUserId) || [];
+        senders.forEach((s) => {
+          if (s.track?.kind === 'video') {
+            configureScreenVideoSender(pc, s, screenQualityRef.current);
+          } else if (s.track?.kind === 'audio') {
+            configureScreenAudioSender(s);
+          }
+        });
+
         const offer = await pc.createOffer();
         if (pc.signalingState !== 'stable') return;
         try {
@@ -687,13 +770,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           await pc.setLocalDescription(offer);
         }
 
-        // Reaplicar parâmetros de bitrate/framerate após negociação local
-        const senders = screenSendersRef.current.get(remoteUserId) || [];
+        // Reconfirmar parâmetros após negociação local
         senders.forEach((s) => {
           if (s.track?.kind === 'video') {
             configureScreenVideoSender(pc, s, screenQualityRef.current);
-          } else if (s.track?.kind === 'audio') {
-            configureScreenAudioSender(s);
           }
         });
 
@@ -1289,6 +1369,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (opts.includeAudio !== undefined) {
         saveUserSetting('screenIncludeAudio', opts.includeAudio);
       }
+      if (opts.mode) {
+        saveUserSetting('screenStreamMode', opts.mode);
+      }
 
       // Atualizar em tempo real se já houver uma transmissão ativa
       if (screenStreamRef.current) {
@@ -1331,6 +1414,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         resolution: settings.screenResolution,
         fps: settings.screenFps,
         includeAudio: settings.screenIncludeAudio,
+        mode: settings.screenStreamMode || 'fluidity',
       };
       screenQualityRef.current = updatedQuality;
       setScreenQuality(updatedQuality);
@@ -2458,7 +2542,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const startScreenShare = useCallback(
     async (sourceId?: string, quality?: ScreenQualityOptions) => {
       try {
-        const activeQuality = quality || { resolution: '1080p', fps: 60, includeAudio: true };
+        const activeQuality = quality || { resolution: '1080p', fps: 60, includeAudio: true, mode: 'fluidity' };
         screenQualityRef.current = activeQuality;
         setScreenQuality(activeQuality);
 
@@ -2485,13 +2569,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             maxWidth: width,
             maxHeight: height,
             maxFrameRate: fps,
+            minFrameRate: Math.min(fps, 30),
           };
 
           // Para monitores inteiros (screen:), fixar minWidth e minHeight para forçar o Chromium a entregar exatamente 1080p ou 720p
           if (!isWindow) {
             videoMandatory.minWidth = width;
             videoMandatory.minHeight = height;
-            videoMandatory.minFrameRate = Math.min(30, fps);
           }
 
           try {
@@ -2510,12 +2594,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const fallbackMandatory: any = {
               chromeMediaSource: 'desktop',
               chromeMediaSourceId: sourceId,
+              maxWidth: width,
+              maxHeight: height,
+              maxFrameRate: fps,
+              minFrameRate: Math.min(fps, 30),
             };
-            if (!isWindow) {
-              fallbackMandatory.maxWidth = width;
-              fallbackMandatory.maxHeight = height;
-              fallbackMandatory.maxFrameRate = fps;
-            }
             stream = await (navigator.mediaDevices as any).getUserMedia({
               audio: false,
               video: {

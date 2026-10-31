@@ -15,6 +15,7 @@ export interface UserAudioSettings {
   screenResolution: '720p' | '1080p';
   screenFps: 30 | 60;
   screenIncludeAudio: boolean;
+  screenStreamMode: 'fluidity' | 'balanced' | 'detail';
   keybindings: UserKeybindings;
 }
 
@@ -38,6 +39,7 @@ export const DEFAULT_USER_SETTINGS: UserAudioSettings = {
   screenResolution: '1080p',
   screenFps: 60,
   screenIncludeAudio: true,
+  screenStreamMode: 'fluidity',
   keybindings: DEFAULT_USER_KEYBINDINGS,
 };
 
@@ -170,6 +172,9 @@ function sanitizeUserSettings(parsed: any): UserAudioSettings {
     screenResolution: parsed?.screenResolution === '720p' ? '720p' : '1080p',
     screenFps: fpsVal === 30 ? 30 : 60,
     screenIncludeAudio: parsed?.screenIncludeAudio !== undefined ? Boolean(parsed.screenIncludeAudio) : DEFAULT_USER_SETTINGS.screenIncludeAudio,
+    screenStreamMode: ['fluidity', 'balanced', 'detail'].includes(parsed?.screenStreamMode)
+      ? parsed.screenStreamMode
+      : 'fluidity',
     keybindings,
   };
 }
