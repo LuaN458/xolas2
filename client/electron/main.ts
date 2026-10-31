@@ -8,6 +8,20 @@ import { autoUpdater } from 'electron-updater';
 // Garantir identificação consistente do diretório userData em AppData/Xolas
 app.setName('Xolas');
 
+// Garantir instância única do aplicativo e trazer à frente se já aberto
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 // Permitir reprodução automática de áudio e vídeo WebRTC sem bloqueio de gesto
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -33,6 +47,7 @@ const __dirname = path.dirname(__filename);
 let mainWindow: BrowserWindow | null = null;
 let audioCaptureProcess: ChildProcess | null = null;
 let hotkeyHelperProcess: ChildProcess | null = null;
+let isQuittingForUpdate = false;
 
 function stopProcessAudioCapture() {
   if (audioCaptureProcess) {
@@ -242,7 +257,10 @@ ipcMain.handle('check-for-updates', async () => {
 });
 
 ipcMain.handle('restart-and-install', () => {
-  console.log('[AutoUpdater] Executando restart-and-install solicitado pelo usuário');
+  console.log('[AutoUpdater] Executando restart-and-install com reinicialização forçada');
+  if (isQuittingForUpdate) return;
+  isQuittingForUpdate = true;
+
   stopProcessAudioCapture();
   stopHotkeyHelper();
   try {
@@ -257,18 +275,20 @@ ipcMain.handle('restart-and-install', () => {
   }
 
   try {
-    // 1. Destruir janelas imediatamente para liberar arquivos e travas de DLL do Windows
+    // 1. Ocultar janelas para resposta visual imediata sem abortar o ciclo do processo
     const windows = BrowserWindow.getAllWindows();
     for (const win of windows) {
       try {
-        win.removeAllListeners('close');
-        win.destroy();
+        win.hide();
       } catch {}
     }
 
-    // 2. Executar quitAndInstall com auto-restart obrigatório
-    // isSilent = false permite que o instalador NSIS mostre a barra rápida e use runAfterFinish com privilégios normais do Windows
-    autoUpdater.quitAndInstall(false, true);
+    // 2. Executar quitAndInstall com modo silencioso e forceRunAfter ativado
+    // isSilent = true instala em background em ~2s sem popups do Windows
+    // isForceRunAfter = true instrui o electron-updater e NSIS a reabrir a aplicação
+    setImmediate(() => {
+      autoUpdater.quitAndInstall(true, true);
+    });
   } catch (err) {
     console.error('[AutoUpdater] Falha ao executar quitAndInstall:', err);
     try {
@@ -622,6 +642,9 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (isQuittingForUpdate) {
+    return;
+  }
   stopProcessAudioCapture();
   stopHotkeyHelper();
   if (process.platform !== 'darwin') {

@@ -1,6 +1,12 @@
 ; Script de Personalização do Instalador NSIS do Xolas
 ; Aplica tema Obsidian Dark (#08090c / #12141a), Dark Mode nativo do Windows e barra de progresso Índigo (#6366f1)
 
+!macro customInit
+  ; Garantir que processos auxiliares estejam encerrados antes de substituir arquivos
+  !insertmacro KILL_PROCESS "wasapi-loopback.exe" 1
+  !insertmacro KILL_PROCESS "hotkey-helper.exe" 1
+!macroend
+
 !macro customInstall
   ${IfNot} ${Silent}
     ; 1. Ativar Dark Mode na barra de título da janela do instalador (Windows 10 Build 19041+ e Windows 11)
@@ -28,11 +34,13 @@
       ${EndIf}
     ${EndIf}
   ${EndIf}
-!macroend
 
-!macro customInstallEnd
-  ; Garante que o aplicativo sempre reabra após a instalação/atualização, mesmo em modo silencioso
-  ${If} ${Silent}
+  ; FORÇAR A REINICIALIZAÇÃO DO APLICATIVO APÓS A ATUALIZAÇÃO:
+  ; Sempre que for uma atualização (tanto no modo silencioso automático quanto no reinício manual),
+  ; garante que o novo executável seja iniciado diretamente pelo instalador
+  ${If} ${isUpdated}
     Exec '"$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
+    ; Limpa $launchLink para evitar que o electron-builder tente executar uma segunda vez via atalho .lnk defeituoso
+    StrCpy $launchLink ""
   ${EndIf}
 !macroend
