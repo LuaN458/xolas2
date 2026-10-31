@@ -29,17 +29,21 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
   );
 
   const estimatedBitrateLabel = useMemo(() => {
+    if (streamMode === 'detail') {
+      return resolution === '1080p' ? '3.6 Mbps (30 FPS Fixo)' : '2.0 Mbps (30 FPS Fixo)';
+    }
     if (resolution === '1080p') {
       return fps === 60 ? '5.5 Mbps' : '3.8 Mbps';
     }
     return fps === 60 ? '3.2 Mbps' : '1.8 Mbps';
-  }, [resolution, fps]);
+  }, [resolution, fps, streamMode]);
 
   // Sincronizar com as preferências ao abrir
   useEffect(() => {
     if (isOpen) {
       setResolution(screenQuality.resolution);
-      setFps(screenQuality.fps);
+      const isDetail = screenQuality.mode === 'detail';
+      setFps(isDetail ? 30 : screenQuality.fps);
       setIncludeAudio(screenQuality.includeAudio ?? true);
       setStreamMode(screenQuality.mode || 'fluidity');
     }
@@ -56,7 +60,12 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
   const handleFpsChange = useCallback(
     (newFps: 30 | 60) => {
       setFps(newFps);
-      updateScreenQualityPreset({ resolution, fps: newFps, includeAudio, mode: streamMode });
+      // Se o usuário selecionar 60 FPS manualmente, altera de Nitidez (30 FPS) para Equilibrado ou Fluidez
+      const newMode = newFps === 60 && streamMode === 'detail' ? 'balanced' : streamMode;
+      if (newMode !== streamMode) {
+        setStreamMode(newMode);
+      }
+      updateScreenQualityPreset({ resolution, fps: newFps, includeAudio, mode: newMode });
     },
     [resolution, includeAudio, streamMode, updateScreenQualityPreset]
   );
@@ -64,7 +73,12 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
   const handleModeChange = useCallback(
     (newMode: 'fluidity' | 'balanced' | 'detail') => {
       setStreamMode(newMode);
-      updateScreenQualityPreset({ resolution, fps, includeAudio, mode: newMode });
+      // No modo 'detail' (Nitidez), travar em 30 FPS para manter 100% dos detalhes sem drop de frames
+      const targetFps = newMode === 'detail' ? 30 : fps;
+      if (newMode === 'detail') {
+        setFps(30);
+      }
+      updateScreenQualityPreset({ resolution, fps: targetFps, includeAudio, mode: newMode });
     },
     [resolution, fps, includeAudio, updateScreenQualityPreset]
   );
@@ -237,7 +251,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleModeChange('detail')}
-                title="Prioriza nitidez estática máxima para textos, código ou documentos"
+                title="Prioriza nitidez estática máxima e clareza perfeita para textos e código (30 FPS Fixo)"
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center space-x-1.5 ${
                   streamMode === 'detail'
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
@@ -245,7 +259,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                 }`}
               >
                 <FileText className="w-3.5 h-3.5" />
-                <span>Nitidez</span>
+                <span>Nitidez (30 FPS)</span>
               </button>
             </div>
 

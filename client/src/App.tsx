@@ -8,8 +8,9 @@ import {
   getCachedServers,
   persistCachedServerDetails,
   persistCachedServers,
+  persistAuthSession,
 } from './lib/authStorage';
-import { Server, Channel, CustomRole } from './types';
+import { Server, Channel, CustomRole, User } from './types';
 
 import { ServerSidebar } from './components/layout/ServerSidebar';
 import { ChannelSidebar, VoiceParticipantInfo } from './components/layout/ChannelSidebar';
@@ -30,7 +31,7 @@ import { LoadingScreen } from './components/ui/LoadingScreen';
 import { MessageSquareText } from 'lucide-react';
 
 export const App: React.FC = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, setUser, token } = useAuth();
   const { socket } = useSocket();
   const { joinVoiceChannel, currentVoiceChannel } = useVoice();
 
@@ -350,6 +351,7 @@ export const App: React.FC = () => {
 
     const handleUserRoleUpdated = (data: {
       userId: string;
+      role?: string;
       customRoleId: string | null;
       customRole: CustomRole | null;
     }) => {
@@ -363,6 +365,7 @@ export const App: React.FC = () => {
                   ...m,
                   user: {
                     ...m.user,
+                    role: (data.role as any) || m.user.role,
                     customRoleId: data.customRoleId,
                     customRole: data.customRole,
                   },
@@ -371,6 +374,20 @@ export const App: React.FC = () => {
           ),
         };
       });
+
+      // Se for o próprio usuário logado, atualizar AuthContext e persistência local imediatamente
+      if (user && user.id === data.userId) {
+        const updatedUser: User = {
+          ...user,
+          role: (data.role as any) || user.role,
+          customRoleId: data.customRoleId,
+          customRole: data.customRole,
+        };
+        setUser(updatedUser);
+        if (token) {
+          persistAuthSession(token, updatedUser);
+        }
+      }
     };
 
     const handleRoleCreated = (data: { role: CustomRole }) => {
@@ -386,6 +403,17 @@ export const App: React.FC = () => {
       setRoles((prev) =>
         prev.map((r) => (r.id === data.role.id ? data.role : r))
       );
+      // Se o usuário logado possuir este cargo, atualizar suas permissões em tempo real!
+      if (user && user.customRoleId === data.role.id) {
+        const updatedUser: User = {
+          ...user,
+          customRole: data.role,
+        };
+        setUser(updatedUser);
+        if (token) {
+          persistAuthSession(token, updatedUser);
+        }
+      }
     };
 
     const handleRoleDeleted = (data: { roleId: string }) => {
@@ -470,6 +498,38 @@ export const App: React.FC = () => {
       redirectToGeneralChat();
     }
   }, [activeChannel, activeServerDetails, redirectToGeneralChat]);
+
+  // Efeito 3: Auto-reconexão no canal de voz após reload limpo da janela (Ctrl+R / F5)
+  const autoReconnectedVoiceRef = useRef(false);
+  useEffect(() => {
+    if (
+      autoReconnectedVoiceRef.current ||
+      !activeServerDetails?.channels ||
+      activeServerDetails.channels.length === 0
+    ) {
+      return;
+    }
+
+    try {
+      const raw = sessionStorage.getItem('xolas_auto_reconnect_voice');
+      if (raw) {
+        sessionStorage.removeItem('xolas_auto_reconnect_voice');
+        const parsed = JSON.parse(raw);
+        if (parsed?.channel?.id && Date.now() - (parsed.timestamp || 0) < 30000) {
+          const target = activeServerDetails.channels.find(
+            (c: Channel) => c.id === parsed.channel.id && c.type === 'VOICE'
+          );
+          if (target) {
+            autoReconnectedVoiceRef.current = true;
+            setActiveChannel(target);
+            joinVoiceChannel(target);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[App] Falha na auto-reconexão após reload:', err);
+    }
+  }, [activeServerDetails, joinVoiceChannel]);
 
   // Enviar mensagem de chat via WebSocket
   const handleSendMessage = (content: string, attachmentUrl?: string) => {

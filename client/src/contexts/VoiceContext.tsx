@@ -491,9 +491,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       pc.onicecandidate = null;
       pc.ontrack = null;
       pc.onconnectionstatechange = null;
+      pc.oniceconnectionstatechange = null;
       pc.close();
       peersRef.current.delete(peerId);
     }
+    reconnectAttemptsRef.current.delete(peerId);
     pendingCandidatesRef.current.delete(peerId);
     makingOfferRef.current.delete(peerId);
     screenSendersRef.current.delete(peerId);
@@ -703,25 +705,30 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!params.encodings || params.encodings.length === 0) {
           params.encodings = [{}];
         }
+        const streamMode = quality.mode || 'fluidity';
+        const isDetail = streamMode === 'detail';
         const is1080 = quality.resolution === '1080p';
         const is60fps = quality.fps === 60;
-        const targetFps = quality.fps || 60;
+        // No modo Nitidez, cravar taxa de quadros a 30 FPS para manter 100% dos detalhes sem drop de frames
+        const targetFps = isDetail ? 30 : (quality.fps || 60);
 
         // Bitrates calibrados (evita bufferbloat e congestionamento em redes residenciais P2P)
         let targetBitrate = 3_200_000;
-        if (is1080) {
-          targetBitrate = is60fps ? 5_500_000 : 3_800_000;
+        if (isDetail) {
+          // No modo Nitidez a 30 FPS, 3.6 Mbps entrega o dobro de bits por quadro para nitidez cristalina
+          targetBitrate = is1080 ? 3_600_000 : 2_200_000;
+        } else if (is1080) {
+          targetBitrate = is60fps ? 5_000_000 : 3_500_000;
         } else {
-          targetBitrate = is60fps ? 3_200_000 : 1_800_000;
+          targetBitrate = is60fps ? 3_000_000 : 1_800_000;
         }
 
         // degradationPreference:
         // 'maintain-framerate' (padrão): NUNCA derruba o FPS em jogos e cenas 3D, garantindo fluidez contínua a 60 FPS
         // 'balanced': ajuste equilibrado automático
         // 'maintain-resolution': prioriza nitidez estática máxima em textos/código
-        const streamMode = quality.mode || 'fluidity';
         const degradationPref =
-          streamMode === 'detail'
+          isDetail
             ? 'maintain-resolution'
             : streamMode === 'balanced'
             ? 'balanced'
@@ -825,9 +832,91 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [configureScreenVideoSender, configureScreenAudioSender]
   );
 
+  const reconnectAttemptsRef = useRef<Map<string, { count: number; timer?: any }>>(new Map());
+  const getOrCreatePeerConnectionRef = useRef<any>(null);
+
+  // Auto-recuperação WebRTC contra oscilações de rede, NAT timeout e conexões congeladas
+  const handlePeerConnectionIssue = useCallback(
+    (remoteUserId: string, channelId: string) => {
+      const pc = peersRef.current.get(remoteUserId);
+      if (!pc || !socket) return;
+
+      const current = reconnectAttemptsRef.current.get(remoteUserId) || { count: 0 };
+      if (current.timer) {
+        return; // Já há uma recuperação em andamento para este peer
+      }
+
+      console.warn(
+        `[WebRTC] Oscilação na conexão com ${remoteUserId} (conn: ${pc.connectionState}, ice: ${pc.iceConnectionState}). Agendando recuperação automática...`
+      );
+
+      const timer = window.setTimeout(async () => {
+        const activePc = peersRef.current.get(remoteUserId);
+        if (!activePc) {
+          reconnectAttemptsRef.current.delete(remoteUserId);
+          return;
+        }
+
+        // Se a conexão já se restabeleceu de forma autônoma
+        if (activePc.connectionState === 'connected' && activePc.iceConnectionState === 'connected') {
+          reconnectAttemptsRef.current.delete(remoteUserId);
+          return;
+        }
+
+        // 1. Tentar ICE Restart elegante
+        try {
+          console.log(`[WebRTC] Disparando ICE Restart para participante ${remoteUserId}...`);
+          makingOfferRef.current.set(remoteUserId, true);
+          const offer = await activePc.createOffer({ iceRestart: true });
+          await activePc.setLocalDescription(offer);
+          socket.emit('webrtc-offer', {
+            channelId,
+            toUserId: remoteUserId,
+            targetUserId: remoteUserId,
+            sdp: activePc.localDescription,
+            screenStreamId: screenStreamRef.current?.id || null,
+          });
+        } catch (err) {
+          console.warn(`[WebRTC] Falha no ICE restart para ${remoteUserId}:`, err);
+        } finally {
+          makingOfferRef.current.set(remoteUserId, false);
+        }
+
+        // 2. Se continuar em failed/disconnected após 4 segundos, recriar a RTCPeerConnection completamente do zero
+        const fallbackTimer = window.setTimeout(() => {
+          const freshPc = peersRef.current.get(remoteUserId);
+          if (
+            freshPc &&
+            (freshPc.connectionState === 'failed' ||
+              freshPc.connectionState === 'disconnected' ||
+              freshPc.iceConnectionState === 'failed' ||
+              freshPc.iceConnectionState === 'disconnected')
+          ) {
+            console.warn(
+              `[WebRTC] Conexão com ${remoteUserId} irrecuperável via ICE restart. Reconstruindo peer connection do zero...`
+            );
+            cleanupPeer(remoteUserId);
+            if (getOrCreatePeerConnectionRef.current) {
+              const { pc: newPc } = getOrCreatePeerConnectionRef.current(remoteUserId, channelId);
+              ensureScreenTracksForPeer(remoteUserId, newPc);
+              sendOffer(remoteUserId, channelId);
+            }
+          }
+          reconnectAttemptsRef.current.delete(remoteUserId);
+        }, 4000);
+
+        reconnectAttemptsRef.current.set(remoteUserId, { count: current.count + 1, timer: fallbackTimer });
+      }, 1200);
+
+      reconnectAttemptsRef.current.set(remoteUserId, { count: current.count, timer });
+    },
+    [socket, cleanupPeer, sendOffer, ensureScreenTracksForPeer]
+  );
+
   // Cria ou retorna a RTCPeerConnection para um participante remoto
   const getOrCreatePeerConnection = useCallback(
     (remoteUserId: string, channelId: string): { pc: RTCPeerConnection; isNew: boolean } => {
+      getOrCreatePeerConnectionRef.current = getOrCreatePeerConnection;
       const existing = peersRef.current.get(remoteUserId);
       if (existing && existing.connectionState !== 'closed') {
         if (screenStreamRef.current) {
@@ -949,15 +1038,22 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed') {
-          // Tentar reconexão ICE automática
-          sendOffer(remoteUserId, channelId);
+        const state = pc.connectionState;
+        if (state === 'failed' || state === 'disconnected') {
+          handlePeerConnectionIssue(remoteUserId, channelId);
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        const iceState = pc.iceConnectionState;
+        if (iceState === 'failed' || iceState === 'disconnected') {
+          handlePeerConnectionIssue(remoteUserId, channelId);
         }
       };
 
       return { pc, isNew: true };
     },
-    [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender, ensureScreenTracksForPeer]
+    [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender, ensureScreenTracksForPeer, handlePeerConnectionIssue]
   );
 
   // Configura detector de atividade de voz com Voice Activation Gate real (DSP / Web Audio estilo Discord)
@@ -1811,6 +1907,57 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [socket, user?.id, cleanupPeer, getOrCreatePeerConnection, sendOffer, syncVoiceState, ensureScreenTracksForPeer]);
 
+  // Watchdog periódico de integridade das conexões WebRTC na sala (auto-recuperação sem intervenção do admin)
+  useEffect(() => {
+    if (!currentVoiceChannel) return;
+
+    const interval = window.setInterval(() => {
+      if (!currentChannelRef.current) return;
+      const chId = currentChannelRef.current.id;
+
+      peersRef.current.forEach((pc, peerId) => {
+        const isConnBad = pc.connectionState === 'failed' || pc.connectionState === 'disconnected';
+        const isIceBad = pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected';
+        if (isConnBad || isIceBad) {
+          handlePeerConnectionIssue(peerId, chId);
+        }
+      });
+    }, 8000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [currentVoiceChannel, handlePeerConnectionIssue]);
+
+  // Limpeza graciosa ao fechar ou recarregar janela (Ctrl+R / F5) com preservação de reconexão
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (currentChannelRef.current) {
+        try {
+          sessionStorage.setItem(
+            'xolas_auto_reconnect_voice',
+            JSON.stringify({
+              channel: currentChannelRef.current,
+              timestamp: Date.now(),
+            })
+          );
+        } catch {}
+        try {
+          socket?.emit('leave-channel', currentChannelRef.current.id);
+          socket?.emit('leave-voice', {
+            channelId: currentChannelRef.current.id,
+            serverId: currentChannelRef.current.serverId,
+          });
+        } catch {}
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [socket]);
+
   // Conectar a um canal de voz com WebRTC Mesh nativo
   const joinVoiceChannel = useCallback(
     async (channel: Channel) => {
@@ -2546,10 +2693,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         screenQualityRef.current = activeQuality;
         setScreenQuality(activeQuality);
 
+        const isDetail = activeQuality.mode === 'detail';
         const is1080 = activeQuality.resolution === '1080p';
         const width = is1080 ? 1920 : 1280;
         const height = is1080 ? 1080 : 720;
-        const fps = activeQuality.fps;
+        // No modo Nitidez, cravar taxa de quadros a 30 FPS para manter alta densidade de detalhes
+        const fps = isDetail ? 30 : activeQuality.fps;
         const includeAudio = activeQuality.includeAudio !== false;
 
         // Encerrar captura de áudio de tela anterior antes de iniciar nova
@@ -2638,8 +2787,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const videoTrack = stream.getVideoTracks()[0];
         if (videoTrack) {
           try {
-            // Priorizar fluidez de movimento (60 FPS constantes em jogos 3D) em vez de travar frames
-            (videoTrack as any).contentHint = 'motion';
+            // Se for modo 'detail' (Nitidez), priorizar clareza de texto e resolução ('detail')
+            // Caso contrário, priorizar fluidez de movimento de jogos ('motion')
+            (videoTrack as any).contentHint = isDetail ? 'detail' : 'motion';
           } catch {}
           try {
             await videoTrack.applyConstraints({

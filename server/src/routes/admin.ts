@@ -2,7 +2,13 @@ import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware, adminMiddleware, AuthRequest } from '../middlewares/auth';
 import { ensureScalarString, isValidIdentifier, sanitizeText } from '../middlewares/security';
-import { notifyAdminsPendingUpdate, notifyUserApprovalStatus, getGlobalIO } from '../sockets/chatHandler';
+import {
+  notifyAdminsPendingUpdate,
+  notifyUserApprovalStatus,
+  getGlobalIO,
+  updateUserSocketPermissions,
+  syncUsersWithRole,
+} from '../sockets/chatHandler';
 
 const router = Router();
 
@@ -264,9 +270,15 @@ router.patch('/users/:id/role', async (req: AuthRequest, res: Response): Promise
     if (io) {
       io.emit('user:role-updated', {
         userId: updatedUser.id,
+        role: updatedUser.role,
         customRoleId: updatedUser.customRoleId,
         customRole: updatedUser.customRole,
       });
+      updateUserSocketPermissions(
+        updatedUser.id,
+        updatedUser.role,
+        updatedUser.customRole?.permissions || []
+      );
     }
 
     res.json({ success: true, user: updatedUser });
@@ -403,6 +415,7 @@ router.patch('/roles/:id', async (req: AuthRequest, res: Response): Promise<void
     const io = getGlobalIO();
     if (io) {
       io.emit('role:updated', { role: rolePayload });
+      syncUsersWithRole(id, rolePayload.permissions);
     }
 
     res.json({
@@ -483,9 +496,15 @@ router.patch('/users/:id/custom-role', async (req: AuthRequest, res: Response): 
     if (io) {
       io.emit('user:role-updated', {
         userId: updatedUser.id,
+        role: updatedUser.role,
         customRoleId: updatedUser.customRoleId,
         customRole: updatedUser.customRole,
       });
+      updateUserSocketPermissions(
+        updatedUser.id,
+        updatedUser.role,
+        updatedUser.customRole?.permissions || []
+      );
     }
 
     res.json({ success: true, user: updatedUser });

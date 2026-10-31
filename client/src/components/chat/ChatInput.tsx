@@ -15,6 +15,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -66,6 +67,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
     }
     setPendingFile(null);
     setPreviewUrl(null);
+    setUploadProgress(null);
     setUploadError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -206,10 +208,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
 
     let uploadedAttachmentUrl: string | undefined = undefined;
 
-    // Se houver anexo pendente, fazer upload com proteções antes de emitir a mensagem
+    // Se houver anexo pendente, fazer upload com proteções e barra de progresso antes de emitir a mensagem
     if (pendingFile) {
       try {
         setIsUploading(true);
+        setUploadProgress(0);
         setUploadError(null);
 
         const formData = new FormData();
@@ -219,10 +222,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
           headers: {
             'Content-Type': 'multipart/form-data',
           },
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total && progressEvent.total > 0) {
+              const percent = Math.min(
+                100,
+                Math.round((progressEvent.loaded * 100) / progressEvent.total)
+              );
+              setUploadProgress(percent);
+            }
+          },
         });
 
         if (response.data && response.data.url) {
           uploadedAttachmentUrl = response.data.url;
+          setUploadProgress(100);
         } else {
           throw new Error('Falha ao receber a URL do anexo.');
         }
@@ -243,6 +256,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
           }
         }
         setUploadError(errorMsg);
+        setUploadProgress(null);
         setIsUploading(false);
         return;
       } finally {
@@ -254,6 +268,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
 
     // Limpar estados após envio com sucesso
     setContent('');
+    setUploadProgress(null);
     handleCancelAttachment();
   };
 
@@ -284,7 +299,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
       {/* Miniatura de Pré-visualização da Imagem Anexada */}
       {pendingFile && previewUrl && (
         <div className="mb-2.5 p-2 bg-obsidian-surface border border-indigo-500/40 rounded-xl flex items-center justify-between animate-in fade-in slide-in-from-bottom-1 duration-150 shadow-lg shadow-indigo-500/5">
-          <div className="flex items-center space-x-3 overflow-hidden">
+          <div className="flex items-center space-x-3 overflow-hidden flex-1 mr-2">
             <div className="relative w-12 h-12 rounded-lg overflow-hidden border border-obsidian-border bg-obsidian-card shrink-0">
               <img
                 src={previewUrl}
@@ -292,16 +307,34 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
                 className="w-full h-full object-cover"
               />
             </div>
-            <div className="flex flex-col min-w-0">
+            <div className="flex flex-col min-w-0 flex-1">
               <span className="text-xs font-semibold text-obsidian-text-primary truncate">
                 {pendingFile.name || 'Captura de tela (Print)'}
               </span>
-              <span className="text-[10px] text-obsidian-text-muted">
-                {pendingFile.size < 1024 * 1024
-                  ? `${Math.max(1, Math.round(pendingFile.size / 1024))} KB`
-                  : `${(pendingFile.size / (1024 * 1024)).toFixed(1)} MB`}{' '}
-                • Imagem pronta para envio
-              </span>
+              {isUploading ? (
+                <div className="mt-1 space-y-1">
+                  <div className="flex items-center justify-between text-[10px] text-indigo-300 font-mono">
+                    <span className="flex items-center">
+                      <Loader2 className="w-3 h-3 animate-spin mr-1 inline" />
+                      Enviando imagem...
+                    </span>
+                    <span className="font-bold">{uploadProgress ?? 0}%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-obsidian-bg/80 rounded-full overflow-hidden border border-indigo-500/20">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-150 ease-out"
+                      style={{ width: `${Math.max(5, uploadProgress ?? 0)}%` }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <span className="text-[10px] text-obsidian-text-muted">
+                  {pendingFile.size < 1024 * 1024
+                    ? `${Math.max(1, Math.round(pendingFile.size / 1024))} KB`
+                    : `${(pendingFile.size / (1024 * 1024)).toFixed(1)} MB`}{' '}
+                  • Imagem pronta para envio
+                </span>
+              )}
             </div>
           </div>
           <button

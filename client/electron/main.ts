@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, shell, session, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, desktopCapturer, shell, session, globalShortcut, screen } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
@@ -157,10 +157,96 @@ function isSafeExternalUrl(rawUrl: unknown): string | null {
   }
 }
 
+interface WindowBoundsState {
+  x?: number;
+  y?: number;
+  width: number;
+  height: number;
+  isMaximized: boolean;
+}
+
+function getWindowStateFilePath(): string {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
+function loadSavedWindowState(): WindowBoundsState {
+  try {
+    const filePath = getWindowStateFilePath();
+    if (fs.existsSync(filePath)) {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      if (typeof data.width === 'number' && typeof data.height === 'number') {
+        return {
+          x: typeof data.x === 'number' ? data.x : undefined,
+          y: typeof data.y === 'number' ? data.y : undefined,
+          width: Math.max(960, data.width),
+          height: Math.max(600, data.height),
+          isMaximized: Boolean(data.isMaximized),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[WindowBounds] Falha ao carregar estado da janela:', err);
+  }
+  return { width: 1280, height: 800, isMaximized: false };
+}
+
+let saveBoundsTimeout: NodeJS.Timeout | null = null;
+function scheduleSaveWindowState(win: BrowserWindow) {
+  if (saveBoundsTimeout) clearTimeout(saveBoundsTimeout);
+  saveBoundsTimeout = setTimeout(() => {
+    try {
+      if (!win || win.isDestroyed()) return;
+      const isMaximized = win.isMaximized();
+      const bounds = win.getNormalBounds();
+      const stateToSave: WindowBoundsState = {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        isMaximized,
+      };
+      fs.writeFileSync(getWindowStateFilePath(), JSON.stringify(stateToSave, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('[WindowBounds] Falha ao salvar estado da janela:', err);
+    }
+  }, 300);
+}
+
 function createWindow() {
+  const savedState = loadSavedWindowState();
+
+  // Validar se as coordenadas salvas ainda são visíveis em algum monitor ativo
+  let initialX = savedState.x;
+  let initialY = savedState.y;
+  if (typeof initialX === 'number' && typeof initialY === 'number') {
+    try {
+      const matchedDisplay = screen.getDisplayMatching({
+        x: initialX,
+        y: initialY,
+        width: savedState.width,
+        height: savedState.height,
+      });
+      const bounds = matchedDisplay.bounds;
+      if (
+        initialX < bounds.x - 20 ||
+        initialX > bounds.x + bounds.width ||
+        initialY < bounds.y - 20 ||
+        initialY > bounds.y + bounds.height
+      ) {
+        initialX = undefined;
+        initialY = undefined;
+      }
+    } catch {
+      initialX = undefined;
+      initialY = undefined;
+    }
+  }
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    x: initialX,
+    y: initialY,
+    width: savedState.width,
+    height: savedState.height,
     minWidth: 960,
     minHeight: 600,
     title: 'Xolas',
@@ -173,6 +259,53 @@ function createWindow() {
       webSecurity: true,
       allowRunningInsecureContent: false,
     },
+  });
+
+  if (savedState.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  mainWindow.on('resize', () => {
+    if (mainWindow) scheduleSaveWindowState(mainWindow);
+  });
+  mainWindow.on('move', () => {
+    if (mainWindow) scheduleSaveWindowState(mainWindow);
+  });
+  mainWindow.on('close', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        const isMaximized = mainWindow.isMaximized();
+        const bounds = mainWindow.getNormalBounds();
+        fs.writeFileSync(
+          getWindowStateFilePath(),
+          JSON.stringify(
+            {
+              x: bounds.x,
+              y: bounds.y,
+              width: bounds.width,
+              height: bounds.height,
+              isMaximized,
+            },
+            null,
+            2
+          ),
+          'utf-8'
+        );
+      } catch {}
+    }
+  });
+
+  // Interceptar Ctrl+R e F5 para reload limpo sem deixar processos ou conexões zumbis
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const isCtrlR = (input.control || input.meta) && !input.alt && input.key.toLowerCase() === 'r';
+    const isF5 = input.key === 'F5';
+    if ((isCtrlR || isF5) && input.type === 'keyDown') {
+      event.preventDefault();
+      stopProcessAudioCapture();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.reloadIgnoringCache();
+      }
+    }
   });
 
   mainWindow.webContents.setBackgroundThrottling(false);

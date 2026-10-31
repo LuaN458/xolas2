@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Message } from '../../types';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Loader2 } from 'lucide-react';
 import { API_BASE } from '../../lib/api';
 import { ImageLightboxModal } from './ImageLightboxModal';
 
@@ -76,8 +76,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isAdmin, onDe
                 className="relative group/img cursor-pointer overflow-hidden rounded-xl border border-obsidian-border bg-obsidian-card/60 transition-all hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10"
               >
                 {!imageLoaded && (
-                  <div className="w-56 h-40 bg-obsidian-card animate-pulse flex items-center justify-center">
-                    <span className="text-[11px] text-obsidian-text-muted">Carregando imagem...</span>
+                  <div className="w-56 h-40 bg-obsidian-card animate-pulse flex flex-col items-center justify-center space-y-2 border border-obsidian-border rounded-xl">
+                    <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
+                    <span className="text-[10px] text-obsidian-text-muted font-mono">Processando imagem...</span>
                   </div>
                 )}
                 <img

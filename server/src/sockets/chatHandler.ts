@@ -77,6 +77,40 @@ export function notifyUserApprovalStatus(userId: string, payload: { status: stri
   }
 }
 
+export function updateUserSocketPermissions(userId: string, role: string, permissions: string[]): void {
+  if (!globalIO) return;
+  const targetSocketIds = userSockets.get(userId);
+  if (targetSocketIds) {
+    targetSocketIds.forEach((sid) => {
+      const s = globalIO!.sockets.sockets.get(sid) as AuthenticatedSocket | undefined;
+      if (s && s.user) {
+        s.user.role = role;
+        s.user.permissions = permissions;
+        if (role === 'ADMIN' || permissions.includes('manage_users')) {
+          s.join('admin-room');
+        } else {
+          s.leave('admin-room');
+        }
+      }
+    });
+  }
+}
+
+export async function syncUsersWithRole(roleId: string, permissions: string[]): Promise<void> {
+  if (!globalIO) return;
+  try {
+    const users = await prisma.user.findMany({
+      where: { customRoleId: roleId },
+      select: { id: true, role: true },
+    });
+    for (const u of users) {
+      updateUserSocketPermissions(u.id, u.role, permissions);
+    }
+  } catch (err) {
+    console.warn('[Socket] Falha ao sincronizar usuários do cargo alterado:', err);
+  }
+}
+
 interface AuthenticatedSocket extends Socket {
   user?: {
     userId: string;
@@ -169,12 +203,39 @@ export function setupSocketHandlers(io: Server): void {
       io.emit('user-status-changed', { userId, status: 'online' });
     }
 
-    // Verificador de permissões: ADMIN total ou permissão específica via cargo customizado
-    const hasPermission = (perm: string) =>
-      user.role === 'ADMIN' || (Array.isArray(user.permissions) && user.permissions.includes(perm));
+    // Verificador de permissões dinâmico em tempo real
+    const userHasPermission = async (perm: string): Promise<boolean> => {
+      // 1. Checagem em memória no socket
+      if (
+        socket.user?.role === 'ADMIN' ||
+        (Array.isArray(socket.user?.permissions) && socket.user.permissions.includes(perm))
+      ) {
+        return true;
+      }
+      // 2. Consulta de sincronia imediata ao banco caso o cargo tenha acabado de ser atribuído
+      try {
+        if (!socket.user?.userId) return false;
+        const db = await prisma.user.findUnique({
+          where: { id: socket.user.userId },
+          select: {
+            role: true,
+            customRole: { select: { permissions: true } },
+          },
+        });
+        if (db) {
+          socket.user.role = db.role;
+          socket.user.permissions = db.customRole?.permissions || [];
+          return (
+            db.role === 'ADMIN' ||
+            (Array.isArray(db.customRole?.permissions) && db.customRole.permissions.includes(perm))
+          );
+        }
+      } catch {}
+      return false;
+    };
 
-    // Se o usuário puder gerenciar usuários, insere na sala de administradores e envia contador de pendências
-    if (hasPermission('manage_users')) {
+    // Inicialização da sala de administradores se possuir privilégios
+    if (user.role === 'ADMIN' || (Array.isArray(user.permissions) && user.permissions.includes('manage_users'))) {
       socket.join('admin-room');
       prisma.user
         .count({ where: { approvalStatus: 'PENDING' } })
@@ -182,125 +243,133 @@ export function setupSocketHandlers(io: Server): void {
           socket.emit('admin-pending-count', { pendingCount });
         })
         .catch(() => {});
-
-      socket.on('admin:get-pending-count', async () => {
-        try {
-          const pendingCount = await prisma.user.count({ where: { approvalStatus: 'PENDING' } });
-          socket.emit('admin-pending-count', { pendingCount });
-        } catch {}
-      });
     }
+
+    // Ouvinte para buscar contagem de pendências (com verificação dinâmica)
+    socket.on('admin:get-pending-count', async () => {
+      try {
+        if (!(await userHasPermission('manage_users'))) return;
+        const pendingCount = await prisma.user.count({ where: { approvalStatus: 'PENDING' } });
+        socket.emit('admin-pending-count', { pendingCount });
+      } catch {}
+    });
 
     // 1. Exclusão de mensagens de chat (Admin ou permissão delete_messages)
-    if (hasPermission('delete_messages')) {
-      socket.on('admin:delete-message', async (data: { channelId?: unknown; messageId?: unknown }) => {
-        try {
-          const channelId = data?.channelId;
-          const messageId = data?.messageId;
-          if (!isValidIdentifier(channelId) || !isValidIdentifier(messageId)) return;
-
-          const existing = await prisma.message.findFirst({
-            where: { id: messageId, channelId },
-          });
-          if (!existing) return;
-
-          await prisma.message.delete({
-            where: { id: messageId },
-          });
-
-          if (existing.attachmentUrl) {
-            deleteUploadedFileSafe(existing.attachmentUrl).catch(() => {});
-          }
-
-          io.to(`channel:${channelId}`).emit('message-deleted', {
-            channelId,
-            messageId,
-          });
-        } catch (err) {
-          console.error('Erro ao excluir mensagem via admin socket:', err);
+    socket.on('admin:delete-message', async (data: { channelId?: unknown; messageId?: unknown }) => {
+      try {
+        if (!(await userHasPermission('delete_messages'))) {
+          console.warn(`[Socket] Usuário ${socket.user?.userId} tentou excluir mensagem sem permissão.`);
+          return;
         }
-      });
-    }
+        const channelId = data?.channelId;
+        const messageId = data?.messageId;
+        if (!isValidIdentifier(channelId) || !isValidIdentifier(messageId)) return;
+
+        const existing = await prisma.message.findFirst({
+          where: { id: messageId, channelId },
+        });
+        if (!existing) return;
+
+        await prisma.message.delete({
+          where: { id: messageId },
+        });
+
+        if (existing.attachmentUrl) {
+          deleteUploadedFileSafe(existing.attachmentUrl).catch(() => {});
+        }
+
+        io.to(`channel:${channelId}`).emit('message-deleted', {
+          channelId,
+          messageId,
+        });
+      } catch (err) {
+        console.error('Erro ao excluir mensagem via admin socket:', err);
+      }
+    });
 
     // 2. Desconexão forçada de participante de voz (Admin ou permissão disconnect_voice)
-    if (hasPermission('disconnect_voice')) {
-      socket.on(
-        'admin:disconnect-voice',
-        async (data: { targetUserId?: unknown; channelId?: unknown; serverId?: unknown }) => {
-          try {
-            const targetUserId = data?.targetUserId;
-            const channelId = data?.channelId;
-            const serverId = data?.serverId;
-            if (
-              !isValidIdentifier(targetUserId) ||
-              !isValidIdentifier(channelId) ||
-              !isValidIdentifier(serverId)
-            ) {
-              return;
-            }
-
-            removeSpecificUserFromVoice(targetUserId, channelId, serverId);
-
-            sendToUser(targetUserId, 'force-disconnect-voice', {
-              channelId,
-              serverId,
-              reason: 'Você foi desconectado da chamada por um administrador.',
-            });
-          } catch (err) {
-            console.error('Erro ao desconectar usuário da voz via admin socket:', err);
+    socket.on(
+      'admin:disconnect-voice',
+      async (data: { targetUserId?: unknown; channelId?: unknown; serverId?: unknown }) => {
+        try {
+          if (!(await userHasPermission('disconnect_voice'))) {
+            console.warn(`[Socket] Usuário ${socket.user?.userId} tentou desconectar usuário sem permissão.`);
+            return;
           }
+          const targetUserId = data?.targetUserId;
+          const channelId = data?.channelId;
+          const serverId = data?.serverId;
+          if (
+            !isValidIdentifier(targetUserId) ||
+            !isValidIdentifier(channelId) ||
+            !isValidIdentifier(serverId)
+          ) {
+            return;
+          }
+
+          removeSpecificUserFromVoice(targetUserId, channelId, serverId);
+
+          sendToUser(targetUserId, 'force-disconnect-voice', {
+            channelId,
+            serverId,
+            reason: 'Você foi desconectado da chamada por um moderador.',
+          });
+        } catch (err) {
+          console.error('Erro ao desconectar usuário da voz via admin socket:', err);
         }
-      );
-    }
+      }
+    );
 
     // 3. Silenciamento no servidor (Admin ou permissão server_mute)
-    if (hasPermission('server_mute')) {
-      socket.on(
-        'admin:server-mute-voice',
-        async (data: {
-          targetUserId?: unknown;
-          channelId?: unknown;
-          serverId?: unknown;
-          isMuted?: unknown;
-        }) => {
-          try {
-            const targetUserId = data?.targetUserId;
-            const channelId = data?.channelId;
-            const serverId = data?.serverId;
-            const isMuted = Boolean(data?.isMuted);
-
-            if (
-              !isValidIdentifier(targetUserId) ||
-              !isValidIdentifier(channelId) ||
-              !isValidIdentifier(serverId)
-            ) {
-              return;
-            }
-
-            const room = voiceRooms.get(channelId);
-            if (room && room.has(targetUserId)) {
-              const p = room.get(targetUserId)!;
-              p.isMuted = isMuted;
-            }
-
-            const statePayload = {
-              channelId,
-              userId: targetUserId,
-              isMuted,
-            };
-            io.to(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
-            io.to(`server:${serverId}`).emit('voice-user-state-updated', statePayload);
-
-            sendToUser(targetUserId, 'force-mute-mic', {
-              channelId,
-              isMuted,
-            });
-          } catch (err) {
-            console.error('Erro ao silenciar usuário no servidor via admin socket:', err);
+    socket.on(
+      'admin:server-mute-voice',
+      async (data: {
+        targetUserId?: unknown;
+        channelId?: unknown;
+        serverId?: unknown;
+        isMuted?: unknown;
+      }) => {
+        try {
+          if (!(await userHasPermission('server_mute'))) {
+            console.warn(`[Socket] Usuário ${socket.user?.userId} tentou mutar participante sem permissão.`);
+            return;
           }
+          const targetUserId = data?.targetUserId;
+          const channelId = data?.channelId;
+          const serverId = data?.serverId;
+          const isMuted = Boolean(data?.isMuted);
+
+          if (
+            !isValidIdentifier(targetUserId) ||
+            !isValidIdentifier(channelId) ||
+            !isValidIdentifier(serverId)
+          ) {
+            return;
+          }
+
+          const room = voiceRooms.get(channelId);
+          if (room && room.has(targetUserId)) {
+            const p = room.get(targetUserId)!;
+            p.isMuted = isMuted;
+          }
+
+          const statePayload = {
+            channelId,
+            userId: targetUserId,
+            isMuted,
+          };
+          io.to(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
+          io.to(`server:${serverId}`).emit('voice-user-state-updated', statePayload);
+
+          sendToUser(targetUserId, 'force-mute-mic', {
+            channelId,
+            isMuted,
+          });
+        } catch (err) {
+          console.error('Erro ao silenciar usuário no servidor via admin socket:', err);
         }
-      );
-    }
+      }
+    );
 
     // Enviar lista de usuários online imediatamente para quem acabou de conectar
     socket.emit('online-users-list', getOnlineUserIds());
