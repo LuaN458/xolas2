@@ -672,6 +672,10 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
               ? () => watchScreenShare(contextMenu.shareId || `screen-${contextMenu.userId}`)
               : undefined
           }
+          streamVolume={streamVolume}
+          isStreamMuted={isStreamMuted}
+          onStreamVolumeChange={handleStreamVolumeChange}
+          onToggleStreamMute={handleToggleStreamMute}
           onVolumeChange={(newVol) => setUserVolume(contextMenu.userId, newVol)}
           onToggleMute={contextMenu.userId === user?.id ? selfToggleMute : () => toggleMuteUser(contextMenu.userId)}
           onToggleDeafen={contextMenu.userId === user?.id ? toggleDeafen : undefined}

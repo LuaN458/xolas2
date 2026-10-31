@@ -483,6 +483,7 @@ namespace XolasAudioLoopback
                 Stream stdout = Console.OpenStandardOutput();
                 byte[] tempBuf = new byte[48000 * 4];
                 byte[] silenceBuf = new byte[480 * 4]; // 10ms of silence
+                int consecutiveErrors = 0;
 
                 while (true)
                 {
@@ -490,7 +491,47 @@ namespace XolasAudioLoopback
 
                     uint nextPacketSize = 0;
                     int pHr = captureClient.GetNextPacketSize(out nextPacketSize);
-                    if (pHr < 0) break;
+                    if (pHr < 0)
+                    {
+                        consecutiveErrors++;
+                        if (consecutiveErrors > 20) // ~400ms de falhas contínuas de sessão
+                        {
+                            Console.Error.WriteLine(string.Format("[WASAPI] GetNextPacketSize erro 0x{0:X8}, tentando restabelecer sessao...", pHr));
+                            Thread.Sleep(100);
+                            try
+                            {
+                                IAudioClient newAudioClient;
+                                IAudioCaptureClient newCaptureClient = ActivateLoopbackCapture(
+                                    targetPid,
+                                    loopbackMode,
+                                    ref fmt,
+                                    sampleEvent,
+                                    out newAudioClient);
+                                if (newCaptureClient != null && newAudioClient != null)
+                                {
+                                    try { audioClient.Stop(); } catch { }
+                                    audioClient = newAudioClient;
+                                    captureClient = newCaptureClient;
+                                    consecutiveErrors = 0;
+                                    Console.Error.WriteLine("[WASAPI] Sessao de audio restabelecida com sucesso apos alteracao de volume/dispositivo.");
+                                    continue;
+                                }
+                            }
+                            catch (Exception exRec)
+                            {
+                                Console.Error.WriteLine("[WASAPI] Falha ao restabelecer captura: " + exRec.Message);
+                            }
+                            if (consecutiveErrors > 150)
+                            {
+                                Console.Error.WriteLine("[WASAPI] Processo alvo encerrado ou captura irrecuperavel. Finalizando helper.");
+                                break;
+                            }
+                            Thread.Sleep(150);
+                        }
+                        continue;
+                    }
+
+                    consecutiveErrors = 0;
 
                     while (nextPacketSize > 0)
                     {
@@ -501,7 +542,11 @@ namespace XolasAudioLoopback
                         ulong qpcPos;
 
                         int bHr = captureClient.GetBuffer(out dataPtr, out numFrames, out bufFlags, out devPos, out qpcPos);
-                        if (bHr < 0) break;
+                        if (bHr < 0)
+                        {
+                            try { captureClient.ReleaseBuffer(0); } catch { }
+                            break;
+                        }
 
                         int bytesToWrite = (int)(numFrames * fmt.nBlockAlign);
                         if (bytesToWrite > 0)

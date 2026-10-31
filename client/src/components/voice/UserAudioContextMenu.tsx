@@ -41,6 +41,11 @@ interface UserAudioContextMenuProps {
   onAssignRole?: (roleId: string | null) => Promise<void> | void;
   isSelf?: boolean;
   inVoiceChannelName?: string;
+  // Volume da transmissão (quando assistindo ao vivo)
+  streamVolume?: number;
+  isStreamMuted?: boolean;
+  onStreamVolumeChange?: (newVolume: number) => void;
+  onToggleStreamMute?: () => void;
 }
 
 export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
@@ -68,6 +73,10 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
   onAssignRole,
   isSelf = false,
   inVoiceChannelName,
+  streamVolume,
+  isStreamMuted: streamIsMuted = false,
+  onStreamVolumeChange,
+  onToggleStreamMute,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [isAssigning, setIsAssigning] = useState(false);
@@ -194,6 +203,95 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
               AO VIVO
             </span>
           </button>
+        </div>
+      )}
+
+      {/* Seção de Volume da Transmissão (quando o usuário está ao vivo com áudio de tela) */}
+      {!isSelf && hasScreenShare && onStreamVolumeChange && (
+        <div className="pt-2.5 pb-2 border-b border-obsidian-border/60 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center space-x-1.5 text-indigo-300 font-semibold">
+              {streamIsMuted || streamVolume === 0 ? (
+                <VolumeX className="w-4 h-4 text-rose-400" />
+              ) : (streamVolume ?? 100) <= 50 ? (
+                <Volume1 className="w-4 h-4 text-indigo-400" />
+              ) : (
+                <Volume2 className="w-4 h-4 text-indigo-400" />
+              )}
+              <span>Volume da Transmissão</span>
+            </div>
+
+            <div className="flex items-center space-x-1.5">
+              {(streamVolume ?? 100) !== 100 && (
+                <button
+                  type="button"
+                  onClick={() => onStreamVolumeChange(100)}
+                  title="Redefinir áudio da tela para 100%"
+                  className="p-1 rounded-md text-obsidian-text-muted hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                </button>
+              )}
+              <span
+                className={`font-mono text-xs font-bold px-1.5 py-0.5 rounded ${
+                  streamIsMuted || streamVolume === 0
+                    ? 'text-rose-400 bg-rose-500/10'
+                    : 'text-indigo-300 bg-indigo-500/10'
+                }`}
+              >
+                {streamIsMuted ? '0%' : `${streamVolume ?? 100}%`}
+              </span>
+            </div>
+          </div>
+
+          <div className="relative pt-1">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={streamIsMuted ? 0 : (streamVolume ?? 100)}
+              onChange={(e) => onStreamVolumeChange(Number(e.target.value))}
+              className="w-full h-1.5 rounded-lg appearance-none cursor-pointer bg-white/20 accent-indigo-500 hover:accent-indigo-400 transition-all"
+            />
+          </div>
+
+          <div className="flex justify-between text-[10px] text-obsidian-text-muted font-mono px-0.5">
+            <span>0%</span>
+            <span className="text-obsidian-text-secondary font-semibold">50%</span>
+            <span className="text-indigo-400/80">100%</span>
+          </div>
+
+          {onToggleStreamMute && (
+            <button
+              type="button"
+              onClick={onToggleStreamMute}
+              className={`w-full mt-1.5 flex items-center justify-between px-3 py-1.5 rounded-xl text-xs font-semibold transition-all group ${
+                streamIsMuted
+                  ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25'
+                  : 'bg-obsidian-surface hover:bg-white/10 text-obsidian-text-primary hover:text-white border border-obsidian-border'
+              }`}
+            >
+              <div className="flex items-center space-x-2 min-w-0">
+                <VolumeX
+                  className={`w-3.5 h-3.5 shrink-0 ${
+                    streamIsMuted ? 'text-rose-400' : 'text-obsidian-text-muted group-hover:text-white'
+                  }`}
+                />
+                <span className="text-xs">Mutar Som da Transmissão</span>
+              </div>
+
+              <div
+                className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                  streamIsMuted
+                    ? 'bg-rose-500 border-rose-400'
+                    : 'border-white/30 group-hover:border-white/50 bg-transparent'
+                }`}
+              >
+                {streamIsMuted && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
+              </div>
+            </button>
+          )}
         </div>
       )}
 

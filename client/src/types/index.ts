@@ -85,6 +85,7 @@ declare global {
   interface Window {
     electronAPI?: {
       getScreenSources: () => Promise<ScreenSource[]>;
+      checkWindowExists?: (sourceId?: string) => Promise<boolean>;
       isElectron?: boolean;
       openExternal?: (url: string) => Promise<void>;
       getAppVersion?: () => Promise<string>;

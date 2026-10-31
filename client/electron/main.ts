@@ -620,6 +620,25 @@ ipcMain.handle('get-screen-sources', async () => {
   }
 });
 
+// Handler IPC para verificar se uma janela ou tela ainda existe no SO (evita encerramento espúrio da live)
+ipcMain.handle('check-window-exists', async (_event, sourceId?: string) => {
+  if (!sourceId) return false;
+  if (sourceId.startsWith('screen:')) return true;
+
+  try {
+    const windows = await desktopCapturer.getSources({
+      types: ['window'],
+      thumbnailSize: { width: 1, height: 1 },
+      fetchWindowIcons: false,
+    });
+    return windows.some((w) => w.id === sourceId);
+  } catch (err) {
+    console.warn('[desktopCapturer] Erro ao verificar existência da janela:', err);
+    // Em caso de erro temporário na chamada, retornar true para tolerância e não matar a live
+    return true;
+  }
+});
+
 // Handler IPC para captura de áudio isolada via WASAPI Process Loopback (Windows 10/11)
 // - Se sourceId for "window:<HWND>:0", captura SOMENTE a árvore de processos daquela janela (INCLUDE_TARGET_PROCESS_TREE)
 // - Se sourceId for "screen:<ID>:0", captura o áudio do sistema EXCLUINDO a árvore de processos do Xolas (EXCLUDE_TARGET_PROCESS_TREE)

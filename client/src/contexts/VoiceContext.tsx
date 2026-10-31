@@ -213,6 +213,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     includeAudio: initialSettings.screenIncludeAudio,
     mode: initialSettings.screenStreamMode || 'fluidity',
   });
+  const currentScreenSourceIdRef = useRef<string | undefined>(undefined);
+  const isRecoveringScreenShareRef = useRef<boolean>(false);
 
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteParticipantsRef = useRef<Map<string, RemotePeerData>>(new Map());
@@ -2199,6 +2201,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     isScreenSharingRef.current = false;
+    currentScreenSourceIdRef.current = undefined;
+    isRecoveringScreenShareRef.current = false;
     setScreenStream(null);
     setIsScreenSharing(false);
     setSelectedScreenShareId((prev) => (prev === 'local-screen' ? null : prev));
@@ -2263,6 +2267,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Ouvinte de atalhos in-app via teclado (ativo em foco tanto na web quanto no Electron para resposta instantânea)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignorar teclas multimídia de volume e mídia do sistema operacional (evita falso disparo de atalhos)
+      const keyLower = (e.key || '').toLowerCase();
+      if (
+        keyLower.startsWith('audiovolume') ||
+        keyLower === 'volumeup' ||
+        keyLower === 'volumedown' ||
+        keyLower === 'volumemute' ||
+        keyLower.startsWith('media')
+      ) {
+        return;
+      }
+
       const target = e.target as HTMLElement | null;
       const isInput =
         target &&
@@ -2282,7 +2298,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (isInput && !hasModifiers) return;
 
       const matchesKey = (targetShortcut?: string): boolean => {
-        if (!targetShortcut) return false;
+        if (!targetShortcut || !targetShortcut.trim()) return false;
         const normTarget = targetShortcut.trim().toLowerCase();
         const normAcc = (currentAcc || '').toLowerCase();
         const normCode = (e.code || '').toLowerCase();
@@ -2686,9 +2702,147 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     []
   );
 
+  const reacquireWindowVideoTrack = useCallback(
+    async (sourceId: string, quality: ScreenQualityOptions): Promise<boolean> => {
+      try {
+        const isDetail = quality.mode === 'detail';
+        const is1080 = quality.resolution === '1080p';
+        const width = is1080 ? 1920 : 1280;
+        const height = is1080 ? 1080 : 720;
+        const fps = isDetail ? 30 : quality.fps;
+
+        const videoMandatory: any = {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: sourceId,
+          maxWidth: width,
+          maxHeight: height,
+          maxFrameRate: fps,
+          minFrameRate: Math.min(fps, 30),
+        };
+
+        let newStream: MediaStream;
+        try {
+          newStream = await (navigator.mediaDevices as any).getUserMedia({
+            audio: false,
+            video: {
+              mandatory: videoMandatory,
+              optional: [{ googCpuOveruseDetection: false }],
+            },
+          });
+        } catch {
+          newStream = await (navigator.mediaDevices as any).getUserMedia({
+            audio: false,
+            video: {
+              mandatory: videoMandatory,
+            },
+          });
+        }
+
+        const newVideoTrack = newStream.getVideoTracks()[0];
+        if (!newVideoTrack) return false;
+
+        try {
+          (newVideoTrack as any).contentHint = isDetail ? 'detail' : 'motion';
+        } catch {}
+
+        try {
+          await newVideoTrack.applyConstraints({
+            width: { ideal: width, max: width },
+            height: { ideal: height, max: height },
+            frameRate: { ideal: fps, max: fps },
+          });
+        } catch {}
+
+        newVideoTrack.onended = () => {
+          handleTrackEnded(newVideoTrack);
+        };
+
+        const currentStream = screenStreamRef.current;
+        if (currentStream) {
+          const oldTracks = currentStream.getVideoTracks();
+          oldTracks.forEach((t) => {
+            try {
+              t.onended = null;
+              t.stop();
+              currentStream.removeTrack(t);
+            } catch {}
+          });
+          currentStream.addTrack(newVideoTrack);
+        } else {
+          screenStreamRef.current = newStream;
+        }
+
+        // Atualizar todas as conexões WebRTC ativas com replaceTrack
+        peersRef.current.forEach((pc, peerId) => {
+          const senders = screenSendersRef.current.get(peerId) || [];
+          const videoSender = senders.find((s) => s.track?.kind === 'video');
+          if (videoSender) {
+            videoSender.replaceTrack(newVideoTrack).catch((err) => {
+              console.warn(`[WebRTC] Falha ao substituir videoTrack no peer ${peerId}:`, err);
+            });
+          }
+        });
+
+        if (screenStreamRef.current) {
+          const freshStream = new MediaStream(screenStreamRef.current.getTracks());
+          screenStreamRef.current = freshStream;
+          setScreenStream(freshStream);
+        }
+
+        return true;
+      } catch (err) {
+        console.warn('[ScreenShare] Falha na re-aquisição da faixa de vídeo:', err);
+        return false;
+      }
+    },
+    []
+  );
+
+  const handleTrackEnded = useCallback(
+    async (_endedTrack?: MediaStreamTrack) => {
+      if (!isScreenSharingRef.current) return;
+      if (isRecoveringScreenShareRef.current) return;
+
+      const sourceId = currentScreenSourceIdRef.current;
+      const isWindow = sourceId && sourceId.startsWith('window:');
+
+      if (isWindow && window.electronAPI?.checkWindowExists) {
+        try {
+          isRecoveringScreenShareRef.current = true;
+          const exists = await window.electronAPI.checkWindowExists(sourceId);
+          if (exists) {
+            console.log(
+              '[ScreenShare] videoTrack.onended disparou (glitch de foco/volume/DWM), mas a janela ainda existe. Iniciando auto-recuperação...'
+            );
+
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              if (!isScreenSharingRef.current) break;
+              await new Promise((resolve) => setTimeout(resolve, attempt * 350));
+              const recovered = await reacquireWindowVideoTrack(sourceId, screenQualityRef.current);
+              if (recovered) {
+                console.log(`[ScreenShare] Transmissão recuperada com sucesso na tentativa ${attempt}!`);
+                isRecoveringScreenShareRef.current = false;
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[ScreenShare] Erro ao verificar existência da janela:', err);
+        } finally {
+          isRecoveringScreenShareRef.current = false;
+        }
+      }
+
+      console.log('[ScreenShare] A janela foi realmente fechada pelo usuário ou não está mais acessível. Encerrando compartilhamento.');
+      stopScreenShare();
+    },
+    [reacquireWindowVideoTrack, stopScreenShare]
+  );
+
   const startScreenShare = useCallback(
     async (sourceId?: string, quality?: ScreenQualityOptions) => {
       try {
+        currentScreenSourceIdRef.current = sourceId;
         const activeQuality = quality || { resolution: '1080p', fps: 60, includeAudio: true, mode: 'fluidity' };
         screenQualityRef.current = activeQuality;
         setScreenQuality(activeQuality);
@@ -2799,7 +2953,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             });
           } catch {}
           videoTrack.onended = () => {
-            stopScreenShare();
+            handleTrackEnded(videoTrack);
           };
         }
 
@@ -2845,6 +2999,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     },
     [
+      handleTrackEnded,
       stopScreenShare,
       createIsolatedProcessAudioTrack,
       syncVoiceState,
