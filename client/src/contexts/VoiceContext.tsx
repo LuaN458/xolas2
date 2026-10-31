@@ -16,6 +16,7 @@ export interface ScreenQualityOptions {
   fps: 30 | 60;
   includeAudio?: boolean;
   mode?: 'fluidity' | 'balanced' | 'detail';
+  maxBitrateKbps?: number;
 }
 
 export interface ActiveParticipant {
@@ -174,6 +175,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     fps: initialSettings.screenFps,
     includeAudio: initialSettings.screenIncludeAudio,
     mode: initialSettings.screenStreamMode || 'fluidity',
+    maxBitrateKbps: initialSettings.screenMaxBitrateKbps || 8500,
   });
   const [selectedAudioDeviceId, setSelectedAudioDeviceIdState] = useState<string>(
     initialSettings.selectedAudioDeviceId
@@ -212,6 +214,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     fps: initialSettings.screenFps,
     includeAudio: initialSettings.screenIncludeAudio,
     mode: initialSettings.screenStreamMode || 'fluidity',
+    maxBitrateKbps: initialSettings.screenMaxBitrateKbps || 8500,
   });
   const currentScreenSourceIdRef = useRef<string | undefined>(undefined);
   const isRecoveringScreenShareRef = useRef<boolean>(false);
@@ -533,39 +536,47 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const is1080 = currentQuality.resolution === '1080p';
       const is60fps = currentQuality.fps === 60;
 
-      // Parâmetros adaptativos de vídeo calibrados para WebRTC Mesh:
-      // 1080p 60fps: 5500 kbps (início suave 2200 kbps, min 1200 kbps para não congelar)
-      // 1080p 30fps: 3800 kbps (início suave 1800 kbps, min 800 kbps)
-      // 720p 60fps: 3200 kbps (início suave 1800 kbps, min 800 kbps)
-      // 720p 30fps: 1800 kbps (início suave 1000 kbps, min 500 kbps)
-      let minVideoBitrate = 800;
-      let startVideoBitrate = 1800;
-      let maxVideoBitrate = 3800;
-      let bAsBandwidth = 3800;
+      // Parâmetros adaptativos de vídeo calibrados para WebRTC Mesh em alta taxa:
+      // 1080p 60fps (Fluidez / Pro Gaming): até 8500-10000 kbps (início firme 3500 kbps, piso 1800 kbps)
+      // 1080p 30fps (Nitidez / Detalhe): 4800-5000 kbps (início 2500 kbps, piso 1200 kbps)
+      // 720p 60fps: 4500 kbps (início 2200 kbps, piso 1000 kbps)
+      // 720p 30fps: 2500 kbps (início 1400 kbps, piso 600 kbps)
+      const userMaxKbps = currentQuality.maxBitrateKbps;
+      const isDetail = currentQuality.mode === 'detail';
 
-      if (is1080) {
+      let maxVideoBitrate = userMaxKbps || 8500;
+      let startVideoBitrate = 3500;
+      let minVideoBitrate = 1800;
+      let bAsBandwidth = maxVideoBitrate;
+
+      if (isDetail) {
+        maxVideoBitrate = userMaxKbps || 4800;
+        startVideoBitrate = 2500;
+        minVideoBitrate = 1200;
+        bAsBandwidth = maxVideoBitrate;
+      } else if (is1080) {
         if (is60fps) {
-          minVideoBitrate = 1200;
-          startVideoBitrate = 2200;
-          maxVideoBitrate = 5500;
-          bAsBandwidth = 5500;
+          maxVideoBitrate = userMaxKbps || 8500;
+          startVideoBitrate = Math.max(3500, Math.round(maxVideoBitrate * 0.42));
+          minVideoBitrate = Math.max(1800, Math.round(maxVideoBitrate * 0.22));
+          bAsBandwidth = maxVideoBitrate;
         } else {
-          minVideoBitrate = 800;
-          startVideoBitrate = 1800;
-          maxVideoBitrate = 3800;
-          bAsBandwidth = 3800;
+          maxVideoBitrate = userMaxKbps || 5000;
+          startVideoBitrate = 2500;
+          minVideoBitrate = 1200;
+          bAsBandwidth = maxVideoBitrate;
         }
       } else {
         if (is60fps) {
-          minVideoBitrate = 800;
-          startVideoBitrate = 1800;
-          maxVideoBitrate = 3200;
-          bAsBandwidth = 3200;
+          maxVideoBitrate = userMaxKbps || 4500;
+          startVideoBitrate = 2200;
+          minVideoBitrate = 1000;
+          bAsBandwidth = maxVideoBitrate;
         } else {
-          minVideoBitrate = 500;
-          startVideoBitrate = 1000;
-          maxVideoBitrate = 1800;
-          bAsBandwidth = 1800;
+          maxVideoBitrate = userMaxKbps || 2500;
+          startVideoBitrate = 1400;
+          minVideoBitrate = 600;
+          bAsBandwidth = maxVideoBitrate;
         }
       }
 
@@ -592,12 +603,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         if (currentSection === 'video') {
-          // Injetar limites adaptativos nos codecs VP8/VP9 (evitar H.264 para não violar RFC 6184)
+          // Injetar limites adaptativos em todos os codecs de vídeo (H.264, VP8, VP9)
           if (
             line.startsWith('a=fmtp:') &&
             !line.includes('apt=') &&
-            !line.includes('x-google-max-bitrate') &&
-            (line.toLowerCase().includes('vp8') || line.toLowerCase().includes('vp9'))
+            !line.includes('x-google-max-bitrate')
           ) {
             result.push(
               `${line};x-google-min-bitrate=${minVideoBitrate};x-google-start-bitrate=${startVideoBitrate};x-google-max-bitrate=${maxVideoBitrate}`
@@ -714,15 +724,19 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // No modo Nitidez, cravar taxa de quadros a 30 FPS para manter 100% dos detalhes sem drop de frames
         const targetFps = isDetail ? 30 : (quality.fps || 60);
 
-        // Bitrates calibrados (evita bufferbloat e congestionamento em redes residenciais P2P)
-        let targetBitrate = 3_200_000;
-        if (isDetail) {
-          // No modo Nitidez a 30 FPS, 3.6 Mbps entrega o dobro de bits por quadro para nitidez cristalina
-          targetBitrate = is1080 ? 3_600_000 : 2_200_000;
+        // Bitrates calibrados em alto teto para eliminação de travamentos e máxima fidelidade
+        let targetBitrate = 8_500_000;
+        if (quality.maxBitrateKbps && quality.maxBitrateKbps > 0) {
+          targetBitrate = quality.maxBitrateKbps * 1000;
+        } else if (isDetail) {
+          // No modo Nitidez a 30 FPS, 4.8 Mbps entrega nitidez cristalina com o dobro de dados por quadro
+          targetBitrate = is1080 ? 4_800_000 : 2_500_000;
         } else if (is1080) {
-          targetBitrate = is60fps ? 5_000_000 : 3_500_000;
+          // No modo Fluidez a 60 FPS, 8.5 Mbps entrega reprodução fluida sem engasgos em cenas de alta velocidade (CS2, shooters)
+          targetBitrate = is60fps ? 8_500_000 : 5_000_000;
         } else {
-          targetBitrate = is60fps ? 3_000_000 : 1_800_000;
+          // 720p
+          targetBitrate = is60fps ? 4_500_000 : 2_500_000;
         }
 
         // degradationPreference:
@@ -927,7 +941,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return { pc: existing, isNew: false };
       }
 
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection({
+        iceServers: ICE_SERVERS,
+        bundlePolicy: 'max-bundle',
+      });
       peersRef.current.set(remoteUserId, pc);
 
       // Adicionar faixa de microfone local se disponível
@@ -1011,6 +1028,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } else if (track.kind === 'video') {
           peerData.screenTrack = track;
           peerData.isScreenSharing = true;
+
+          // Amortecimento suave de jitter para eliminar micro-travamentos a 60 FPS (16.6ms)
+          if (event.receiver) {
+            try {
+              if ('jitterBufferTarget' in event.receiver) {
+                (event.receiver as any).jitterBufferTarget = 45;
+              }
+            } catch {}
+            try {
+              if ('playoutDelayHint' in event.receiver) {
+                (event.receiver as any).playoutDelayHint = 0.045;
+              }
+            } catch {}
+          }
 
           // Verificar se o stream recebido já traz a faixa de áudio da tela junto
           const streamAudio = incomingStream?.getAudioTracks()[0];
@@ -1469,6 +1500,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       if (opts.mode) {
         saveUserSetting('screenStreamMode', opts.mode);
+      }
+      if (opts.maxBitrateKbps) {
+        saveUserSetting('screenMaxBitrateKbps', opts.maxBitrateKbps);
       }
 
       // Atualizar em tempo real se já houver uma transmissão ativa
@@ -2717,7 +2751,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           maxWidth: width,
           maxHeight: height,
           maxFrameRate: fps,
-          minFrameRate: Math.min(fps, 30),
+          minFrameRate: isDetail ? 30 : fps,
         };
 
         let newStream: MediaStream;
@@ -2872,7 +2906,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             maxWidth: width,
             maxHeight: height,
             maxFrameRate: fps,
-            minFrameRate: Math.min(fps, 30),
+            minFrameRate: isDetail ? 30 : fps,
           };
 
           // Para monitores inteiros (screen:), fixar minWidth e minHeight para forçar o Chromium a entregar exatamente 1080p ou 720p
@@ -2900,7 +2934,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               maxWidth: width,
               maxHeight: height,
               maxFrameRate: fps,
-              minFrameRate: Math.min(fps, 30),
+              minFrameRate: isDetail ? 30 : fps,
             };
             stream = await (navigator.mediaDevices as any).getUserMedia({
               audio: false,

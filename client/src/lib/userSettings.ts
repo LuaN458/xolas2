@@ -16,6 +16,7 @@ export interface UserAudioSettings {
   screenFps: 30 | 60;
   screenIncludeAudio: boolean;
   screenStreamMode: 'fluidity' | 'balanced' | 'detail';
+  screenMaxBitrateKbps?: number;
   keybindings: UserKeybindings;
 }
 
@@ -40,6 +41,7 @@ export const DEFAULT_USER_SETTINGS: UserAudioSettings = {
   screenFps: 60,
   screenIncludeAudio: true,
   screenStreamMode: 'fluidity',
+  screenMaxBitrateKbps: 8500,
   keybindings: DEFAULT_USER_KEYBINDINGS,
 };
 
@@ -175,6 +177,9 @@ function sanitizeUserSettings(parsed: any): UserAudioSettings {
     screenStreamMode: ['fluidity', 'balanced', 'detail'].includes(parsed?.screenStreamMode)
       ? parsed.screenStreamMode
       : 'fluidity',
+    screenMaxBitrateKbps: typeof parsed?.screenMaxBitrateKbps === 'number' && parsed.screenMaxBitrateKbps >= 1000
+      ? parsed.screenMaxBitrateKbps
+      : DEFAULT_USER_SETTINGS.screenMaxBitrateKbps,
     keybindings,
   };
 }

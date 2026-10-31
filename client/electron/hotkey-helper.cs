@@ -13,8 +13,8 @@ using System.Threading;
 [assembly: AssemblyCopyright("Copyright © 2026 Xolas")]
 [assembly: AssemblyTrademark("Xolas")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("1.0.59.0")]
-[assembly: AssemblyFileVersion("1.0.59.0")]
+[assembly: AssemblyVersion("1.0.60.0")]
+[assembly: AssemblyFileVersion("1.0.60.0")]
 
 namespace XolasHotkeyCompanion
 {

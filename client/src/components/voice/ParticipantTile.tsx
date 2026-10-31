@@ -38,6 +38,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
 
   const audioTrackCount = stream ? stream.getAudioTracks().length : 0;
 
+  // Controle de volume e mudo isolado para não reiniciar nem interromper o pipeline de vídeo
   React.useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -48,6 +49,12 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
       el.muted = volume === 0;
       el.volume = Math.max(0, Math.min(1, volume / 100));
     }
+  }, [volume, isLocal]);
+
+  // Montagem e reprodução estável do stream de vídeo
+  React.useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
 
     if (stream) {
       if (el.srcObject !== stream) {
@@ -68,7 +75,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
     } else {
       el.srcObject = null;
     }
-  }, [stream, videoTrack, audioTrackCount, isLocal, isScreenShare, volume]);
+  }, [stream, videoTrack, isLocal, isScreenShare]);
 
   // Economizar GPU do transmissor pausando a pintura do preview local quando o Xolas estiver minimizado/em segundo plano
   React.useEffect(() => {
@@ -131,6 +138,10 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
           playsInline
           disablePictureInPicture
           muted={isLocal || volume === 0}
+          onWaiting={() => {
+            // Auto-retomar reprodução suave caso ocorra micro-congelamento de buffer
+            videoRef.current?.play().catch(() => {});
+          }}
           onLoadedMetadata={(e) => {
             if (onVideoResolutionResolved && e.currentTarget.videoWidth && e.currentTarget.videoHeight) {
               onVideoResolutionResolved(e.currentTarget.videoWidth, e.currentTarget.videoHeight);

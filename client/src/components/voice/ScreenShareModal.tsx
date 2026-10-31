@@ -27,16 +27,24 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
   const [streamMode, setStreamMode] = useState<'fluidity' | 'balanced' | 'detail'>(
     screenQuality.mode || 'fluidity'
   );
+  const [maxBitrateKbps, setMaxBitrateKbps] = useState<number>(screenQuality.maxBitrateKbps || 8500);
 
   const estimatedBitrateLabel = useMemo(() => {
     if (streamMode === 'detail') {
-      return resolution === '1080p' ? '3.6 Mbps (30 FPS Fixo)' : '2.0 Mbps (30 FPS Fixo)';
+      return resolution === '1080p' ? '4.8 Mbps (30 FPS Nitidez)' : '2.5 Mbps (30 FPS Nitidez)';
     }
     if (resolution === '1080p') {
-      return fps === 60 ? '5.5 Mbps' : '3.8 Mbps';
+      if (fps === 60) {
+        return maxBitrateKbps === 10000
+          ? '10.0 Mbps (Ultra Fibra)'
+          : maxBitrateKbps === 6000
+          ? '6.0 Mbps (Equilibrado)'
+          : '8.5 Mbps (Pro Gaming)';
+      }
+      return '5.0 Mbps';
     }
-    return fps === 60 ? '3.2 Mbps' : '1.8 Mbps';
-  }, [resolution, fps, streamMode]);
+    return fps === 60 ? '4.5 Mbps' : '2.5 Mbps';
+  }, [resolution, fps, streamMode, maxBitrateKbps]);
 
   // Sincronizar com as preferências ao abrir
   useEffect(() => {
@@ -46,15 +54,24 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
       setFps(isDetail ? 30 : screenQuality.fps);
       setIncludeAudio(screenQuality.includeAudio ?? true);
       setStreamMode(screenQuality.mode || 'fluidity');
+      setMaxBitrateKbps(screenQuality.maxBitrateKbps || 8500);
     }
   }, [isOpen, screenQuality]);
+
+  const handleBitrateChange = useCallback(
+    (newBitrate: number) => {
+      setMaxBitrateKbps(newBitrate);
+      updateScreenQualityPreset({ resolution, fps, includeAudio, mode: streamMode, maxBitrateKbps: newBitrate });
+    },
+    [resolution, fps, includeAudio, streamMode, updateScreenQualityPreset]
+  );
 
   const handleResolutionChange = useCallback(
     (newRes: '720p' | '1080p') => {
       setResolution(newRes);
-      updateScreenQualityPreset({ resolution: newRes, fps, includeAudio, mode: streamMode });
+      updateScreenQualityPreset({ resolution: newRes, fps, includeAudio, mode: streamMode, maxBitrateKbps });
     },
-    [fps, includeAudio, streamMode, updateScreenQualityPreset]
+    [fps, includeAudio, streamMode, maxBitrateKbps, updateScreenQualityPreset]
   );
 
   const handleFpsChange = useCallback(
@@ -65,9 +82,9 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
       if (newMode !== streamMode) {
         setStreamMode(newMode);
       }
-      updateScreenQualityPreset({ resolution, fps: newFps, includeAudio, mode: newMode });
+      updateScreenQualityPreset({ resolution, fps: newFps, includeAudio, mode: newMode, maxBitrateKbps });
     },
-    [resolution, includeAudio, streamMode, updateScreenQualityPreset]
+    [resolution, includeAudio, streamMode, maxBitrateKbps, updateScreenQualityPreset]
   );
 
   const handleModeChange = useCallback(
@@ -78,18 +95,18 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
       if (newMode === 'detail') {
         setFps(30);
       }
-      updateScreenQualityPreset({ resolution, fps: targetFps, includeAudio, mode: newMode });
+      updateScreenQualityPreset({ resolution, fps: targetFps, includeAudio, mode: newMode, maxBitrateKbps });
     },
-    [resolution, fps, includeAudio, updateScreenQualityPreset]
+    [resolution, fps, includeAudio, maxBitrateKbps, updateScreenQualityPreset]
   );
 
   const handleToggleAudio = useCallback(() => {
     setIncludeAudio((prev) => {
       const next = !prev;
-      updateScreenQualityPreset({ resolution, fps, includeAudio: next, mode: streamMode });
+      updateScreenQualityPreset({ resolution, fps, includeAudio: next, mode: streamMode, maxBitrateKbps });
       return next;
     });
-  }, [resolution, fps, streamMode, updateScreenQualityPreset]);
+  }, [resolution, fps, streamMode, maxBitrateKbps, updateScreenQualityPreset]);
 
   const fetchSources = async () => {
     setLoading(true);
@@ -129,8 +146,8 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
   const windows = sources.filter((s) => s.id.startsWith('window:'));
 
   const handleStartShare = () => {
-    updateScreenQualityPreset({ resolution, fps, includeAudio, mode: streamMode });
-    onSelectSource(selectedSourceId || undefined, { resolution, fps, includeAudio, mode: streamMode });
+    updateScreenQualityPreset({ resolution, fps, includeAudio, mode: streamMode, maxBitrateKbps });
+    onSelectSource(selectedSourceId || undefined, { resolution, fps, includeAudio, mode: streamMode, maxBitrateKbps });
     onClose();
   };
 
@@ -308,6 +325,48 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                 60 FPS
               </button>
             </div>
+
+            {/* Seletor de Teto de Bitrate para 1080p 60FPS */}
+            {resolution === '1080p' && fps === 60 && streamMode !== 'detail' && (
+              <div className="flex items-center bg-obsidian-card p-1 rounded-xl border border-obsidian-border shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => handleBitrateChange(8500)}
+                  title="8.5 Mbps: Teto ideal Pro Gaming para jogos rápidos (CS2, shooters) com 60 FPS lisos"
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
+                    maxBitrateKbps === 8500
+                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                      : 'text-obsidian-text-secondary hover:text-white'
+                  }`}
+                >
+                  8.5M
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBitrateChange(10000)}
+                  title="10.0 Mbps: Teto ultra para conexões de alta velocidade (fibra) sem compressão"
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
+                    maxBitrateKbps === 10000
+                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                      : 'text-obsidian-text-secondary hover:text-white'
+                  }`}
+                >
+                  10M
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBitrateChange(6000)}
+                  title="6.0 Mbps: Teto equilibrado padrão"
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
+                    maxBitrateKbps === 6000
+                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
+                      : 'text-obsidian-text-secondary hover:text-white'
+                  }`}
+                >
+                  6.0M
+                </button>
+              </div>
+            )}
 
             {/* Toggle de Isolamento de Áudio da Tela */}
             <button

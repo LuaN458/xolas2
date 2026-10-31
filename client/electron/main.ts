@@ -38,9 +38,11 @@ app.commandLine.appendSwitch('force-high-performance-gpu');
 app.commandLine.appendSwitch('webrtc-max-cpu-consumption-percentage', '100');
 app.commandLine.appendSwitch('enable-webrtc-hw-encoding');
 app.commandLine.appendSwitch('enable-webrtc-hw-decoding');
+app.commandLine.appendSwitch('enable-accelerated-video-decode');
+app.commandLine.appendSwitch('enable-accelerated-mjpeg-decode');
 app.commandLine.appendSwitch(
   'enable-features',
-  'AllowWgcScreenCapturer,AllowWgcWindowCapturer,MediaFoundationD3D11VideoCapture,MediaFoundationVideoEncodeAcceleration,MediaFoundationVideoDecodeAcceleration,D3D11VideoDecoder,PlatformHEVCDecoderSupport,ZeroCopyTabCapture,WebRtcUseMinMaxVEADimensions'
+  'AllowWgcScreenCapturer,AllowWgcWindowCapturer,MediaFoundationD3D11VideoCapture,MediaFoundationVideoEncodeAcceleration,MediaFoundationVideoDecodeAcceleration,D3D11VideoDecoder,PlatformHEVCDecoderSupport,ZeroCopyTabCapture,WebRtcUseMinMaxVEADimensions,WebRtcSendBufferAdaptiveAllocation'
 );
 
 const __filename = fileURLToPath(import.meta.url);
