@@ -33,6 +33,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
   const handleSetPendingFile = (file: File) => {
     setUploadError(null);
 
+    // Validação de arquivo vazio (comum em descritores virtuais do Windows Snipping Tool)
+    if (!file || file.size <= 0) {
+      setUploadError('A imagem colada está vazia (0 KB) ou ainda não foi processada pela área de transferência. Tente colar novamente.');
+      return;
+    }
+
     // Validação de tipo MIME
     if (!ALLOWED_MIME_TYPES.has(file.type.toLowerCase())) {
       setUploadError('Formato inválido. Envie apenas imagens PNG, JPG, WebP ou GIF.');
@@ -73,24 +79,33 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
     }
   };
 
+  const generateCleanPrintName = (originalName?: string) => {
+    const isGuid = /^\{?[0-9a-fA-F-]{36}\}?\.png$/i.test(originalName || '');
+    if (!originalName || isGuid || originalName === 'image.png') {
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+      return `print-${timestamp}.png`;
+    }
+    return originalName;
+  };
+
   // Suporte a colar print da área de transferência (Ctrl+V)
-  const handlePaste = (e: ClipboardEvent<HTMLInputElement | HTMLDivElement>) => {
+  const handlePaste = async (e: ClipboardEvent<HTMLInputElement | HTMLDivElement>) => {
     const clipboardData = e.clipboardData;
     if (!clipboardData) return;
 
-    // Verificar se há arquivo nos itens da área de transferência
+    // 1. Verificar se há arquivo nos itens da área de transferência com bytes reais (> 0)
     const items = clipboardData.items;
     if (items) {
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         if (item.kind === 'file' && item.type.startsWith('image/')) {
           const file = item.getAsFile();
-          if (file) {
+          if (file && file.size > 0) {
             e.preventDefault();
-            // Para capturas de tela/prints, atribuir um nome representativo se vier vazio
-            const namedFile = file.name
-              ? file
-              : new File([file], `print-${Date.now()}.png`, { type: file.type || 'image/png' });
+            const cleanName = generateCleanPrintName(file.name);
+            const namedFile = new File([file], cleanName, { type: file.type || 'image/png' });
             handleSetPendingFile(namedFile);
             return;
           }
@@ -98,13 +113,38 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
       }
     }
 
-    // Fallback: verificar se há arquivos na lista direta
+    // 2. Fallback: verificar se há arquivos na lista direta de files com conteúdo (> 0)
     if (clipboardData.files && clipboardData.files.length > 0) {
-      const file = clipboardData.files[0];
-      if (file.type.startsWith('image/')) {
-        e.preventDefault();
-        handleSetPendingFile(file);
+      for (let i = 0; i < clipboardData.files.length; i++) {
+        const file = clipboardData.files[i];
+        if (file.type.startsWith('image/') && file.size > 0) {
+          e.preventDefault();
+          const cleanName = generateCleanPrintName(file.name);
+          const namedFile = new File([file], cleanName, { type: file.type || 'image/png' });
+          handleSetPendingFile(namedFile);
+          return;
+        }
       }
+    }
+
+    // 3. Fallback assíncrono para navigator.clipboard se os itens vierem com delayed rendering
+    if (navigator.clipboard && typeof navigator.clipboard.read === 'function') {
+      try {
+        const clipItems = await navigator.clipboard.read();
+        for (const clipItem of clipItems) {
+          const imageType = clipItem.types.find((t) => t.startsWith('image/'));
+          if (imageType) {
+            const blob = await clipItem.getType(imageType);
+            if (blob && blob.size > 0) {
+              e.preventDefault();
+              const cleanName = generateCleanPrintName();
+              const namedFile = new File([blob], cleanName, { type: imageType });
+              handleSetPendingFile(namedFile);
+              return;
+            }
+          }
+        }
+      } catch {}
     }
   };
 
@@ -188,10 +228,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
         }
       } catch (err: any) {
         console.error('Erro no upload de imagem:', err);
-        const errorMsg =
-          err.response?.data?.error ||
-          err.message ||
-          'Não foi possível enviar a imagem. Tente novamente.';
+        let errorMsg = err.response?.data?.error;
+        if (!errorMsg) {
+          if (err.response?.status === 404) {
+            errorMsg = 'O serviço de upload está reiniciando ou atualizando na nuvem. Aguarde alguns instantes e tente novamente.';
+          } else if (err.response?.status === 413) {
+            errorMsg = 'A imagem enviada excede o limite máximo permitido de 8 MB.';
+          } else if (err.response?.status === 401 || err.response?.status === 403) {
+            errorMsg = 'Você não possui permissão para enviar imagens. Verifique se sua conta foi aprovada.';
+          } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+            errorMsg = 'O envio da imagem demorou muito. Verifique sua conexão e tente novamente.';
+          } else {
+            errorMsg = err.message || 'Não foi possível enviar a imagem. Tente novamente.';
+          }
+        }
         setUploadError(errorMsg);
         setIsUploading(false);
         return;
@@ -247,7 +297,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
                 {pendingFile.name || 'Captura de tela (Print)'}
               </span>
               <span className="text-[10px] text-obsidian-text-muted">
-                {(pendingFile.size / 1024).toFixed(0)} KB • Imagem pronta para envio
+                {pendingFile.size < 1024 * 1024
+                  ? `${Math.max(1, Math.round(pendingFile.size / 1024))} KB`
+                  : `${(pendingFile.size / (1024 * 1024)).toFixed(1)} MB`}{' '}
+                • Imagem pronta para envio
               </span>
             </div>
           </div>

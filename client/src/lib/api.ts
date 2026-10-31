@@ -1,9 +1,9 @@
 import axios from 'axios';
 import { getAuthToken } from './authStorage';
 
-// Em produção, se VITE_API_URL não for informada, faz fallback para o servidor na nuvem (Render)
+// Se VITE_API_URL não for informada, faz fallback para o servidor de produção na nuvem (Render)
 const DEFAULT_PROD_API = 'https://xolas-server.onrender.com';
-const DEFAULT_DEV_API = 'http://localhost:3001';
+const DEFAULT_DEV_API = 'https://xolas-server.onrender.com';
 
 export const API_BASE =
   import.meta.env.VITE_API_URL ||
