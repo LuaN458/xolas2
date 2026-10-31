@@ -64,6 +64,11 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
     if (socket) {
       socket.emit('join-channel', channel.id);
 
+      const handleConnect = () => {
+        socket.emit('join-channel', channel.id);
+        loadMessages();
+      };
+
       const handleNewMessage = (msg: Message) => {
         if (msg.channelId === channel.id) {
           setMessages((prev) => [...prev, msg]);
@@ -76,11 +81,13 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
         }
       };
 
+      socket.on('connect', handleConnect);
       socket.on('new-message', handleNewMessage);
       socket.on('message-deleted', handleMessageDeleted);
 
       return () => {
         socket.emit('leave-channel', channel.id);
+        socket.off('connect', handleConnect);
         socket.off('new-message', handleNewMessage);
         socket.off('message-deleted', handleMessageDeleted);
         isMounted = false;

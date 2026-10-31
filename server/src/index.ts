@@ -157,13 +157,51 @@ server.listen(PORT, () => {
   ensureDatabaseAdminAndApprovalBootstrap();
 });
 
-// Encerramento seguro
-process.on('SIGINT', async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
+// Encerramento seguro e gracioso
+let isShuttingDown = false;
 
-process.on('SIGTERM', async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
+async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`\n🛑 [Shutdown] Sinal ${signal} recebido. Encerrando servidor graciosamente...`);
+
+  const forceExitTimeout = setTimeout(() => {
+    console.error('⚠️ [Shutdown] Tempo limite de encerramento excedido. Forçando saída.');
+    process.exit(1);
+  }, 5000);
+  forceExitTimeout.unref();
+
+  try {
+    // 1. Fechar conexões WebSocket do Socket.io
+    await new Promise<void>((resolve) => {
+      io.close(() => {
+        console.log('📡 [Shutdown] Socket.io encerrado com sucesso.');
+        resolve();
+      });
+    });
+
+    // 2. Fechar servidor HTTP
+    await new Promise<void>((resolve) => {
+      server.close((err) => {
+        if (err) {
+          console.error('⚠️ [Shutdown] Erro ao fechar servidor HTTP:', err);
+        } else {
+          console.log('🌐 [Shutdown] Servidor HTTP fechado com sucesso.');
+        }
+        resolve();
+      });
+    });
+
+    // 3. Desconectar Prisma ORM
+    await prisma.$disconnect();
+    console.log('💾 [Shutdown] Conexão com banco de dados Prisma encerrada.');
+
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ [Shutdown] Erro durante o encerramento gracioso:', error);
+    process.exit(1);
+  }
+}
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

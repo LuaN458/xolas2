@@ -300,11 +300,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
               isScreenShare={true}
               stream={activeShare.stream}
               videoTrack={activeShare.track}
-              volume={
-                isStreamMuted
-                  ? 0
-                  : Math.round((streamVolume * masterVolume) / 100)
-              }
+              volume={0}
               isLocal={activeShare.isLocal}
               onVideoResolutionResolved={(w, h) => setResolvedVideoDimensions({ width: w, height: h })}
             />

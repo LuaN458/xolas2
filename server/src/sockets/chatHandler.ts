@@ -160,15 +160,22 @@ export function setupSocketHandlers(io: Server): void {
         },
       });
 
+      if (!dbUser || dbUser.isApproved !== true) {
+        return next(new Error('Conta pendente de aprovação ou não autorizada'));
+      }
+
       socket.user = {
         userId: decoded.userId,
         username: sanitizeText(decoded.username, 32) || 'Usuário',
         email: typeof decoded.email === 'string' ? decoded.email : '',
-        role: dbUser?.role || decoded.role || 'USER',
-        permissions: dbUser?.customRole?.permissions || [],
+        role: dbUser.role || decoded.role || 'USER',
+        permissions: dbUser.customRole?.permissions || [],
       };
       next();
-    } catch {
+    } catch (err: any) {
+      if (err?.message === 'Conta pendente de aprovação ou não autorizada') {
+        return next(err);
+      }
       next(new Error('Token inválido'));
     }
   });
@@ -307,7 +314,7 @@ export function setupSocketHandlers(io: Server): void {
             return;
           }
 
-          removeSpecificUserFromVoice(targetUserId, channelId, serverId);
+          removeSpecificUserFromVoice(targetUserId, channelId, serverId, { forceAll: true });
 
           sendToUser(targetUserId, 'force-disconnect-voice', {
             channelId,
@@ -417,7 +424,8 @@ export function setupSocketHandlers(io: Server): void {
         // Difundir para todos os membros na sala do canal
         io.to(`channel:${channelId}`).emit('new-message', message);
       } catch (err) {
-        console.error('Erro ao enviar mensagem via socket:', err);
+        console.error('[Socket] Erro ao enviar mensagem via socket:', err);
+        socket.emit('message-error', { error: 'Falha ao processar e salvar mensagem.' });
       }
     });
 
@@ -443,21 +451,64 @@ export function setupSocketHandlers(io: Server): void {
       }
     };
 
+    // Verifica se o usuário ainda possui outro socket ativo e conectado nesta sala de voz
+    const hasOtherActiveVoiceSocket = (
+      targetUserId: string,
+      channelId: string,
+      excludeSocketId?: string
+    ): boolean => {
+      const socketIds = userSockets.get(targetUserId);
+      if (!socketIds) return false;
+      for (const sid of socketIds) {
+        if (excludeSocketId && sid === excludeSocketId) continue;
+        const s = io.sockets.sockets.get(sid) as AuthenticatedSocket | undefined;
+        if (s && s.connected && s.currentVoice?.channelId === channelId) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     // Função auxiliar para remover qualquer usuário de canal de voz
-    const removeSpecificUserFromVoice = (targetUserId: string, channelId: string, serverId: string) => {
+    const removeSpecificUserFromVoice = (
+      targetUserId: string,
+      channelId: string,
+      serverId: string,
+      options?: { forceAll?: boolean; excludeSocketId?: string }
+    ) => {
       if (!isValidIdentifier(channelId) || !isValidIdentifier(serverId) || !isValidIdentifier(targetUserId)) return;
 
-      const targetSocketIds = userSockets.get(targetUserId);
-      if (targetSocketIds) {
-        targetSocketIds.forEach((sid) => {
-          const s = io.sockets.sockets.get(sid) as AuthenticatedSocket | undefined;
+      const forceAll = Boolean(options?.forceAll);
+      const excludeSocketId = options?.excludeSocketId;
+
+      if (forceAll) {
+        const targetSocketIds = userSockets.get(targetUserId);
+        if (targetSocketIds) {
+          targetSocketIds.forEach((sid) => {
+            const s = io.sockets.sockets.get(sid) as AuthenticatedSocket | undefined;
+            if (s) {
+              s.leave(`voice:${channelId}`);
+              if (s.currentVoice?.channelId === channelId) {
+                s.currentVoice = undefined;
+              }
+            }
+          });
+        }
+      } else {
+        if (excludeSocketId) {
+          const s = io.sockets.sockets.get(excludeSocketId) as AuthenticatedSocket | undefined;
           if (s) {
             s.leave(`voice:${channelId}`);
             if (s.currentVoice?.channelId === channelId) {
               s.currentVoice = undefined;
             }
           }
-        });
+        }
+
+        // Se o usuário ainda tem outro socket conectado no mesmo canal de voz, NÃO remover da sala
+        if (hasOtherActiveVoiceSocket(targetUserId, channelId, excludeSocketId)) {
+          return;
+        }
       }
 
       const room = voiceRooms.get(channelId);
@@ -480,73 +531,93 @@ export function setupSocketHandlers(io: Server): void {
     };
 
     // Função auxiliar para remover usuário atual de canal de voz
-    const removeUserFromVoice = (channelId: string, serverId: string) => {
-      removeSpecificUserFromVoice(user.userId, channelId, serverId);
+    const removeUserFromVoice = (channelId: string, serverId: string, excludeSocketId?: string) => {
+      removeSpecificUserFromVoice(user.userId, channelId, serverId, {
+        excludeSocketId: excludeSocketId || socket.id,
+      });
     };
 
     // Conectar em canal de voz
     socket.on('join-voice', async (data: { serverId?: unknown; channelId?: unknown }) => {
-      const serverId = data?.serverId;
-      const channelId = data?.channelId;
-      if (!isValidIdentifier(serverId) || !isValidIdentifier(channelId)) return;
+      try {
+        const serverId = data?.serverId;
+        const channelId = data?.channelId;
+        if (!isValidIdentifier(serverId) || !isValidIdentifier(channelId)) return;
 
-      // Se já estava em outro canal de voz, sai dele antes
-      if (socket.currentVoice && socket.currentVoice.channelId !== channelId) {
-        removeUserFromVoice(socket.currentVoice.channelId, socket.currentVoice.serverId);
+        // Se já estava em outro canal de voz, sai dele antes
+        if (socket.currentVoice && socket.currentVoice.channelId !== channelId) {
+          const prevVoice = socket.currentVoice;
+          socket.leave(`voice:${prevVoice.channelId}`);
+          socket.currentVoice = undefined;
+          removeUserFromVoice(prevVoice.channelId, prevVoice.serverId, socket.id);
+        }
+
+        // Buscar avatar atualizado do usuário no banco de dados
+        const dbUser = await prisma.user.findUnique({
+          where: { id: user.userId },
+          select: { id: true, username: true, avatarUrl: true },
+        });
+
+        // Verificar se socket ainda está conectado após await no banco
+        if (!socket.connected) {
+          return;
+        }
+
+        const existingRoom = voiceRooms.get(channelId);
+        const existingEntry = existingRoom?.get(user.userId);
+
+        const safeUsername = dbUser?.username || user.username;
+        const participant: VoiceParticipant = {
+          id: user.userId,
+          username: safeUsername,
+          avatarUrl:
+            dbUser?.avatarUrl ||
+            `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(safeUsername)}`,
+          isMuted: existingEntry?.isMuted ?? false,
+          isSpeaking: existingEntry?.isSpeaking ?? false,
+          isScreenSharing: existingEntry?.isScreenSharing ?? false,
+          screenStreamId: existingEntry?.screenStreamId ?? null,
+        };
+
+        if (!voiceRooms.has(channelId)) {
+          voiceRooms.set(channelId, new Map());
+        }
+        voiceRooms.get(channelId)!.set(user.userId, participant);
+
+        socket.currentVoice = { serverId, channelId };
+        socket.join(`voice:${channelId}`);
+
+        const updatedUsers = getChannelVoiceParticipants(channelId);
+
+        // Notificar demais participantes da sala de voz para iniciar negociação WebRTC
+        socket.to(`voice:${channelId}`).emit('voice-peer-joined', {
+          channelId,
+          peer: participant,
+          participant,
+        });
+
+        // Notifica todos no servidor (inclusive o próprio usuário)
+        io.to(`server:${serverId}`).emit('voice-channel-updated', {
+          channelId,
+          users: updatedUsers,
+          participants: updatedUsers,
+        });
+      } catch (err) {
+        console.error('[Socket] Erro ao conectar no canal de voz:', err);
+        socket.emit('voice-error', { message: 'Erro ao ingressar no canal de voz. Tente novamente.' });
       }
-
-      // Buscar avatar atualizado do usuário no banco de dados
-      const dbUser = await prisma.user.findUnique({
-        where: { id: user.userId },
-        select: { id: true, username: true, avatarUrl: true },
-      });
-
-      const existingRoom = voiceRooms.get(channelId);
-      const existingEntry = existingRoom?.get(user.userId);
-
-      const safeUsername = dbUser?.username || user.username;
-      const participant: VoiceParticipant = {
-        id: user.userId,
-        username: safeUsername,
-        avatarUrl:
-          dbUser?.avatarUrl ||
-          `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(safeUsername)}`,
-        isMuted: existingEntry?.isMuted ?? false,
-        isSpeaking: existingEntry?.isSpeaking ?? false,
-        isScreenSharing: existingEntry?.isScreenSharing ?? false,
-        screenStreamId: existingEntry?.screenStreamId ?? null,
-      };
-
-      if (!voiceRooms.has(channelId)) {
-        voiceRooms.set(channelId, new Map());
-      }
-      voiceRooms.get(channelId)!.set(user.userId, participant);
-
-      socket.currentVoice = { serverId, channelId };
-      socket.join(`voice:${channelId}`);
-
-      const updatedUsers = getChannelVoiceParticipants(channelId);
-
-      // Notificar demais participantes da sala de voz para iniciar negociação WebRTC
-      socket.to(`voice:${channelId}`).emit('voice-peer-joined', {
-        channelId,
-        peer: participant,
-        participant,
-      });
-
-      // Notifica todos no servidor (inclusive o próprio usuário)
-      io.to(`server:${serverId}`).emit('voice-channel-updated', {
-        channelId,
-        users: updatedUsers,
-        participants: updatedUsers,
-      });
     });
 
     // Sair de canal de voz
     socket.on('leave-voice', (data: { serverId?: unknown; channelId?: unknown }) => {
-      if (!isValidIdentifier(data?.serverId) || !isValidIdentifier(data?.channelId)) return;
-      removeUserFromVoice(data.channelId, data.serverId);
-      socket.currentVoice = undefined;
+      try {
+        if (!isValidIdentifier(data?.serverId) || !isValidIdentifier(data?.channelId)) return;
+        socket.leave(`voice:${data.channelId}`);
+        socket.currentVoice = undefined;
+        removeUserFromVoice(data.channelId, data.serverId, socket.id);
+      } catch (err) {
+        console.error('[Socket] Erro ao sair do canal de voz:', err);
+      }
     });
 
     // Sinalização WebRTC Ponto-a-Ponto (Voz + Transmissão de Tela)
@@ -561,13 +632,15 @@ export function setupSocketHandlers(io: Server): void {
       }) => {
         if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
         const targetId = data?.toUserId || data?.targetUserId;
-        if (!isValidIdentifier(targetId) || !isValidIdentifier(data?.channelId)) return;
+        const channelId = data?.channelId;
+        if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
+        if (!socket.rooms.has(`voice:${channelId}`)) return;
         if (!data?.sdp || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
 
-        sendToUser(targetId, 'webrtc-offer', {
+        sendToUser(targetId as string, 'webrtc-offer', {
           fromUserId: user.userId,
           fromUsername: user.username,
-          channelId: data.channelId,
+          channelId,
           sdp: { type: data.sdp.type === 'offer' ? 'offer' : 'offer', sdp: data.sdp.sdp },
           screenStreamId: ensureScalarString(data.screenStreamId, 128) || null,
         });
@@ -585,13 +658,15 @@ export function setupSocketHandlers(io: Server): void {
       }) => {
         if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
         const targetId = data?.toUserId || data?.targetUserId;
-        if (!isValidIdentifier(targetId) || !isValidIdentifier(data?.channelId)) return;
+        const channelId = data?.channelId;
+        if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
+        if (!socket.rooms.has(`voice:${channelId}`)) return;
         if (!data?.sdp || typeof data.sdp.sdp !== 'string' || data.sdp.sdp.length > 65536) return;
 
-        sendToUser(targetId, 'webrtc-answer', {
+        sendToUser(targetId as string, 'webrtc-answer', {
           fromUserId: user.userId,
           fromUsername: user.username,
-          channelId: data.channelId,
+          channelId,
           sdp: { type: 'answer', sdp: data.sdp.sdp },
           screenStreamId: ensureScalarString(data.screenStreamId, 128) || null,
         });
@@ -603,12 +678,14 @@ export function setupSocketHandlers(io: Server): void {
       (data: { toUserId?: unknown; targetUserId?: unknown; channelId?: unknown; candidate?: any }) => {
         if (!allowSocketEvent('webrtc-ice', 300, 10_000)) return;
         const targetId = data?.toUserId || data?.targetUserId;
-        if (!isValidIdentifier(targetId) || !isValidIdentifier(data?.channelId)) return;
+        const channelId = data?.channelId;
+        if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
+        if (!socket.rooms.has(`voice:${channelId}`)) return;
         if (!data?.candidate || typeof data.candidate !== 'object') return;
 
-        sendToUser(targetId, 'webrtc-ice-candidate', {
+        sendToUser(targetId as string, 'webrtc-ice-candidate', {
           fromUserId: user.userId,
-          channelId: data.channelId,
+          channelId,
           candidate: data.candidate,
         });
       }
@@ -619,11 +696,13 @@ export function setupSocketHandlers(io: Server): void {
       (data: { toUserId?: unknown; targetUserId?: unknown; channelId?: unknown }) => {
         if (!allowSocketEvent('webrtc-sig', 120, 10_000)) return;
         const targetId = data?.toUserId || data?.targetUserId;
-        if (!isValidIdentifier(targetId) || !isValidIdentifier(data?.channelId)) return;
+        const channelId = data?.channelId;
+        if (!isValidIdentifier(targetId) || !isValidIdentifier(channelId)) return;
+        if (!socket.rooms.has(`voice:${channelId}`)) return;
 
         sendToUser(targetId as string, 'request-screen-stream', {
           fromUserId: user.userId,
-          channelId: data.channelId,
+          channelId,
         });
       }
     );
@@ -639,8 +718,9 @@ export function setupSocketHandlers(io: Server): void {
         screenStreamId?: unknown;
       }) => {
         if (!allowSocketEvent('voice-state', 120, 10_000)) return;
-        if (!isValidIdentifier(data?.channelId)) return;
-        const channelId = data.channelId;
+        const channelId = data?.channelId;
+        if (!isValidIdentifier(channelId)) return;
+        if (!socket.rooms.has(`voice:${channelId}`)) return;
 
         const room = voiceRooms.get(channelId);
         const safeScreenStreamId =
@@ -670,7 +750,7 @@ export function setupSocketHandlers(io: Server): void {
         // Notificar tanto os membros no canal de voz quanto no servidor
         socket.to(`voice:${channelId}`).emit('voice-user-state-updated', statePayload);
 
-        const targetServerId = isValidIdentifier(data.serverId)
+        const targetServerId = isValidIdentifier(data?.serverId)
           ? data.serverId
           : socket.currentVoice?.serverId;
         if (targetServerId) {
@@ -728,11 +808,15 @@ export function setupSocketHandlers(io: Server): void {
       socket.emit('voice-state-sync', getAllVoiceState());
     });
 
+    // Sair da sala do servidor ao trocar de contexto
+    socket.on('leave-server', (serverId: unknown) => {
+      if (!isValidIdentifier(serverId)) return;
+      socket.leave(`server:${serverId}`);
+    });
+
     socket.on('disconnect', () => {
-      if (socket.currentVoice) {
-        removeUserFromVoice(socket.currentVoice.channelId, socket.currentVoice.serverId);
-        socket.currentVoice = undefined;
-      }
+      const currentVoice = socket.currentVoice;
+      socket.currentVoice = undefined;
 
       const sockets = userSockets.get(userId);
       if (sockets) {
@@ -741,6 +825,10 @@ export function setupSocketHandlers(io: Server): void {
           userSockets.delete(userId);
           io.emit('user-status-changed', { userId, status: 'offline' });
         }
+      }
+
+      if (currentVoice) {
+        removeUserFromVoice(currentVoice.channelId, currentVoice.serverId, socket.id);
       }
     });
   });

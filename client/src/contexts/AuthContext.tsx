@@ -46,6 +46,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
+    const notifySessionTermination = () => {
+      try {
+        (window as any).electronAPI?.stopProcessAudioCapture?.();
+      } catch {}
+      try {
+        window.dispatchEvent(new CustomEvent('xolas:auth-logout'));
+      } catch {}
+    };
+
     async function verifySessionWithServer(activeToken: string) {
       if (!isMounted || !activeToken) return;
 
@@ -61,6 +70,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           loadedUser.approvalStatus === 'REJECTED' ||
           !loadedUser.isApproved
         ) {
+          notifySessionTermination();
           clearStoredAuthSession();
           setToken(null);
           setUser(null);
@@ -77,6 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Só desloga se o servidor recusar explicitamente a sessão (401 / 403)
         if (status === 401 || status === 403) {
+          notifySessionTermination();
           clearStoredAuthSession();
           setToken(null);
           setUser(null);
@@ -190,6 +201,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
     }
+    try {
+      (window as any).electronAPI?.stopProcessAudioCapture?.();
+    } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('xolas:auth-logout'));
+    } catch {}
     clearStoredAuthSession();
     setToken(null);
     setUser(null);

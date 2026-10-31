@@ -9,6 +9,7 @@ import {
   persistCachedServerDetails,
   persistCachedServers,
   persistAuthSession,
+  getAuthToken,
 } from './lib/authStorage';
 import { Server, Channel, CustomRole, User } from './types';
 
@@ -32,8 +33,14 @@ import { MessageSquareText } from 'lucide-react';
 
 export const App: React.FC = () => {
   const { user, loading, setUser, token } = useAuth();
-  const { socket } = useSocket();
+  const { socket, isConnected, isReconnecting, connectionError } = useSocket();
   const { joinVoiceChannel, currentVoiceChannel } = useVoice();
+
+  const userRef = useRef(user);
+  userRef.current = user;
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
+  const prevServerIdRef = useRef<string | null>(null);
 
   const [servers, setServers] = useState<Server[]>(() => getCachedServers());
   const [activeServerId, setActiveServerId] = useState<string | null>(() => {
@@ -201,9 +208,22 @@ export const App: React.FC = () => {
     };
   }, [activeServerId, socket]);
 
-  // Sincronizar participantes de voz em tempo real
+  // Sincronizar participantes de voz em tempo real e gerenciar entrada/saída de servidores
   useEffect(() => {
-    if (!socket || !activeServerId) return;
+    if (!socket) return;
+
+    if (!activeServerId) {
+      if (prevServerIdRef.current) {
+        socket.emit('leave-server', prevServerIdRef.current);
+        prevServerIdRef.current = null;
+      }
+      return;
+    }
+
+    if (prevServerIdRef.current && prevServerIdRef.current !== activeServerId) {
+      socket.emit('leave-server', prevServerIdRef.current);
+    }
+    prevServerIdRef.current = activeServerId;
 
     const joinCurrentServer = () => {
       socket.emit('join-server', activeServerId);
@@ -285,7 +305,7 @@ export const App: React.FC = () => {
     };
   }, [socket]);
 
-  // Sincronizar usuários online e novos membros em tempo real via WebSocket
+  // Sincronizar usuários online em tempo real via WebSocket
   useEffect(() => {
     if (!socket) return;
 
@@ -305,25 +325,12 @@ export const App: React.FC = () => {
       });
     };
 
-    const handleMemberJoined = (data: { serverId: string; member: any }) => {
-      setActiveServerDetails((prev) => {
-        if (!prev || prev.id !== data.serverId) return prev;
-        if (prev.members.some((m) => m.userId === data.member.userId)) return prev;
-        return {
-          ...prev,
-          members: [...prev.members, data.member],
-        };
-      });
-    };
-
     socket.on('online-users-list', handleOnlineList);
     socket.on('user-status-changed', handleStatusChanged);
-    socket.on('member-joined', handleMemberJoined);
 
     return () => {
       socket.off('online-users-list', handleOnlineList);
       socket.off('user-status-changed', handleStatusChanged);
-      socket.off('member-joined', handleMemberJoined);
     };
   }, [socket]);
 
@@ -375,19 +382,21 @@ export const App: React.FC = () => {
         };
       });
 
-      // Se for o próprio usuário logado, atualizar AuthContext e persistência local imediatamente
-      if (user && user.id === data.userId) {
+      // Se for o próprio usuário logado, atualizar AuthContext e persistência local imediatamente sem stale closures
+      setUser((currentUser) => {
+        if (!currentUser || currentUser.id !== data.userId) return currentUser;
         const updatedUser: User = {
-          ...user,
-          role: (data.role as any) || user.role,
+          ...currentUser,
+          role: (data.role as any) || currentUser.role,
           customRoleId: data.customRoleId,
           customRole: data.customRole,
         };
-        setUser(updatedUser);
-        if (token) {
-          persistAuthSession(token, updatedUser);
+        const activeToken = getAuthToken() || tokenRef.current;
+        if (activeToken) {
+          persistAuthSession(activeToken, updatedUser);
         }
-      }
+        return updatedUser;
+      });
     };
 
     const handleRoleCreated = (data: { role: CustomRole }) => {
@@ -403,22 +412,37 @@ export const App: React.FC = () => {
       setRoles((prev) =>
         prev.map((r) => (r.id === data.role.id ? data.role : r))
       );
-      // Se o usuário logado possuir este cargo, atualizar suas permissões em tempo real!
-      if (user && user.customRoleId === data.role.id) {
+      // Se o usuário logado possuir este cargo, atualizar suas permissões em tempo real sem stale closures!
+      setUser((currentUser) => {
+        if (!currentUser || currentUser.customRoleId !== data.role.id) return currentUser;
         const updatedUser: User = {
-          ...user,
+          ...currentUser,
           customRole: data.role,
         };
-        setUser(updatedUser);
-        if (token) {
-          persistAuthSession(token, updatedUser);
+        const activeToken = getAuthToken() || tokenRef.current;
+        if (activeToken) {
+          persistAuthSession(activeToken, updatedUser);
         }
-      }
+        return updatedUser;
+      });
     };
 
     const handleRoleDeleted = (data: { roleId: string }) => {
       if (!data?.roleId) return;
       setRoles((prev) => prev.filter((r) => r.id !== data.roleId));
+      setUser((currentUser) => {
+        if (!currentUser || currentUser.customRoleId !== data.roleId) return currentUser;
+        const updatedUser: User = {
+          ...currentUser,
+          customRoleId: null,
+          customRole: undefined,
+        };
+        const activeToken = getAuthToken() || tokenRef.current;
+        if (activeToken) {
+          persistAuthSession(activeToken, updatedUser);
+        }
+        return updatedUser;
+      });
     };
 
     socket.on('user:role-updated', handleUserRoleUpdated);
@@ -589,6 +613,16 @@ export const App: React.FC = () => {
 
           {/* 3. Área Central (Discussão ou Estúdio de Voz) */}
           <main className="flex-1 flex flex-col min-w-0 bg-obsidian-bg relative">
+            {user && !isConnected && (
+              <div className="bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-xs py-1.5 px-4 text-center shrink-0 z-20 flex items-center justify-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span>
+                  {isReconnecting
+                    ? 'Reconectando ao servidor...'
+                    : connectionError || 'Desconectado do servidor. Tentando reconectar...'}
+                </span>
+              </div>
+            )}
             {activeChannel ? (
               <>
                 <ChatHeader channel={activeChannel} />

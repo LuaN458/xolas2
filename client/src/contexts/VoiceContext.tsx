@@ -105,12 +105,29 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
 ];
 
+// Cache único de AudioContext para sons de feedback sem estourar limites do navegador
+let sharedAudioCueCtx: AudioContext | null = null;
+function getSharedAudioCueContext(): AudioContext | null {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!sharedAudioCueCtx || sharedAudioCueCtx.state === 'closed') {
+      sharedAudioCueCtx = new AudioCtx();
+    }
+    if (sharedAudioCueCtx.state === 'suspended') {
+      sharedAudioCueCtx.resume().catch(() => {});
+    }
+    return sharedAudioCueCtx;
+  } catch {
+    return null;
+  }
+}
+
 // Feedback sonoro suave estilo Discord para alternância de mudo e ensordecer
 function playAudioCue(type: 'mute' | 'unmute' | 'deafen' | 'undeafen') {
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    const ctx = getSharedAudioCueContext();
+    if (!ctx) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
@@ -151,8 +168,11 @@ function playAudioCue(type: 'mute' | 'unmute' | 'deafen' | 'undeafen') {
     }
 
     setTimeout(() => {
-      ctx.close().catch(() => {});
-    }, 300);
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {}
+    }, 250);
   } catch {}
 }
 
@@ -219,6 +239,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
   const currentScreenSourceIdRef = useRef<string | undefined>(undefined);
   const isRecoveringScreenShareRef = useRef<boolean>(false);
+
+  const streamVolumeRef = useRef<number>(initialSettings.streamVolume);
+  const isStreamMutedRef = useRef<boolean>(initialSettings.isStreamMuted);
+  const reconnectAttemptsRef = useRef<Map<string, { count: number; timer?: any }>>(new Map());
 
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const remoteParticipantsRef = useRef<Map<string, RemotePeerData>>(new Map());
@@ -441,6 +465,28 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     const key = `${peerId}:::${track.id}`;
+
+    // Limpar elementos e pipelines obsoletos anteriores do mesmo participante (ex: troca de microfone / renegotiation)
+    Array.from(audioElementsRef.current.entries()).forEach(([existingKey, el]) => {
+      if (existingKey.startsWith(`${peerId}:::`) && existingKey !== key) {
+        try {
+          el.pause();
+          el.srcObject = null;
+          el.remove();
+        } catch {}
+        audioElementsRef.current.delete(existingKey);
+
+        const oldPipeline = remotePipelinesRef.current.get(existingKey);
+        if (oldPipeline) {
+          try {
+            oldPipeline.source.disconnect();
+            oldPipeline.gainNode.disconnect();
+          } catch {}
+          remotePipelinesRef.current.delete(existingKey);
+        }
+      }
+    });
+
     let audioEl = audioElementsRef.current.get(key);
     if (!audioEl) {
       audioEl = document.createElement('audio');
@@ -488,7 +534,104 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     applyGainToPeer(peerId);
     audioEl.play().catch(() => {});
+
+    track.onended = () => {
+      const el = audioElementsRef.current.get(key);
+      if (el) {
+        try {
+          el.pause();
+          el.srcObject = null;
+          el.remove();
+        } catch {}
+        audioElementsRef.current.delete(key);
+      }
+      const pipeline = remotePipelinesRef.current.get(key);
+      if (pipeline) {
+        try {
+          pipeline.source.disconnect();
+          pipeline.gainNode.disconnect();
+        } catch {}
+        remotePipelinesRef.current.delete(key);
+      }
+    };
   }, [applyGainToPeer]);
+
+  const applyScreenAudioVolume = useCallback((audioEl: HTMLAudioElement) => {
+    if (isDeafenedRef.current || isStreamMutedRef.current) {
+      audioEl.muted = true;
+      audioEl.volume = 0;
+    } else {
+      audioEl.muted = false;
+      const vol = (streamVolumeRef.current / 100) * (masterVolumeRef.current / 100);
+      audioEl.volume = Math.max(0, Math.min(1, vol));
+    }
+  }, []);
+
+  // Anexa stream de áudio de compartilhamento de tela remoto ao container DOM de fundo
+  // para preservação contínua do áudio tanto na visualização em grade quanto em destaque
+  const attachRemoteScreenAudio = useCallback(
+    (peerId: string, track: MediaStreamTrack, stream?: MediaStream) => {
+      let container = document.getElementById('xolas-remote-audio-container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'xolas-remote-audio-container';
+        container.style.display = 'none';
+        document.body.appendChild(container);
+      }
+
+      const key = `screen:::${peerId}:::${track.id}`;
+
+      // Limpar elementos obsoletos de tela anteriores do mesmo participante
+      Array.from(audioElementsRef.current.entries()).forEach(([existingKey, el]) => {
+        if (existingKey.startsWith(`screen:::${peerId}:::`) && existingKey !== key) {
+          try {
+            el.pause();
+            el.srcObject = null;
+            el.remove();
+          } catch {}
+          audioElementsRef.current.delete(existingKey);
+        }
+      });
+
+      let audioEl = audioElementsRef.current.get(key);
+      if (!audioEl) {
+        audioEl = document.createElement('audio');
+        audioEl.autoplay = true;
+        (audioEl as any).playsInline = true;
+        container.appendChild(audioEl);
+        audioElementsRef.current.set(key, audioEl);
+      }
+
+      const mediaStream = stream || new MediaStream([track]);
+      if (audioEl.srcObject !== mediaStream) {
+        audioEl.srcObject = mediaStream;
+      }
+
+      applyScreenAudioVolume(audioEl);
+      audioEl.play().catch(() => {});
+
+      track.onended = () => {
+        const el = audioElementsRef.current.get(key);
+        if (el) {
+          try {
+            el.pause();
+            el.srcObject = null;
+            el.remove();
+          } catch {}
+          audioElementsRef.current.delete(key);
+        }
+      };
+    },
+    [applyScreenAudioVolume]
+  );
+
+  const updateAllScreenAudioVolumes = useCallback(() => {
+    audioElementsRef.current.forEach((el, key) => {
+      if (key.startsWith('screen:::')) {
+        applyScreenAudioVolume(el);
+      }
+    });
+  }, [applyScreenAudioVolume]);
 
   // Remove conexões e elementos de mídia de um participante específico
   const cleanupPeer = useCallback((peerId: string) => {
@@ -500,6 +643,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       pc.oniceconnectionstatechange = null;
       pc.close();
       peersRef.current.delete(peerId);
+    }
+    const reconnectAttempt = reconnectAttemptsRef.current.get(peerId);
+    if (reconnectAttempt?.timer) {
+      window.clearTimeout(reconnectAttempt.timer);
     }
     reconnectAttemptsRef.current.delete(peerId);
     pendingCandidatesRef.current.delete(peerId);
@@ -518,12 +665,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     });
 
-    // Remover elementos de áudio associados ao peer
+    // Remover elementos de áudio associados ao peer (voz e tela)
     Array.from(audioElementsRef.current.entries()).forEach(([key, el]) => {
-      if (key.startsWith(`${peerId}:::`)) {
-        el.pause();
-        el.srcObject = null;
-        el.remove();
+      if (key.startsWith(`${peerId}:::`) || key.startsWith(`screen:::${peerId}:::`)) {
+        try {
+          el.pause();
+          el.srcObject = null;
+          el.remove();
+        } catch {}
         audioElementsRef.current.delete(key);
       }
     });
@@ -849,7 +998,6 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [configureScreenVideoSender, configureScreenAudioSender]
   );
 
-  const reconnectAttemptsRef = useRef<Map<string, { count: number; timer?: any }>>(new Map());
   const getOrCreatePeerConnectionRef = useRef<any>(null);
 
   // Auto-recuperação WebRTC contra oscilações de rede, NAT timeout e conexões congeladas
@@ -1022,6 +1170,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
             tracks.push(track);
             peerData.screenStream = new MediaStream(tracks);
+            attachRemoteScreenAudio(remoteUserId, track, incomingStream || new MediaStream([track]));
           } else {
             peerData.audioTrack = track;
             attachRemoteAudio(remoteUserId, track, incomingStream || new MediaStream([track]));
@@ -1048,6 +1197,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const streamAudio = incomingStream?.getAudioTracks()[0];
           if (streamAudio) {
             peerData.screenAudioTrack = streamAudio;
+            attachRemoteScreenAudio(remoteUserId, streamAudio, incomingStream);
           }
 
           const tracks: MediaStreamTrack[] = [track];
@@ -1063,6 +1213,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               currentPeer.screenAudioTrack = undefined;
               currentPeer.screenStream = undefined;
               currentPeer.isScreenSharing = false;
+              Array.from(audioElementsRef.current.entries()).forEach(([key, el]) => {
+                if (key.startsWith(`screen:::${remoteUserId}:::`)) {
+                  try {
+                    el.pause();
+                    el.srcObject = null;
+                    el.remove();
+                  } catch {}
+                  audioElementsRef.current.delete(key);
+                }
+              });
               syncVoiceState();
             }
           };
@@ -1087,7 +1247,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       return { pc, isNew: true };
     },
-    [socket, attachRemoteAudio, syncVoiceState, sendOffer, configureScreenVideoSender, ensureScreenTracksForPeer, handlePeerConnectionIssue]
+    [socket, attachRemoteAudio, attachRemoteScreenAudio, syncVoiceState, sendOffer, configureScreenVideoSender, ensureScreenTracksForPeer, handlePeerConnectionIssue]
   );
 
   // Configura detector de atividade de voz com Voice Activation Gate real (DSP / Web Audio estilo Discord)
@@ -1535,6 +1695,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setSelectedAudioDeviceIdState(settings.selectedAudioDeviceId);
       masterVolumeRef.current = settings.masterOutputVolume;
       setMasterVolumeState(settings.masterOutputVolume);
+      if (typeof settings.streamVolume === 'number') {
+        streamVolumeRef.current = settings.streamVolume;
+      }
+      if (typeof settings.isStreamMuted === 'boolean') {
+        isStreamMutedRef.current = settings.isStreamMuted;
+      }
+      updateAllGainNodes();
+      updateAllScreenAudioVolumes();
       micInputGainRef.current = settings.micInputGain;
       setMicInputGainState(settings.micInputGain);
       voiceActivationThresholdRef.current = settings.voiceActivationThreshold;
@@ -1550,7 +1718,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setScreenQuality(updatedQuality);
     });
     return unsubscribe;
-  }, []);
+  }, [updateAllGainNodes, updateAllScreenAudioVolumes]);
 
   useEffect(() => {
     refreshAudioDevices();
@@ -1684,12 +1852,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         screenStream: existing?.screenStream,
       });
 
-      // Criar conexão e enviar oferta imediatamente (garante que quem já estava transmitindo envie a tela ao novo membro)
+      // Criar conexão e enviar oferta com desempate determinístico (evita colisão de ofertas simultâneas/glare)
       const { pc } = getOrCreatePeerConnection(peer.id, channelId);
       if (screenStreamRef.current) {
         ensureScreenTracksForPeer(peer.id, pc);
+        sendOffer(peer.id, channelId);
+      } else if (String(user?.id || '') < String(peer.id)) {
+        sendOffer(peer.id, channelId);
       }
-      sendOffer(peer.id, channelId);
       syncVoiceState();
     };
 
@@ -1744,7 +1914,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         peer.isScreenSharing = peerSharing;
         if (!peerSharing) {
           peer.screenTrack = undefined;
+          peer.screenAudioTrack = undefined;
           peer.screenStream = undefined;
+          Array.from(audioElementsRef.current.entries()).forEach(([key, el]) => {
+            if (key.startsWith(`screen:::${userId}:::`)) {
+              try {
+                el.pause();
+                el.srcObject = null;
+                el.remove();
+              } catch {}
+              audioElementsRef.current.delete(key);
+            }
+          });
         }
       }
       if (screenStreamId !== undefined) peer.screenStreamId = screenStreamId;
@@ -1920,6 +2101,32 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await sendOffer(fromUserId, channelId);
     };
 
+    // Re-sincronização de estado de voz quando o Socket.io reconecta após oscilação de rede
+    const handleSocketConnect = () => {
+      const ch = currentChannelRef.current;
+      if (ch) {
+        socket.emit('join-voice', {
+          serverId: ch.serverId,
+          channelId: ch.id,
+          isMuted: isMutedRef.current,
+          isScreenSharing: isScreenSharingRef.current,
+          screenStreamId: screenStreamRef.current?.id || null,
+        });
+
+        peersRef.current.forEach((pc, peerId) => {
+          if (
+            pc.connectionState === 'failed' ||
+            pc.connectionState === 'disconnected' ||
+            pc.iceConnectionState === 'failed' ||
+            pc.iceConnectionState === 'disconnected'
+          ) {
+            handlePeerConnectionIssue(peerId, ch.id);
+          }
+        });
+      }
+    };
+
+    socket.on('connect', handleSocketConnect);
     socket.on('voice-channel-updated', handleVoiceChannelUpdated);
     socket.on('voice-peer-joined', handleVoicePeerJoined);
     socket.on('voice-peer-left', handleVoicePeerLeft);
@@ -1930,6 +2137,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     socket.on('request-screen-stream', handleRequestScreenStream);
 
     return () => {
+      socket.off('connect', handleSocketConnect);
       socket.off('voice-channel-updated', handleVoiceChannelUpdated);
       socket.off('voice-peer-joined', handleVoicePeerJoined);
       socket.off('voice-peer-left', handleVoicePeerLeft);
@@ -1939,7 +2147,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       socket.off('webrtc-ice-candidate', handleWebRTCIceCandidate);
       socket.off('request-screen-stream', handleRequestScreenStream);
     };
-  }, [socket, user?.id, cleanupPeer, getOrCreatePeerConnection, sendOffer, syncVoiceState, ensureScreenTracksForPeer]);
+  }, [socket, user?.id, cleanupPeer, getOrCreatePeerConnection, sendOffer, syncVoiceState, ensureScreenTracksForPeer, handlePeerConnectionIssue]);
 
   // Watchdog periódico de integridade das conexões WebRTC na sala (auto-recuperação sem intervenção do admin)
   useEffect(() => {
@@ -2052,6 +2260,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       screenAudioCleanupRef.current = null;
     }
 
+    // Garantir término explícito de processos zumbis de áudio de loopback do Windows (wasapi-loopback.exe)
+    try {
+      window.electronAPI?.stopProcessAudioCapture?.();
+    } catch {}
+
     if (rawMicStreamRef.current) {
       rawMicStreamRef.current.getTracks().forEach((t) => t.stop());
       rawMicStreamRef.current = null;
@@ -2073,16 +2286,33 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     micGainNodeRef.current = null;
     vadGateGainNodeRef.current = null;
 
+    // Fechar e anular contexto Web Audio remoto para evitar acúmulo de instâncias suspensas
+    if (remoteAudioCtxRef.current && remoteAudioCtxRef.current.state !== 'closed') {
+      try {
+        remoteAudioCtxRef.current.close().catch(() => {});
+      } catch {}
+      remoteAudioCtxRef.current = null;
+    }
+
     if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current.getTracks().forEach((t) => {
+        t.onended = null;
+        t.stop();
+      });
       screenStreamRef.current = null;
     }
+    currentScreenSourceIdRef.current = undefined;
+    isRecoveringScreenShareRef.current = false;
     setScreenStream(null);
     isScreenSharingRef.current = false;
     setIsScreenSharing(false);
 
     Array.from(peersRef.current.keys()).forEach((peerId) => cleanupPeer(peerId));
+    peersRef.current.clear();
     remoteParticipantsRef.current.clear();
+    screenSendersRef.current.clear();
+    pendingCandidatesRef.current.clear();
+    makingOfferRef.current.clear();
 
     remotePipelinesRef.current.forEach((pipeline) => {
       try {
@@ -2099,12 +2329,50 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
     audioElementsRef.current.clear();
 
+    // Limpar o container de áudio remoto no DOM
+    const audioContainer = document.getElementById('xolas-remote-audio-container');
+    if (audioContainer) {
+      audioContainer.innerHTML = '';
+    }
+
     setCurrentVoiceChannel(null);
     setLivekitToken(null);
     setVoiceParticipants([]);
     setActiveScreenShares([]);
     setSelectedScreenShareId(null);
   }, [socket, cleanupPeer]);
+
+  // Teardown automático de voz, faixas de mídia e processos nativos ao deslogar ou expirar sessão
+  useEffect(() => {
+    const handleAuthLogout = () => {
+      leaveVoiceChannel();
+    };
+
+    window.addEventListener('xolas:auth-logout', handleAuthLogout);
+    return () => {
+      window.removeEventListener('xolas:auth-logout', handleAuthLogout);
+    };
+  }, [leaveVoiceChannel]);
+
+  useEffect(() => {
+    if (!user) {
+      if (
+        currentChannelRef.current ||
+        screenStreamRef.current ||
+        rawMicStreamRef.current ||
+        peersRef.current.size > 0
+      ) {
+        leaveVoiceChannel();
+      }
+    }
+  }, [user, leaveVoiceChannel]);
+
+  // Limpeza garantida ao desmontar VoiceProvider
+  useEffect(() => {
+    return () => {
+      leaveVoiceChannel();
+    };
+  }, [leaveVoiceChannel]);
 
   const lastMuteToggleRef = useRef<number>(0);
   const lastDeafenToggleRef = useRef<number>(0);
@@ -2166,12 +2434,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         el.volume = next ? 0 : Math.max(0, Math.min(1, masterVolumeRef.current / 100));
       });
       updateAllGainNodes();
+      updateAllScreenAudioVolumes();
       playAudioCue(next ? 'deafen' : 'undeafen');
       syncVoiceState();
       emitLocalVoiceState();
       return next;
     });
-  }, [syncVoiceState, emitLocalVoiceState, updateAllGainNodes]);
+  }, [syncVoiceState, emitLocalVoiceState, updateAllGainNodes, updateAllScreenAudioVolumes]);
 
   // Ouvintes de Moderação de Administrador (Desconexão forçada da chamada e Silenciamento no servidor)
   useEffect(() => {
@@ -3053,9 +3322,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const watchScreenShare = useCallback(
     (shareId: string) => {
       setSelectedScreenShareId(shareId);
-      const targetUserId = shareId.replace(/^screen-/, '');
+      const targetUserId = shareId.replace(/^(remote-)?screen-/, '');
       const ch = currentChannelRef.current;
-      if (socket && ch && targetUserId && targetUserId !== user?.id && targetUserId !== 'local-screen') {
+      if (
+        socket &&
+        ch &&
+        targetUserId &&
+        targetUserId !== user?.id &&
+        targetUserId !== 'local-screen' &&
+        targetUserId !== 'local'
+      ) {
         const peerData = remoteParticipantsRef.current.get(targetUserId);
         if (!peerData?.screenTrack || peerData.screenTrack.readyState !== 'live') {
           socket.emit('request-screen-stream', {
