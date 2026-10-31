@@ -1,12 +1,6 @@
 ; Script de Personalização do Instalador NSIS do Xolas
 ; Aplica tema Obsidian Dark (#08090c / #12141a), Dark Mode nativo do Windows e barra de progresso Índigo (#6366f1)
 
-!macro customInit
-  ; Garantir que processos auxiliares estejam encerrados antes de substituir arquivos
-  !insertmacro KILL_PROCESS "wasapi-loopback.exe" 1
-  !insertmacro KILL_PROCESS "hotkey-helper.exe" 1
-!macroend
-
 !macro customInstall
   ${IfNot} ${Silent}
     ; 1. Ativar Dark Mode na barra de título da janela do instalador (Windows 10 Build 19041+ e Windows 11)
