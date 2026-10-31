@@ -1005,163 +1005,173 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </p>
               </div>
 
-              {/* Sensibilidade / Ganho do Microfone */}
-              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-2 text-obsidian-text-secondary font-medium">
-                    <Sliders className="w-4 h-4 text-emerald-400" />
-                    <span>Sensibilidade do Microfone</span>
-                  </div>
-                  <span className="text-xs font-mono font-bold text-white bg-obsidian-surface px-2 py-0.5 rounded-lg border border-obsidian-border tabular-nums">
-                    {micInputGain}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={micInputGain}
-                  onChange={(e) => setMicInputGain(Number(e.target.value))}
-                  className="w-full h-1.5 bg-obsidian-surface rounded-lg appearance-none cursor-pointer accent-emerald-500 hover:accent-emerald-400"
-                />
-                <p className="text-[10px] text-obsidian-text-muted">
-                  Ajuste a intensidade de captação da sua voz antes de entrar em salas ou transmissões.
-                </p>
-              </div>
-
-              {/* Sensibilidade de Entrada / Limiar de Ativação por Voz (Estilo Discord) */}
-              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3.5">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-2 text-obsidian-text-secondary font-medium">
-                    <Volume2 className="w-4 h-4 text-emerald-400" />
-                    <span>Sensibilidade de Entrada (Ativação por Voz)</span>
-                  </div>
-                  {volumeLevel >= voiceActivationThreshold ? (
-                    <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-md border border-emerald-500/40 flex items-center space-x-1.5 animate-pulse">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      <span>Transmitindo ({volumeLevel}% / {Math.round(-60 + (volumeLevel / 100) * 60)} dBFS)</span>
+              {/* Card Único Integrado: Ganho do Microfone & Portão de Voz (Studio Obsidian) */}
+              <div className="p-5 bg-obsidian-card rounded-2xl border border-obsidian-border shadow-xl space-y-4">
+                {/* Seção Superior: Ganho / Sensibilidade do Microfone */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center space-x-2.5">
+                      <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                        <Sliders className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="font-semibold text-white tracking-tight">Sensibilidade do Microfone</span>
+                        <p className="text-[10px] text-obsidian-text-muted">Ajuste a intensidade e ganho geral de captação da sua voz</p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-mono font-bold text-emerald-400 bg-obsidian-surface px-2.5 py-1 rounded-lg border border-obsidian-border tabular-nums shadow-sm">
+                      {micInputGain}%
                     </span>
-                  ) : (
-                    <span className="text-[10px] font-mono text-obsidian-text-muted bg-obsidian-surface px-2 py-0.5 rounded-md border border-obsidian-border">
-                      Silenciado ({volumeLevel}% / {Math.round(-60 + (volumeLevel / 100) * 60)} dBFS)
-                    </span>
-                  )}
-                </div>
-
-                {/* Barra Interativa com Marcador de Limiar Sobreposto Estilo Discord */}
-                <div
-                  onPointerDown={handleThresholdPointerDown}
-                  onPointerMove={handleThresholdPointerMove}
-                  onPointerUp={handleThresholdPointerUp}
-                  onPointerCancel={handleThresholdPointerUp}
-                  className="relative w-full h-8 bg-obsidian-surface rounded-xl overflow-hidden border border-obsidian-border select-none flex items-center cursor-pointer touch-none"
-                >
-                  {/* Nível do microfone abaixo do limiar (Região Cortada / Ruído de Fundo em âmbar) */}
-                  <div
-                    className="absolute left-0 top-0 bottom-0 bg-amber-500/25 transition-all duration-75"
-                    style={{
-                      width: `${Math.min(volumeLevel, voiceActivationThreshold)}%`,
-                    }}
-                  />
-
-                  {/* Nível do microfone acima do limiar (Região Ativa / Transmitida em verde esmeralda com brilho) */}
-                  {volumeLevel > voiceActivationThreshold && (
-                    <div
-                      className="absolute top-0 bottom-0 bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_14px_rgba(16,185,129,0.55)] transition-all duration-75"
-                      style={{
-                        left: `${voiceActivationThreshold}%`,
-                        width: `${Math.max(0, volumeLevel - voiceActivationThreshold)}%`,
-                      }}
-                    />
-                  )}
-
-                  {/* Marcador Vertical da Linha de Corte (Threshold Handle) */}
-                  <div
-                    className="absolute top-0 bottom-0 w-1 bg-white shadow-lg pointer-events-none z-10"
-                    style={{ left: `calc(${voiceActivationThreshold}% - 2px)` }}
-                  >
-                    <div className="absolute -top-1 -left-1 w-3 h-3 bg-white rounded-full shadow-md border border-black/30" />
-                    <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-white rounded-full shadow-md border border-black/30" />
                   </div>
 
-                  {/* Input Range Invisível Sobreposto para acessibilidade via teclado */}
                   <input
                     type="range"
                     min="0"
                     max="100"
-                    value={voiceActivationThreshold}
-                    onChange={(e) => setVoiceActivationThreshold(Number(e.target.value))}
-                    className="absolute inset-0 w-full h-full opacity-0 pointer-events-none z-20"
-                    title={`Limiar de ativação: ${voiceActivationThreshold}%`}
-                    aria-label="Limiar de ativação por voz"
+                    value={micInputGain}
+                    onChange={(e) => setMicInputGain(Number(e.target.value))}
+                    className="w-full h-1.5 bg-obsidian-surface rounded-lg appearance-none cursor-pointer accent-emerald-500 hover:accent-emerald-400"
+                    title={`Sensibilidade do microfone: ${micInputGain}%`}
                   />
                 </div>
 
-                {/* Legendas e Dica de Calibração */}
-                <div className="flex items-center justify-between text-[11px] text-obsidian-text-muted font-mono">
-                  <span>0% (Mais sensível)</span>
-                  <span className="text-white font-bold bg-obsidian-surface px-2.5 py-0.5 rounded-lg border border-obsidian-border text-xs flex items-center space-x-1.5">
-                    <span>Corte em {voiceActivationThreshold}%</span>
-                    <span className="text-obsidian-text-muted text-[10px]">
-                      ({Math.round(-60 + (voiceActivationThreshold / 100) * 60)} dBFS)
+                {/* Divisor Elegante de Estúdio */}
+                <div className="border-t border-obsidian-border/60 pt-3.5 space-y-3">
+                  {/* Cabeçalho do Portão de Voz com Indicador de Transmissão */}
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center space-x-2 text-obsidian-text-secondary font-medium">
+                      <Volume2 className="w-4 h-4 text-emerald-400" />
+                      <span className="text-white font-medium">Sensibilidade de Entrada (Ativação por Voz)</span>
+                    </div>
+
+                    {volumeLevel >= voiceActivationThreshold || voiceActivationThreshold === 0 ? (
+                      <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/40 flex items-center space-x-1.5 animate-pulse shadow-sm shadow-emerald-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span>Transmitindo ({volumeLevel}% / {Math.round(-60 + (volumeLevel / 100) * 60)} dBFS)</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono text-obsidian-text-muted bg-obsidian-surface px-2.5 py-0.5 rounded-full border border-obsidian-border flex items-center space-x-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-obsidian-border" />
+                        <span>Silenciado ({volumeLevel}% / {Math.round(-60 + (volumeLevel / 100) * 60)} dBFS)</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Barra Interativa com Marcador de Agulha Magnética em Diamante (Estilo Studio) */}
+                  <div
+                    onPointerDown={handleThresholdPointerDown}
+                    onPointerMove={handleThresholdPointerMove}
+                    onPointerUp={handleThresholdPointerUp}
+                    onPointerCancel={handleThresholdPointerUp}
+                    className="relative w-full h-7 bg-obsidian-surface rounded-xl overflow-hidden border border-obsidian-border select-none flex items-center cursor-pointer touch-none shadow-inner"
+                  >
+                    {/* Região Cortada / Ruído de Fundo (Âmbar Translúcido Suave) */}
+                    <div
+                      className="absolute left-0 top-0 bottom-0 bg-amber-500/25 transition-all duration-75"
+                      style={{
+                        width: `${Math.min(volumeLevel, voiceActivationThreshold)}%`,
+                      }}
+                    />
+
+                    {/* Região Transmitida / Voz Ativa (Gradiente Esmeralda/Teal com Brilho Neon) */}
+                    {(volumeLevel > voiceActivationThreshold || voiceActivationThreshold === 0) && (
+                      <div
+                        className="absolute top-0 bottom-0 bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_12px_rgba(16,185,129,0.55)] transition-all duration-75"
+                        style={{
+                          left: `${voiceActivationThreshold}%`,
+                          width: `${Math.max(0, volumeLevel - voiceActivationThreshold)}%`,
+                        }}
+                      />
+                    )}
+
+                    {/* Marcador Vertical em Agulha Magnética Chanfrada (Sem bolinhas grossas) */}
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg pointer-events-none z-10"
+                      style={{ left: `calc(${voiceActivationThreshold}% - 1px)` }}
+                    >
+                      <div className="absolute -top-1 -left-1.5 w-3.5 h-3.5 bg-white rounded-md shadow-md transform rotate-45 border border-black/40" />
+                      <div className="absolute -bottom-1 -left-1.5 w-3.5 h-3.5 bg-white rounded-md shadow-md transform rotate-45 border border-black/40" />
+                    </div>
+
+                    {/* Input Range Invisível para Acessibilidade por Teclado */}
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={voiceActivationThreshold}
+                      onChange={(e) => setVoiceActivationThreshold(Number(e.target.value))}
+                      className="absolute inset-0 w-full h-full opacity-0 pointer-events-none z-20"
+                      title={`Limiar de ativação: ${voiceActivationThreshold}%`}
+                      aria-label="Limiar de ativação por voz"
+                    />
+                  </div>
+
+                  {/* Legendas Numéricas de Precisão */}
+                  <div className="flex items-center justify-between text-[11px] text-obsidian-text-muted font-mono">
+                    <span>0% (Mais sensível)</span>
+                    <span className="text-white font-bold bg-obsidian-surface px-2.5 py-0.5 rounded-lg border border-obsidian-border text-xs flex items-center space-x-1.5">
+                      <span>Corte em {voiceActivationThreshold}%</span>
+                      <span className="text-obsidian-text-muted text-[10px]">
+                        ({Math.round(-60 + (voiceActivationThreshold / 100) * 60)} dBFS)
+                      </span>
                     </span>
-                  </span>
-                  <span>100% (Menos sensível)</span>
-                </div>
+                    <span>100% (Menos sensível)</span>
+                  </div>
 
-                {/* Presets Rápidos de Calibração */}
-                <div className="flex items-center flex-wrap gap-2 pt-0.5">
-                  <span className="text-[10px] text-obsidian-text-muted font-medium">Calibração Rápida:</span>
-                  <button
-                    type="button"
-                    onClick={() => setVoiceActivationThreshold(0)}
-                    className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
-                      voiceActivationThreshold === 0
-                        ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300 font-bold shadow-sm shadow-indigo-500/20'
-                        : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
-                    }`}
-                    title="Mantém o microfone 100% aberto sem nenhum corte (transmissão contínua)"
-                  >
-                    Sempre Ativo (0%)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVoiceActivationThreshold(15)}
-                    className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
-                      voiceActivationThreshold === 15
-                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
-                        : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
-                    }`}
-                  >
-                    Sensível (15%)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVoiceActivationThreshold(20)}
-                    className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
-                      voiceActivationThreshold === 20
-                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
-                        : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
-                    }`}
-                  >
-                    Padrão / Discord (20%) ⭐
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVoiceActivationThreshold(40)}
-                    className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
-                      voiceActivationThreshold === 40
-                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
-                        : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
-                    }`}
-                  >
-                    Ambiente Barulhento (40%)
-                  </button>
-                </div>
+                  {/* Presets Rápidos de Calibração em Pills Minimalistas */}
+                  <div className="flex items-center flex-wrap gap-2 pt-1 border-t border-obsidian-border/40">
+                    <span className="text-[10px] text-obsidian-text-muted font-medium">Calibração Rápida:</span>
+                    <button
+                      type="button"
+                      onClick={() => setVoiceActivationThreshold(0)}
+                      className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
+                        voiceActivationThreshold === 0
+                          ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300 font-bold shadow-sm shadow-indigo-500/20'
+                          : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                      }`}
+                      title="Mantém o microfone 100% aberto sem nenhum corte (transmissão contínua)"
+                    >
+                      Sempre Ativo (0%)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVoiceActivationThreshold(15)}
+                      className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
+                        voiceActivationThreshold === 15
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
+                          : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                      }`}
+                    >
+                      Sensível (15%)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVoiceActivationThreshold(20)}
+                      className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
+                        voiceActivationThreshold === 20
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
+                          : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                      }`}
+                    >
+                      Padrão / Discord (20%) ⭐
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVoiceActivationThreshold(40)}
+                      className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
+                        voiceActivationThreshold === 40
+                          ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
+                          : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                      }`}
+                    >
+                      Ambiente Barulhento (40%)
+                    </button>
+                  </div>
 
-                <p className="text-[10px] text-obsidian-text-muted leading-relaxed">
-                  Arraste o marcador branco para ajustar: sons à esquerda da linha serão bloqueados (cortando barulhos de teclado e respiração), e sons que ultrapassarem a linha serão transmitidos para todos na sala.
-                </p>
+                  <p className="text-[10px] text-obsidian-text-muted leading-relaxed">
+                    Arraste o marcador para ajustar: sons à esquerda da linha serão bloqueados (cortando barulhos de teclado e respiração), e sons que ultrapassarem a linha serão transmitidos para todos na sala.
+                  </p>
+                </div>
               </div>
 
               {/* Volume Geral de Saída das Transmissões e Salas */}
