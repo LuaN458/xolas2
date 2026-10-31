@@ -2466,13 +2466,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             maxWidth: width,
             maxHeight: height,
             maxFrameRate: fps,
-            minFrameRate: Math.min(30, fps),
           };
 
           // Para monitores inteiros (screen:), fixar minWidth e minHeight para forçar o Chromium a entregar exatamente 1080p ou 720p
           if (!isWindow) {
             videoMandatory.minWidth = width;
             videoMandatory.minHeight = height;
+            videoMandatory.minFrameRate = Math.min(30, fps);
           }
 
           try {
@@ -2487,23 +2487,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               },
             });
           } catch (errWindow) {
-            console.warn('Captura de vídeo com minFrameRate falhou, tentando constraints simplificados:', errWindow);
+            console.warn('Captura de vídeo com constraints avançados falhou, tentando constraints simplificados adaptativos:', errWindow);
             const fallbackMandatory: any = {
               chromeMediaSource: 'desktop',
               chromeMediaSourceId: sourceId,
-              maxWidth: width,
-              maxHeight: height,
-              maxFrameRate: fps,
             };
             if (!isWindow) {
-              fallbackMandatory.minWidth = width;
-              fallbackMandatory.minHeight = height;
+              fallbackMandatory.maxWidth = width;
+              fallbackMandatory.maxHeight = height;
+              fallbackMandatory.maxFrameRate = fps;
             }
             stream = await (navigator.mediaDevices as any).getUserMedia({
               audio: false,
               video: {
                 mandatory: fallbackMandatory,
-                optional: [{ googCpuOveruseDetection: false }],
               },
             });
           }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { ScreenSource } from '../../types';
 import { useVoice, ScreenQualityOptions } from '../../contexts/VoiceContext';
-import { Monitor, X, AppWindow, Check, Sparkles, RefreshCw, Volume2, VolumeX } from 'lucide-react';
+import { Monitor, X, AppWindow, Check, Sparkles, RefreshCw, Volume2, VolumeX, Gamepad2 } from 'lucide-react';
 
 interface ScreenShareModalProps {
   isOpen: boolean;
@@ -259,6 +259,37 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
 
         {/* Grade de Miniaturas das Telas e Janelas */}
         <div className="p-6 flex-1 overflow-y-auto">
+          {/* Banner de Orientação para Jogos (Valorant, CS2, LoL, etc.) */}
+          {activeTab === 'windows' && !loading && (
+            <div className="mb-4 p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl flex items-start justify-between gap-3 text-xs shadow-sm">
+              <div className="flex items-start space-x-2.5">
+                <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 shrink-0 mt-0.5">
+                  <Gamepad2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <p className="font-semibold text-indigo-200">
+                    Transmitindo jogos com anti-cheat (Valorant, CS2, LoL)?
+                  </p>
+                  <p className="text-[11px] text-obsidian-text-secondary mt-0.5 leading-relaxed">
+                    Para transmitir apenas a janela do jogo sem tela preta, coloque o jogo em{' '}
+                    <strong className="text-white">"Tela Cheia em Janela / Sem Bordas"</strong> nas opções de vídeo dele, ou transmita diretamente pela aba{' '}
+                    <strong className="text-white">"Telas Inteiras"</strong> (captura nativa da GPU a 60 FPS com áudio isolado).
+                  </p>
+                </div>
+              </div>
+              {screens.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('screens')}
+                  className="px-2.5 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white border border-indigo-400/30 text-[11px] font-semibold whitespace-nowrap transition-all shrink-0"
+                  title="Compartilhar monitor inteiro"
+                >
+                  Ir para Telas ({screens.length})
+                </button>
+              )}
+            </div>
+          )}
+
           {loading ? (
             <div className="text-center py-16 text-obsidian-text-muted text-xs font-mono space-y-2">
               <div className="w-6 h-6 border-2 border-obsidian-accent border-t-transparent rounded-full animate-spin mx-auto" />

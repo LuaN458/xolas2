@@ -38,7 +38,7 @@ app.commandLine.appendSwitch('enable-webrtc-hw-encoding');
 app.commandLine.appendSwitch('enable-webrtc-hw-decoding');
 app.commandLine.appendSwitch(
   'enable-features',
-  'MediaFoundationD3D11VideoCapture,MediaFoundationVideoEncodeAcceleration,MediaFoundationVideoDecodeAcceleration,D3D11VideoDecoder,PlatformHEVCDecoderSupport'
+  'AllowWgcScreenCapturer,AllowWgcWindowCapturer,MediaFoundationD3D11VideoCapture,MediaFoundationVideoEncodeAcceleration,MediaFoundationVideoDecodeAcceleration,D3D11VideoDecoder,PlatformHEVCDecoderSupport'
 );
 
 const __filename = fileURLToPath(import.meta.url);
@@ -417,36 +417,70 @@ ipcMain.handle('open-external', async (_event, url: unknown) => {
 // Handler IPC para capturar janelas e telas disponíveis para transmissão
 ipcMain.handle('get-screen-sources', async () => {
   try {
-    let sources = [];
-    try {
-      sources = await desktopCapturer.getSources({
-        types: ['screen', 'window'],
-        thumbnailSize: { width: 480, height: 270 },
-        fetchWindowIcons: false,
-      });
-    } catch (err) {
-      console.warn('Erro ao buscar janelas e telas em conjunto, tentando telas:', err);
-      sources = await desktopCapturer.getSources({
+    // 1. Obter telas (monitores) de forma isolada
+    const screensPromise = desktopCapturer
+      .getSources({
         types: ['screen'],
         thumbnailSize: { width: 480, height: 270 },
+      })
+      .catch((err) => {
+        console.warn('[desktopCapturer] Erro ao obter telas:', err);
+        return [];
       });
-    }
 
-    if (!sources || sources.length === 0) {
-      sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width: 480, height: 270 },
-      });
-    }
+    // 2. Obter janelas com ícones nativos e fallback resiliente
+    const windowsPromise = (async () => {
+      try {
+        return await desktopCapturer.getSources({
+          types: ['window'],
+          thumbnailSize: { width: 480, height: 270 },
+          fetchWindowIcons: true,
+        });
+      } catch (errIcons) {
+        console.warn('[desktopCapturer] Falha ao buscar janelas com ícones, tentando sem ícones:', errIcons);
+        try {
+          return await desktopCapturer.getSources({
+            types: ['window'],
+            thumbnailSize: { width: 480, height: 270 },
+            fetchWindowIcons: false,
+          });
+        } catch (errWindows) {
+          console.warn('[desktopCapturer] Erro ao obter janelas:', errWindows);
+          return [];
+        }
+      }
+    })();
 
-    return sources.map((source) => ({
-      id: source.id,
-      name: source.name || (source.id.startsWith('screen:') ? 'Monitor' : 'Janela'),
-      thumbnail: source.thumbnail ? source.thumbnail.toDataURL() : '',
-      appIcon: null,
-    }));
+    const [screens, windows] = await Promise.all([screensPromise, windowsPromise]);
+    const allSources = [...screens, ...windows];
+
+    return allSources.map((source) => {
+      const isScreen = source.id.startsWith('screen:');
+      const cleanName = source.name ? source.name.trim() : '';
+
+      let appIcon: string | null = null;
+      try {
+        if (source.appIcon && !source.appIcon.isEmpty()) {
+          appIcon = source.appIcon.toDataURL();
+        }
+      } catch {}
+
+      let thumbnail = '';
+      try {
+        if (source.thumbnail && !source.thumbnail.isEmpty()) {
+          thumbnail = source.thumbnail.toDataURL();
+        }
+      } catch {}
+
+      return {
+        id: source.id,
+        name: cleanName || (isScreen ? 'Monitor' : 'Janela'),
+        thumbnail,
+        appIcon,
+      };
+    });
   } catch (error) {
-    console.error('Erro ao capturar fontes de tela:', error);
+    console.error('Erro geral ao capturar fontes de tela:', error);
     return [];
   }
 });
