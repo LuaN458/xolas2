@@ -56,7 +56,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
       setStreamMode(screenQuality.mode || 'fluidity');
       setMaxBitrateKbps(screenQuality.maxBitrateKbps || 8500);
     }
-  }, [isOpen, screenQuality]);
+  }, [isOpen]);
 
   const handleBitrateChange = useCallback(
     (newBitrate: number) => {

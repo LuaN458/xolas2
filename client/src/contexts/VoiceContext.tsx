@@ -5,6 +5,7 @@ import { useAuth } from './AuthContext';
 import {
   getUserSettings,
   saveUserSetting,
+  saveMultipleUserSettings,
   subscribeToSettingsChange,
   resolveAudioDevice,
   keyboardEventToAccelerator,
@@ -1493,17 +1494,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     (opts: ScreenQualityOptions) => {
       screenQualityRef.current = opts;
       setScreenQuality(opts);
-      saveUserSetting('screenResolution', opts.resolution);
-      saveUserSetting('screenFps', opts.fps);
-      if (opts.includeAudio !== undefined) {
-        saveUserSetting('screenIncludeAudio', opts.includeAudio);
-      }
-      if (opts.mode) {
-        saveUserSetting('screenStreamMode', opts.mode);
-      }
-      if (opts.maxBitrateKbps) {
-        saveUserSetting('screenMaxBitrateKbps', opts.maxBitrateKbps);
-      }
+      saveMultipleUserSettings({
+        screenResolution: opts.resolution,
+        screenFps: opts.fps,
+        ...(opts.includeAudio !== undefined ? { screenIncludeAudio: opts.includeAudio } : {}),
+        ...(opts.mode ? { screenStreamMode: opts.mode } : {}),
+        ...(opts.maxBitrateKbps ? { screenMaxBitrateKbps: opts.maxBitrateKbps } : {}),
+      });
 
       // Atualizar em tempo real se já houver uma transmissão ativa
       if (screenStreamRef.current) {
@@ -1547,6 +1544,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         fps: settings.screenFps,
         includeAudio: settings.screenIncludeAudio,
         mode: settings.screenStreamMode || 'fluidity',
+        maxBitrateKbps: settings.screenMaxBitrateKbps || 8500,
       };
       screenQualityRef.current = updatedQuality;
       setScreenQuality(updatedQuality);
@@ -2877,7 +2875,15 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     async (sourceId?: string, quality?: ScreenQualityOptions) => {
       try {
         currentScreenSourceIdRef.current = sourceId;
-        const activeQuality = quality || { resolution: '1080p', fps: 60, includeAudio: true, mode: 'fluidity' };
+        const activeQuality =
+          quality ||
+          screenQualityRef.current || {
+            resolution: '1080p',
+            fps: 60,
+            includeAudio: true,
+            mode: 'fluidity',
+            maxBitrateKbps: 8500,
+          };
         screenQualityRef.current = activeQuality;
         setScreenQuality(activeQuality);
 
