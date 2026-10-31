@@ -634,12 +634,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!params.encodings || params.encodings.length === 0) {
           params.encodings = [{}];
         }
-        const targetBitrate = quality.resolution === '1080p' ? 7_000_000 : 4_000_000;
+        const is1080 = quality.resolution === '1080p';
+        const targetBitrate = is1080 ? 7_000_000 : 4_000_000;
         const targetFps = quality.fps || 60;
 
-        // 'balanced' permite ao WebRTC equilibrar dinamicamente resolução e framerate,
-        // evitando travadas quando houver picos de CPU ou oscilação de rede
-        (params as any).degradationPreference = 'balanced';
+        // 'maintain-resolution' garante que o WebRTC nunca rebaixe 1080p para 720p sob variações de banda
+        (params as any).degradationPreference = 'maintain-resolution';
+        params.encodings[0].scaleResolutionDownBy = 1.0;
         params.encodings[0].maxBitrate = targetBitrate;
         params.encodings[0].maxFramerate = targetFps;
         (params.encodings[0] as any).priority = 'high';
@@ -2462,13 +2463,16 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const videoMandatory: any = {
             chromeMediaSource: 'desktop',
             chromeMediaSourceId: sourceId,
+            maxWidth: width,
+            maxHeight: height,
             maxFrameRate: fps,
             minFrameRate: Math.min(30, fps),
           };
 
+          // Para monitores inteiros (screen:), fixar minWidth e minHeight para forçar o Chromium a entregar exatamente 1080p ou 720p
           if (!isWindow) {
-            videoMandatory.maxWidth = width;
-            videoMandatory.maxHeight = height;
+            videoMandatory.minWidth = width;
+            videoMandatory.minHeight = height;
           }
 
           try {
@@ -2479,25 +2483,27 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               audio: false,
               video: {
                 mandatory: videoMandatory,
-                optional: isWindow
-                  ? [{ maxWidth: width }, { maxHeight: height }, { googCpuOveruseDetection: false }]
-                  : [{ googCpuOveruseDetection: false }],
+                optional: [{ googCpuOveruseDetection: false }],
               },
             });
           } catch (errWindow) {
-            console.warn('Captura de vídeo com maxFrameRate falhou, tentando constraints simplificados:', errWindow);
+            console.warn('Captura de vídeo com minFrameRate falhou, tentando constraints simplificados:', errWindow);
+            const fallbackMandatory: any = {
+              chromeMediaSource: 'desktop',
+              chromeMediaSourceId: sourceId,
+              maxWidth: width,
+              maxHeight: height,
+              maxFrameRate: fps,
+            };
+            if (!isWindow) {
+              fallbackMandatory.minWidth = width;
+              fallbackMandatory.minHeight = height;
+            }
             stream = await (navigator.mediaDevices as any).getUserMedia({
               audio: false,
               video: {
-                mandatory: {
-                  chromeMediaSource: 'desktop',
-                  chromeMediaSourceId: sourceId,
-                },
-                optional: [
-                  { maxWidth: width },
-                  { maxHeight: height },
-                  { googCpuOveruseDetection: false },
-                ],
+                mandatory: fallbackMandatory,
+                optional: [{ googCpuOveruseDetection: false }],
               },
             });
           }
@@ -2514,8 +2520,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } else {
           stream = await navigator.mediaDevices.getDisplayMedia({
             video: {
-              width: { ideal: width },
-              height: { ideal: height },
+              width: { ideal: width, max: width },
+              height: { ideal: height, max: height },
               frameRate: { ideal: fps, max: fps },
             },
             audio: includeAudio,
@@ -2535,6 +2541,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           try {
             // Priorizar fluidez de movimento (60 FPS constantes em jogos 3D) em vez de travar frames
             (videoTrack as any).contentHint = 'motion';
+          } catch {}
+          try {
+            await videoTrack.applyConstraints({
+              width: { ideal: width, max: width },
+              height: { ideal: height, max: height },
+              frameRate: { ideal: fps, max: fps },
+            });
           } catch {}
           videoTrack.onended = () => {
             stopScreenShare();

@@ -230,6 +230,35 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     return activeScreenShares.find((s) => s.id === selectedScreenShareId) || null;
   }, [activeScreenShares, selectedScreenShareId]);
 
+  const [resolvedVideoDimensions, setResolvedVideoDimensions] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    setResolvedVideoDimensions(null);
+  }, [activeShare?.id]);
+
+  const activeStreamQualityLabel = useMemo(() => {
+    if (!activeShare) return '';
+    if (activeShare.isLocal) {
+      return `${screenQuality.resolution} ${screenQuality.fps}FPS`;
+    }
+    if (resolvedVideoDimensions && resolvedVideoDimensions.height > 0) {
+      const h = resolvedVideoDimensions.height;
+      const res = h >= 1000 ? '1080p' : h >= 700 ? '720p' : `${h}p`;
+      return `${res} 60FPS`;
+    }
+    const track = activeShare.track || activeShare.stream?.getVideoTracks()[0];
+    if (track) {
+      const settings = track.getSettings?.();
+      const h = settings?.height;
+      const f = Math.round(settings?.frameRate || 0);
+      if (h) {
+        const res = h >= 1000 ? '1080p' : h >= 700 ? '720p' : `${h}p`;
+        return f ? `${res} ${f}FPS` : res;
+      }
+    }
+    return `${screenQuality.resolution} ${screenQuality.fps}FPS`;
+  }, [activeShare, screenQuality, resolvedVideoDimensions]);
+
   return (
     <div className="flex-1 bg-obsidian-bg flex flex-col justify-between overflow-hidden relative">
       {activeShare ? (
@@ -277,6 +306,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                   : Math.round((streamVolume * masterVolume) / 100)
               }
               isLocal={activeShare.isLocal}
+              onVideoResolutionResolved={(w, h) => setResolvedVideoDimensions({ width: w, height: h })}
             />
 
             {/* Barra Superior de Controles de Transmissão */}
@@ -284,7 +314,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
               {/* Badge de Qualidade */}
               <div className="bg-black/75 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/10 flex items-center space-x-2 text-xs text-white pointer-events-auto shadow-lg">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="font-mono font-semibold">{screenQuality.resolution} {screenQuality.fps}FPS</span>
+                <span className="font-mono font-semibold">{activeStreamQualityLabel}</span>
               </div>
 
               {/* Ações: Volume com Porcentagem, Trocar Janela (se local) e Tela Cheia */}

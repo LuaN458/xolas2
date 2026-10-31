@@ -15,6 +15,7 @@ interface ParticipantTileProps {
   volume?: number; // 0 a 100
   isLocal?: boolean;
   onContextMenu?: (e: React.MouseEvent) => void;
+  onVideoResolutionResolved?: (width: number, height: number) => void;
 }
 
 export const ParticipantTile: React.FC<ParticipantTileProps> = ({
@@ -31,6 +32,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
   volume = 100,
   isLocal = false,
   onContextMenu,
+  onVideoResolutionResolved,
 }) => {
   const videoRef = React.useRef<HTMLVideoElement>(null);
 
@@ -130,8 +132,16 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
           disablePictureInPicture
           muted={isLocal || volume === 0}
           onLoadedMetadata={(e) => {
+            if (onVideoResolutionResolved && e.currentTarget.videoWidth && e.currentTarget.videoHeight) {
+              onVideoResolutionResolved(e.currentTarget.videoWidth, e.currentTarget.videoHeight);
+            }
             if (!(isLocal && isScreenShare && document.hidden)) {
               e.currentTarget.play().catch(() => {});
+            }
+          }}
+          onResize={(e) => {
+            if (onVideoResolutionResolved && e.currentTarget.videoWidth && e.currentTarget.videoHeight) {
+              onVideoResolutionResolved(e.currentTarget.videoWidth, e.currentTarget.videoHeight);
             }
           }}
           className="w-full h-full object-contain bg-black transform-gpu will-change-transform"
