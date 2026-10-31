@@ -50,10 +50,11 @@ const globalRateLimiter = createRateLimiter({
 
 app.use('/api', globalRateLimiter);
 
-// Rota de Health Check
-app.get('/api/health', (req, res) => {
-  res.json({
+// Rotas de Health Check e Raiz (para UptimeRobot / BetterStack e monitoramento)
+app.get(['/', '/health', '/api/health'], (req, res) => {
+  res.status(200).json({
     status: 'ok',
+    app: 'Xolas Server API',
     time: new Date().toISOString(),
     livekitConfigured: Boolean(process.env.LIVEKIT_URL && !process.env.LIVEKIT_URL.includes('your-livekit-url')),
   });
