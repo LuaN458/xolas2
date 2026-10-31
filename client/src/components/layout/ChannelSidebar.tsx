@@ -379,7 +379,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
           inVoiceChannelName={contextMenu.channel.name}
           onVolumeChange={(newVolume) => setUserVolume(contextMenu.userId, newVolume)}
           onToggleMute={contextMenu.userId === user?.id ? selfToggleMute : () => toggleMuteUser(contextMenu.userId)}
-          onToggleDeafen={toggleDeafen}
+          onToggleDeafen={contextMenu.userId === user?.id ? toggleDeafen : undefined}
           isServerMuted={
             voiceParticipants[contextMenu.channel.id]?.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
           }

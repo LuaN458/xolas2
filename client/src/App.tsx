@@ -228,13 +228,29 @@ export const App: React.FC = () => {
       }));
     };
 
+    const handleVoiceUserStateUpdated = (data: { channelId: string; userId: string; isMuted?: boolean }) => {
+      if (!data?.channelId || !data?.userId) return;
+      setVoiceParticipants((prev) => {
+        const channelList = prev[data.channelId];
+        if (!channelList) return prev;
+        return {
+          ...prev,
+          [data.channelId]: channelList.map((p) =>
+            p.id === data.userId ? { ...p, isMuted: data.isMuted !== undefined ? Boolean(data.isMuted) : p.isMuted } : p
+          ),
+        };
+      });
+    };
+
     socket.on('voice-state-sync', handleVoiceSync);
     socket.on('voice-channel-updated', handleVoiceChannelUpdated);
+    socket.on('voice-user-state-updated', handleVoiceUserStateUpdated);
 
     return () => {
       socket.off('connect', joinCurrentServer);
       socket.off('voice-state-sync', handleVoiceSync);
       socket.off('voice-channel-updated', handleVoiceChannelUpdated);
+      socket.off('voice-user-state-updated', handleVoiceUserStateUpdated);
     };
   }, [socket, activeServerId, currentVoiceChannel]);
 

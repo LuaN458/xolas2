@@ -197,7 +197,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           username: sp.username,
           avatarUrl: sp.avatarUrl,
           isSpeaking: false,
-          isMuted: false,
+          isMuted: Boolean(sp.isMuted),
           isLocal,
           hasScreenShare: Boolean(sp.isScreenSharing),
         });
@@ -635,7 +635,10 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           isSelf={contextMenu.userId === user?.id}
           inVoiceChannelName={channel.name}
           isServerMuted={
-            socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ?? false
+            Boolean(
+              socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ||
+              voiceParticipants.find((p) => p.id === contextMenu.userId)?.isMuted
+            )
           }
           onDisconnectVoice={
             isAdmin || user?.customRole?.permissions?.includes('disconnect_voice')
@@ -651,8 +654,10 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           onToggleServerMute={
             isAdmin || user?.customRole?.permissions?.includes('server_mute')
               ? () => {
-                  const currentMuted =
-                    socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ?? false;
+                  const currentMuted = Boolean(
+                    socketParticipants.find((p) => p.id === contextMenu.userId)?.isMuted ||
+                    voiceParticipants.find((p) => p.id === contextMenu.userId)?.isMuted
+                  );
                   socket?.emit('admin:server-mute-voice', {
                     targetUserId: contextMenu.userId,
                     channelId: channel.id,
@@ -669,7 +674,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           }
           onVolumeChange={(newVol) => setUserVolume(contextMenu.userId, newVol)}
           onToggleMute={contextMenu.userId === user?.id ? selfToggleMute : () => toggleMuteUser(contextMenu.userId)}
-          onToggleDeafen={toggleDeafen}
+          onToggleDeafen={contextMenu.userId === user?.id ? toggleDeafen : undefined}
           onClose={() => setContextMenu(null)}
         />
       )}

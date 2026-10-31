@@ -219,7 +219,7 @@ export const MemberList: React.FC<MemberListProps> = ({
           isDeafened={isDeafened}
           onVolumeChange={(newVolume) => setUserVolume(targetUserId, newVolume)}
           onToggleMute={isSelf ? selfToggleMute : () => toggleMuteUser(targetUserId)}
-          onToggleDeafen={toggleDeafen}
+          onToggleDeafen={isSelf ? toggleDeafen : undefined}
           onClose={() => setContextMenu(null)}
           isAdmin={canManageRoles || canDisconnectVoice || canServerMute}
           isSelf={isSelf}

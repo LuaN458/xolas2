@@ -271,21 +271,36 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (gain > 1.0 && ctx && ctx.state !== 'closed' && pipeline) {
           try {
             if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+            pipeline.gainNode.gain.cancelScheduledValues(ctx.currentTime);
             pipeline.gainNode.gain.setValueAtTime(gain, ctx.currentTime);
+            pipeline.gainNode.gain.value = gain;
             el.muted = true; // Web Audio entrega a reprodução amplificada
             el.volume = 1.0;
           } catch {
             el.muted = false;
             el.volume = 1.0;
           }
+        } else if (gain === 0) {
+          // Silenciamento total (Local ou Ensurdecer)
+          if (pipeline && ctx && ctx.state !== 'closed') {
+            try {
+              pipeline.gainNode.gain.cancelScheduledValues(ctx.currentTime);
+              pipeline.gainNode.gain.setValueAtTime(0, ctx.currentTime);
+              pipeline.gainNode.gain.value = 0;
+            } catch {}
+          }
+          el.muted = true;
+          el.volume = 0;
         } else {
           // Volume normal 0% a 100% nativo no elemento de áudio
           if (pipeline && ctx && ctx.state !== 'closed') {
             try {
+              pipeline.gainNode.gain.cancelScheduledValues(ctx.currentTime);
               pipeline.gainNode.gain.setValueAtTime(0, ctx.currentTime);
+              pipeline.gainNode.gain.value = 0;
             } catch {}
           }
-          el.muted = (gain === 0);
+          el.muted = false;
           el.volume = Math.max(0, Math.min(1, gain));
         }
       }
@@ -450,6 +465,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!pipeline) {
           const source = ctx.createMediaStreamSource(mediaStream);
           const gainNode = ctx.createGain();
+          gainNode.gain.value = 0; // Inicializar em 0 para não vazar áudio antes do applyGainToPeer
           source.connect(gainNode);
           gainNode.connect(ctx.destination);
 
@@ -1505,7 +1521,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         remoteParticipantsRef.current.set(userId, peer);
       }
 
-      if (typeof peerMuted === 'boolean') peer.isMuted = peerMuted;
+      if (typeof peerMuted === 'boolean') {
+        peer.isMuted = peerMuted;
+        applyGainToPeer(userId);
+      }
       if (typeof peerSpeaking === 'boolean') peer.isSpeaking = peerSpeaking;
       if (typeof peerSharing === 'boolean') {
         peer.isScreenSharing = peerSharing;
@@ -2628,29 +2647,24 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const setUserVolume = useCallback((userId: string, volume: number) => {
     const clamped = Math.max(0, Math.min(200, Math.round(volume)));
-    setUserVolumes((prev) => {
-      const updated = { ...prev, [userId]: clamped };
-      userVolumesRef.current = updated;
-      try {
-        localStorage.setItem('xolas_user_volumes', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
-
+    const updated = { ...userVolumesRef.current, [userId]: clamped };
+    userVolumesRef.current = updated;
+    try {
+      localStorage.setItem('xolas_user_volumes', JSON.stringify(updated));
+    } catch {}
+    setUserVolumes(updated);
     applyGainToPeer(userId);
   }, [applyGainToPeer]);
 
   const toggleMuteUser = useCallback((userId: string) => {
-    setUserMuted((prev) => {
-      const next = !prev[userId];
-      const updated = { ...prev, [userId]: next };
-      userMutedRef.current = updated;
-      try {
-        localStorage.setItem('xolas_user_muted', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
-
+    const currentMuted = Boolean(userMutedRef.current[userId]);
+    const nextMuted = !currentMuted;
+    const updated = { ...userMutedRef.current, [userId]: nextMuted };
+    userMutedRef.current = updated;
+    try {
+      localStorage.setItem('xolas_user_muted', JSON.stringify(updated));
+    } catch {}
+    setUserMuted(updated);
     applyGainToPeer(userId);
   }, [applyGainToPeer]);
 

@@ -102,7 +102,7 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
   const safeY = Math.max(12, Math.min(y, window.innerHeight - MENU_APPROX_HEIGHT - 16));
 
   const effectiveVolume = isMuted ? 0 : volume;
-  const hasVoiceModeration = Boolean(onDisconnectVoice || onToggleServerMute);
+  const hasVoiceModeration = Boolean(onDisconnectVoice);
   const activeRole = roles.find((r) => r.id === currentRoleId);
 
   const handleRoleSelect = async (roleId: string | null) => {
@@ -266,27 +266,32 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
             <span className="text-amber-400/80">200%</span>
           </div>
 
-          {/* Botão de Silenciamento Local (Mudo do Usuário) */}
+          {/* Opção 1: Silenciar para Mim (Local Mute com Checkbox - Estilo Discord) */}
           <button
             type="button"
             onClick={onToggleMute}
-            className={`w-full mt-1.5 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
+            className={`w-full mt-2 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
               isMuted
                 ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25'
                 : 'bg-obsidian-surface hover:bg-white/10 text-obsidian-text-primary hover:text-white border border-obsidian-border'
             }`}
           >
-            <div className="flex items-center space-x-2">
-              <MicOff
-                className={`w-4 h-4 ${
+            <div className="flex items-center space-x-2 min-w-0">
+              <VolumeX
+                className={`w-4 h-4 shrink-0 ${
                   isMuted ? 'text-rose-400' : 'text-obsidian-text-muted group-hover:text-white'
                 }`}
               />
-              <span>Silenciar Usuário</span>
+              <div className="flex flex-col text-left truncate">
+                <span className="truncate">Silenciar para Mim</span>
+                <span className="text-[10px] font-normal text-obsidian-text-muted group-hover:text-obsidian-text-secondary">
+                  Apenas para você
+                </span>
+              </div>
             </div>
 
             <div
-              className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
+              className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
                 isMuted
                   ? 'bg-rose-500 border-rose-400'
                   : 'border-white/30 group-hover:border-white/50 bg-transparent'
@@ -303,36 +308,41 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
             </div>
           </button>
 
-          {/* Botão de Desativar Áudio (Ensurdecer / Mudo Geral) */}
-          {onToggleDeafen && (
+          {/* Opção 2: Silenciar no Servidor (Server Mute com Checkbox - Estilo Discord) */}
+          {onToggleServerMute && (
             <button
               type="button"
-              onClick={onToggleDeafen}
+              onClick={onToggleServerMute}
               className={`w-full mt-1.5 flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all group ${
-                isDeafened
-                  ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25'
+                isServerMuted
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
                   : 'bg-obsidian-surface hover:bg-white/10 text-obsidian-text-primary hover:text-white border border-obsidian-border'
               }`}
             >
-              <div className="flex items-center space-x-2">
-                <Headphones
-                  className={`w-4 h-4 ${
-                    isDeafened ? 'text-rose-400' : 'text-obsidian-text-muted group-hover:text-white'
+              <div className="flex items-center space-x-2 min-w-0">
+                <MicOff
+                  className={`w-4 h-4 shrink-0 ${
+                    isServerMuted ? 'text-amber-400' : 'text-obsidian-text-muted group-hover:text-amber-300'
                   }`}
                 />
-                <span>Desativar Áudio</span>
+                <div className="flex flex-col text-left truncate">
+                  <span className="truncate">Silenciar no Servidor</span>
+                  <span className="text-[10px] font-normal text-obsidian-text-muted group-hover:text-obsidian-text-secondary">
+                    Para todos no canal
+                  </span>
+                </div>
               </div>
 
               <div
-                className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
-                  isDeafened
-                    ? 'bg-rose-500 border-rose-400'
+                className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                  isServerMuted
+                    ? 'bg-amber-500 border-amber-400'
                     : 'border-white/30 group-hover:border-white/50 bg-transparent'
                 }`}
               >
-                {isDeafened && (
+                {isServerMuted && (
                   <svg
-                    className="w-3 h-3 text-white fill-current"
+                    className="w-3 h-3 text-obsidian-bg fill-current font-bold"
                     viewBox="0 0 20 20"
                   >
                     <path d="M0 11l2-2 5 5L18 3l2 2L7 18z" />
@@ -504,29 +514,6 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
           </div>
 
           <div className="space-y-1.5">
-            {onToggleServerMute && (
-              <button
-                type="button"
-                onClick={() => {
-                  onToggleServerMute();
-                  onClose();
-                }}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
-                  isServerMuted
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
-                    : 'bg-obsidian-surface hover:bg-white/10 text-obsidian-text-secondary hover:text-white border border-obsidian-border'
-                }`}
-              >
-                <div className="flex items-center space-x-2">
-                  <MicOff className="w-4 h-4 text-amber-400" />
-                  <span>{isServerMuted ? 'Desmutar no Servidor' : 'Silenciar no Servidor'}</span>
-                </div>
-                <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                  Para Todos
-                </span>
-              </button>
-            )}
-
             {onDisconnectVoice && (
               <button
                 type="button"
