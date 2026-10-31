@@ -49,6 +49,8 @@ export interface Server {
 export interface Message {
   id: string;
   content: string;
+  attachmentUrl?: string | null;
+  attachmentType?: string | null;
   userId: string;
   channelId: string;
   createdAt: string;

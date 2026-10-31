@@ -2,6 +2,7 @@ import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import { Server as SocketIOServer } from 'socket.io';
 
 dotenv.config();
@@ -11,6 +12,7 @@ import serverRoutes from './routes/servers';
 import channelRoutes from './routes/channels';
 import livekitRoutes from './routes/livekit';
 import adminRoutes from './routes/admin';
+import uploadRoutes from './routes/upload';
 import { setupSocketHandlers } from './sockets/chatHandler';
 import { prisma } from './lib/prisma';
 import {
@@ -82,12 +84,23 @@ app.get('/api/roles', authMiddleware, async (req, res) => {
   }
 });
 
+// Servir arquivos de uploads locais com proteções adicionais
+app.use(
+  '/uploads',
+  express.static(path.resolve(process.cwd(), 'uploads'), {
+    dotfiles: 'ignore',
+    index: false,
+    maxAge: '7d',
+  })
+);
+
 // Rotas da API
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/servers', serverRoutes);
 app.use('/api/channels', channelRoutes);
 app.use('/api/livekit', livekitRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Configurar WebSockets
 setupSocketHandlers(io);

@@ -456,11 +456,12 @@ export const App: React.FC = () => {
   }, [activeChannel, activeServerDetails, redirectToGeneralChat]);
 
   // Enviar mensagem de chat via WebSocket
-  const handleSendMessage = (content: string) => {
+  const handleSendMessage = (content: string, attachmentUrl?: string) => {
     if (!activeChannel || !socket) return;
     socket.emit('send-message', {
       channelId: activeChannel.id,
       content,
+      attachmentUrl,
     });
   };
 

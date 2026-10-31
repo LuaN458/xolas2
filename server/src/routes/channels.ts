@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { adminMiddleware, authMiddleware, AuthRequest } from '../middlewares/auth';
 import { ensureScalarString, isValidIdentifier, sanitizeText } from '../middlewares/security';
+import { sanitizeAttachmentUrl, deleteUploadedFileSafe } from '../middlewares/uploadSecurity';
 import { getGlobalIO } from '../sockets/chatHandler';
 
 const router = Router();
@@ -56,7 +57,9 @@ router.post('/:id/messages', authMiddleware, async (req: AuthRequest, res: Respo
     const userId = req.user!.userId;
 
     const cleanContent = sanitizeText(rawContent || '', 4000);
-    if (!cleanContent) {
+    const safeAttachmentUrl = sanitizeAttachmentUrl(req.body?.attachmentUrl);
+
+    if (!cleanContent && !safeAttachmentUrl) {
       res.status(400).json({ error: 'Mensagem vazia não é permitida.' });
       return;
     }
@@ -74,6 +77,8 @@ router.post('/:id/messages', authMiddleware, async (req: AuthRequest, res: Respo
     const message = await prisma.message.create({
       data: {
         content: cleanContent,
+        attachmentUrl: safeAttachmentUrl,
+        attachmentType: safeAttachmentUrl ? 'IMAGE' : null,
         channelId: id,
         userId,
       },
@@ -118,6 +123,10 @@ router.delete(
       await prisma.message.delete({
         where: { id: messageId },
       });
+
+      if (existingMessage.attachmentUrl) {
+        deleteUploadedFileSafe(existingMessage.attachmentUrl).catch(() => {});
+      }
 
       // Notificar em tempo real todos os usuários conectados no canal
       const io = getGlobalIO();

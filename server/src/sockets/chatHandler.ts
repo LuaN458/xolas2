@@ -7,6 +7,10 @@ import {
   sanitizeSafeUrl,
   sanitizeText,
 } from '../middlewares/security';
+import {
+  sanitizeAttachmentUrl,
+  deleteUploadedFileSafe,
+} from '../middlewares/uploadSecurity';
 
 export interface VoiceParticipant {
   id: string;
@@ -204,6 +208,10 @@ export function setupSocketHandlers(io: Server): void {
             where: { id: messageId },
           });
 
+          if (existing.attachmentUrl) {
+            deleteUploadedFileSafe(existing.attachmentUrl).catch(() => {});
+          }
+
           io.to(`channel:${channelId}`).emit('message-deleted', {
             channelId,
             messageId,
@@ -309,7 +317,7 @@ export function setupSocketHandlers(io: Server): void {
     });
 
     // Enviar mensagem em tempo real com sanitização e rate limit
-    socket.on('send-message', async (data: { channelId?: unknown; content?: unknown }) => {
+    socket.on('send-message', async (data: { channelId?: unknown; content?: unknown; attachmentUrl?: unknown }) => {
       try {
         if (!allowSocketEvent('send-message', 30, 10_000)) return;
         const channelId = data?.channelId;
@@ -317,11 +325,16 @@ export function setupSocketHandlers(io: Server): void {
 
         const rawContent = ensureScalarString(data?.content, 4000);
         const cleanContent = sanitizeText(rawContent || '', 4000);
-        if (!cleanContent) return;
+        const safeAttachmentUrl = sanitizeAttachmentUrl(data?.attachmentUrl);
+
+        // Mensagem precisa ter texto ou anexo válido
+        if (!cleanContent && !safeAttachmentUrl) return;
 
         const message = await prisma.message.create({
           data: {
             content: cleanContent,
+            attachmentUrl: safeAttachmentUrl,
+            attachmentType: safeAttachmentUrl ? 'IMAGE' : null,
             channelId,
             userId: user.userId,
           },
