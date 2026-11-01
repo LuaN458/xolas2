@@ -1,15 +1,26 @@
 import React from 'react';
+import { RefreshCw, WifiOff } from 'lucide-react';
 
-interface LoadingScreenProps {
+export interface LoadingScreenProps {
   fullscreen?: boolean;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
+  statusMessage?: string;
+  errorState?: {
+    message: string;
+    onRetry?: () => void;
+    onContinueOffline?: () => void;
+  } | null;
+  isFadingOut?: boolean;
 }
 
 export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   fullscreen = true,
   size = 'md',
   className = '',
+  statusMessage,
+  errorState,
+  isFadingOut = false,
 }) => {
   const sizeMap = {
     sm: {
@@ -62,11 +73,61 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
 
   if (fullscreen) {
     return (
-      <div className="h-screen w-screen bg-obsidian-bg flex items-center justify-center select-none overflow-hidden">
+      <div
+        className={`fixed inset-0 z-50 bg-obsidian-bg flex flex-col items-center justify-center select-none overflow-hidden transition-opacity duration-300 ease-out ${
+          isFadingOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        }`}
+      >
         {content}
+
+        {/* Feedback visual dinâmico ou estado de timeout/erro */}
+        {errorState ? (
+          <div className="mt-8 flex flex-col items-center gap-3 max-w-sm px-6 text-center">
+            <div className="flex items-center gap-2 text-amber-400 text-xs font-semibold px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20">
+              <WifiOff className="w-3.5 h-3.5 shrink-0" />
+              <span>{errorState.message}</span>
+            </div>
+            <div className="flex items-center gap-2.5 mt-1">
+              {errorState.onRetry && (
+                <button
+                  type="button"
+                  onClick={errorState.onRetry}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium shadow-md shadow-indigo-500/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Tentar Novamente</span>
+                </button>
+              )}
+              {errorState.onContinueOffline && (
+                <button
+                  type="button"
+                  onClick={errorState.onContinueOffline}
+                  className="px-3.5 py-1.5 rounded-lg bg-obsidian-card hover:bg-obsidian-hover border border-obsidian-border text-obsidian-text-secondary hover:text-white text-xs font-medium transition-colors"
+                >
+                  Continuar Offline
+                </button>
+              )}
+            </div>
+          </div>
+        ) : statusMessage ? (
+          <div className="mt-8 flex items-center gap-2.5 text-obsidian-text-secondary text-xs tracking-wide font-medium">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse shadow-sm shadow-indigo-500/50" />
+            <span>{statusMessage}</span>
+          </div>
+        ) : null}
       </div>
     );
   }
 
-  return content;
+  return (
+    <div className="flex flex-col items-center">
+      {content}
+      {statusMessage && (
+        <div className="mt-3 flex items-center gap-2 text-obsidian-text-secondary text-xs font-medium">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+          <span>{statusMessage}</span>
+        </div>
+      )}
+    </div>
+  );
 };

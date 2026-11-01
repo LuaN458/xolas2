@@ -72,6 +72,14 @@ export const App: React.FC = () => {
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [createChannelType, setCreateChannelType] = useState<'TEXT' | 'VOICE'>('TEXT');
 
+  // Estados de inicialização e prontidão do software
+  const [isAppReady, setIsAppReady] = useState(false);
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const [startupTimedOut, setStartupTimedOut] = useState(false);
+  const [startupRetryCount, setStartupRetryCount] = useState(0);
+  const [initialServersLoaded, setInitialServersLoaded] = useState(() => getCachedServers().length > 0);
+  const appMountTimeRef = useRef<number>(Date.now());
+
   const canAccessAdmin =
     user?.role === 'ADMIN' || Boolean(user?.customRole?.permissions?.includes('manage_users'));
 
@@ -114,6 +122,10 @@ export const App: React.FC = () => {
         console.warn('Falha ao carregar servidores (tentando novamente em 5s):', err);
         if (isMounted) {
           retryTimer = setTimeout(fetchServers, 5000);
+        }
+      } finally {
+        if (isMounted) {
+          setInitialServersLoaded(true);
         }
       }
     }
@@ -572,8 +584,88 @@ export const App: React.FC = () => {
     }
   };
 
+  // Transição de prontidão: WebSocket conectado e dados iniciais prontos
+  useEffect(() => {
+    if (!user || isAppReady) return;
+
+    if (isConnected && initialServersLoaded) {
+      setStartupTimedOut(false);
+      // Garantir pelo menos 800ms de exibição da animação para um feedback visual polido sem flicker
+      const elapsed = Date.now() - appMountTimeRef.current;
+      const minDisplayTime = 800;
+      const delay = Math.max(0, minDisplayTime - elapsed);
+
+      const fadeTimer = setTimeout(() => {
+        setIsFadingOut(true);
+        const readyTimer = setTimeout(() => {
+          setIsAppReady(true);
+        }, 300);
+        return () => clearTimeout(readyTimer);
+      }, delay);
+
+      return () => clearTimeout(fadeTimer);
+    }
+  }, [user, isConnected, initialServersLoaded, isAppReady]);
+
+  // Timeout de 10 segundos na inicialização para evitar travamento em caso de offline
+  useEffect(() => {
+    if (!user || isAppReady) return;
+
+    const timer = setTimeout(() => {
+      setStartupTimedOut(true);
+    }, 10000);
+
+    return () => clearTimeout(timer);
+  }, [user, isAppReady, startupRetryCount]);
+
+  // Resetar estados de prontidão quando o usuário deslogar
+  useEffect(() => {
+    if (!user) {
+      setIsAppReady(false);
+      setIsFadingOut(false);
+      setStartupTimedOut(false);
+      appMountTimeRef.current = Date.now();
+    }
+  }, [user]);
+
+  // Retentativa manual de conexão pelo botão do erro de timeout
+  const handleRetryStartup = useCallback(() => {
+    setStartupTimedOut(false);
+    appMountTimeRef.current = Date.now();
+    setStartupRetryCount((c) => c + 1);
+    if (socket && !socket.connected) {
+      socket.connect();
+    }
+    api.get('/api/servers')
+      .then((res) => {
+        const list: Server[] = res.data?.servers || [];
+        setServers(list);
+        persistCachedServers(list);
+        setInitialServersLoaded(true);
+      })
+      .catch((err) => {
+        console.warn('[Startup] Falha na retentativa de carregar servidores:', err);
+      });
+  }, [socket]);
+
+  // Continuar em modo offline se o usuário desejar entrar sem esperar conexão
+  const handleContinueOffline = useCallback(() => {
+    setIsFadingOut(true);
+    setTimeout(() => {
+      setIsAppReady(true);
+    }, 300);
+  }, []);
+
+  // Obter texto dinâmico de status na inicialização
+  const getStartupStatusMessage = () => {
+    if (loading) return 'Validando credenciais...';
+    if (!isConnected) return 'Conectando ao servidor...';
+    if (!initialServersLoaded) return 'Sincronizando espaços e canais...';
+    return 'Iniciando o Xolas...';
+  };
+
   if (loading) {
-    return <LoadingScreen fullscreen size="md" />;
+    return <LoadingScreen fullscreen size="md" statusMessage="Validando credenciais..." />;
   }
 
   return (
@@ -581,7 +673,8 @@ export const App: React.FC = () => {
       {!user ? (
         <AuthModal />
       ) : (
-        <div className="h-screen w-screen flex bg-obsidian-bg overflow-hidden font-sans text-obsidian-text-primary antialiased">
+        <>
+          <div className="h-screen w-screen flex bg-obsidian-bg overflow-hidden font-sans text-obsidian-text-primary antialiased">
           {/* 1. Dock Lateral de Espaços (Linear Style) */}
           <ServerSidebar
             servers={servers}
@@ -718,7 +811,27 @@ export const App: React.FC = () => {
             onPendingCountChange={setPendingApprovalsCount}
           />
         </div>
-      )}
+
+        {/* Animação de entrada e carregamento no startup (overlay fluido até estar pronto) */}
+        {!isAppReady && (
+          <LoadingScreen
+            fullscreen
+            size="md"
+            statusMessage={getStartupStatusMessage()}
+            errorState={
+              startupTimedOut
+                ? {
+                    message: 'Não foi possível conectar ao servidor no momento.',
+                    onRetry: handleRetryStartup,
+                    onContinueOffline: handleContinueOffline,
+                  }
+                : null
+            }
+            isFadingOut={isFadingOut}
+          />
+        )}
+      </>
+    )}
 
       {/* Modal de Atualização Obrigatória para usuários deslogados */}
       <ForceUpdateModal isLoggedIn={Boolean(user)} />
