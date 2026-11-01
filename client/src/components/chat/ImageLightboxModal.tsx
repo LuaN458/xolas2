@@ -13,7 +13,7 @@ export const ImageLightboxModal: React.FC<ImageLightboxModalProps> = ({
   onClose,
 }) => {
   const [scale, setScale] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !imageUrl.startsWith('blob:') && !imageUrl.startsWith('data:'));
 
   // Fechar com a tecla ESC
   useEffect(() => {

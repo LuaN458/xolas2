@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
-import { Channel } from '../types';
+import { Channel, User } from '../types';
 import { useSocket } from './SocketContext';
 import { useAuth } from './AuthContext';
 import {
@@ -181,6 +181,8 @@ const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { socket } = useSocket();
   const { user } = useAuth();
+  const userRef = useRef(user);
+  userRef.current = user;
   const initialSettings = getUserSettings();
 
   const [currentVoiceChannel, setCurrentVoiceChannel] = useState<Channel | null>(null);
@@ -379,12 +381,13 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const list: ActiveParticipant[] = [];
     const currentScreen = screenStreamRef.current;
+    const currentUser = userRef.current;
 
     // 1. Participante Local
     list.push({
-      id: user?.id || 'local-user',
-      username: user?.username || 'Você',
-      avatarUrl: user?.avatarUrl,
+      id: currentUser?.id || 'local-user',
+      username: currentUser?.username || 'Você',
+      avatarUrl: currentUser?.avatarUrl,
       isSpeaking: !isMutedRef.current && isLocalSpeakingRef.current,
       isMuted: isMutedRef.current,
       isLocal: true,
@@ -394,7 +397,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // 2. Participantes Remotos
     remoteParticipantsRef.current.forEach((p) => {
-      if (p.id === user?.id) return;
+      if (p.id === currentUser?.id) return;
       list.push({
         id: p.id,
         username: p.username || 'Usuário',
@@ -425,7 +428,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       shares.push({
         id: 'local-screen',
-        participantName: user?.username || 'Você',
+        participantName: currentUser?.username || 'Você',
         isLocal: true,
         stream: videoOnlyLocalStream,
         track: currentTrack,
@@ -435,7 +438,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     remoteParticipantsRef.current.forEach((p) => {
-      if (p.id === user?.id) return;
+      if (p.id === currentUser?.id) return;
       const hasLiveTrack =
         p.screenTrack && p.screenTrack.readyState === 'live';
       const hasLiveStream =
@@ -462,7 +465,15 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Para espectadores remotos: não auto-seleciona, permitindo que cliquem em "Assistir Transmissão"
       return null;
     });
-  }, [user]);
+  }, []);
+
+  // Atualizar visual do participante local caso perfil (avatar, nome, cargo) mude sem recriar referências
+  useEffect(() => {
+    userRef.current = user;
+    if (currentChannelRef.current) {
+      syncVoiceState();
+    }
+  }, [user, syncVoiceState]);
 
   // Anexa stream de áudio remoto ao container DOM oculto com suporte a GainNode (0% a 200%)
   const attachRemoteAudio = useCallback((peerId: string, track: MediaStreamTrack, stream?: MediaStream) => {
@@ -2415,37 +2426,43 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSelectedScreenShareId(null);
   }, [socket, cleanupPeer]);
 
+  const leaveVoiceChannelRef = useRef(leaveVoiceChannel);
+  leaveVoiceChannelRef.current = leaveVoiceChannel;
+
   // Teardown automático de voz, faixas de mídia e processos nativos ao deslogar ou expirar sessão
   useEffect(() => {
     const handleAuthLogout = () => {
-      leaveVoiceChannel();
+      leaveVoiceChannelRef.current();
     };
 
     window.addEventListener('xolas:auth-logout', handleAuthLogout);
     return () => {
       window.removeEventListener('xolas:auth-logout', handleAuthLogout);
     };
-  }, [leaveVoiceChannel]);
+  }, []);
 
+  // Monitorar se o usuário foi deslogado (passou de autenticado para null)
+  const prevUserRef = useRef<User | null>(user);
   useEffect(() => {
-    if (!user) {
+    if (prevUserRef.current && !user) {
       if (
         currentChannelRef.current ||
         screenStreamRef.current ||
         rawMicStreamRef.current ||
         peersRef.current.size > 0
       ) {
-        leaveVoiceChannel();
+        leaveVoiceChannelRef.current();
       }
     }
-  }, [user, leaveVoiceChannel]);
+    prevUserRef.current = user;
+  }, [user]);
 
-  // Limpeza garantida ao desmontar VoiceProvider
+  // Limpeza garantida ESTRITAMENTE ao desmontar o VoiceProvider (array de dependências vazio [])
   useEffect(() => {
     return () => {
-      leaveVoiceChannel();
+      leaveVoiceChannelRef.current();
     };
-  }, [leaveVoiceChannel]);
+  }, []);
 
   const lastMuteToggleRef = useRef<number>(0);
   const lastDeafenToggleRef = useRef<number>(0);
@@ -2515,6 +2532,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   }, [syncVoiceState, emitLocalVoiceState, updateAllGainNodes, updateAllScreenAudioVolumes]);
 
+  const toggleMuteRef = useRef(toggleMute);
+  toggleMuteRef.current = toggleMute;
+
   // Ouvintes de Moderação de Administrador (Desconexão forçada da chamada e Silenciamento no servidor)
   useEffect(() => {
     if (!socket) return;
@@ -2524,14 +2544,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!data?.channelId || data.channelId === currentChannelRef.current.id) {
         console.warn('[VoiceContext] Desconectado por administrador:', data?.reason);
         playAudioCue('mute');
-        leaveVoiceChannel();
+        leaveVoiceChannelRef.current();
       }
     };
 
     const handleForceMuteMic = (data: { isMuted?: boolean }) => {
       const shouldMute = Boolean(data?.isMuted);
       if (shouldMute !== isMutedRef.current) {
-        toggleMute();
+        toggleMuteRef.current();
       }
     };
 
@@ -2542,7 +2562,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       socket.off('force-disconnect-voice', handleForceDisconnectVoice);
       socket.off('force-mute-mic', handleForceMuteMic);
     };
-  }, [socket, leaveVoiceChannel, toggleMute]);
+  }, [socket]);
 
   // Função unificada acionada pela hotkey (espectador ou streamer):
   // - Se for o streamer compartilhando sua própria tela, encerra a transmissão

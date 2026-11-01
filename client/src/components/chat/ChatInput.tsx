@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, KeyboardEvent, ChangeEvent, ClipboardEvent, DragEvent } from 'react';
 import { ArrowUp, Paperclip, X, Image as ImageIcon, Loader2 } from 'lucide-react';
-import { api } from '../../lib/api';
+import { api, API_BASE } from '../../lib/api';
+import { saveImageToCache } from '../../lib/imageCache';
 
 interface ChatInputProps {
   channelName: string;
@@ -233,9 +234,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({ channelName, onSendMessage
           },
         });
 
-        if (response.data && response.data.url) {
-          uploadedAttachmentUrl = response.data.url;
+        if (response.data && typeof response.data.url === 'string') {
+          const finalUrl: string = response.data.url;
+          uploadedAttachmentUrl = finalUrl;
           setUploadProgress(100);
+
+          // Salvar imediatamente no cache local em memória e IndexedDB para renderização instantânea
+          saveImageToCache(finalUrl, pendingFile).catch(() => {});
+          const fullUrl = `${API_BASE}${finalUrl.startsWith('/') ? '' : '/'}${finalUrl}`;
+          saveImageToCache(fullUrl, pendingFile).catch(() => {});
         } else {
           throw new Error('Falha ao receber a URL do anexo.');
         }
