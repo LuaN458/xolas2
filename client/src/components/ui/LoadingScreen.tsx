@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { RefreshCw, WifiOff } from 'lucide-react';
 
 export interface LoadingScreenProps {
@@ -13,6 +13,48 @@ export interface LoadingScreenProps {
   } | null;
   isFadingOut?: boolean;
 }
+
+const DecryptText: React.FC<{ text: string }> = ({ text }) => {
+  const [displayText, setDisplayText] = useState(text);
+  const [isDecrypted, setIsDecrypted] = useState(false);
+
+  useEffect(() => {
+    setIsDecrypted(false);
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*<>[]{}';
+    let iteration = 0;
+    const interval = setInterval(() => {
+      setDisplayText(
+        text
+          .split('')
+          .map((char, index) => {
+            if (char === ' ' || index < iteration) return text[index];
+            return chars[Math.floor(Math.random() * chars.length)];
+          })
+          .join('')
+      );
+
+      if (iteration >= text.length) {
+        clearInterval(interval);
+        setIsDecrypted(true);
+      }
+      iteration += 1 / 2;
+    }, 30);
+
+    return () => clearInterval(interval);
+  }, [text]);
+
+  return (
+    <span
+      className={`font-mono text-xs tracking-wider transition-all duration-300 ${
+        isDecrypted
+          ? 'text-indigo-200 drop-shadow-[0_0_8px_rgba(99,102,241,0.5)] animate-pulse'
+          : 'text-indigo-400 font-bold drop-shadow-[0_0_12px_rgba(99,102,241,0.8)]'
+      }`}
+    >
+      {displayText}
+    </span>
+  );
+};
 
 export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   fullscreen = true,
@@ -112,7 +154,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         ) : statusMessage ? (
           <div className="mt-8 flex items-center gap-2.5 text-obsidian-text-secondary text-xs tracking-wide font-medium">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse shadow-sm shadow-indigo-500/50" />
-            <span>{statusMessage}</span>
+            <DecryptText text={statusMessage} />
           </div>
         ) : null}
       </div>
@@ -125,7 +167,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       {statusMessage && (
         <div className="mt-3 flex items-center gap-2 text-obsidian-text-secondary text-xs font-medium">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-          <span>{statusMessage}</span>
+          <DecryptText text={statusMessage} />
         </div>
       )}
     </div>
