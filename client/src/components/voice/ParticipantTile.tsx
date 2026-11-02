@@ -1,11 +1,12 @@
 import React from 'react';
-import { MicOff, Monitor, VolumeX } from 'lucide-react';
+import { MicOff, Monitor, VolumeX, HeadphoneOff } from 'lucide-react';
 
 interface ParticipantTileProps {
   name: string;
   avatarUrl?: string;
   isSpeaking?: boolean;
   isMuted?: boolean;
+  isDeafened?: boolean;
   isLocallyMuted?: boolean;
   isScreenShare?: boolean;
   hasScreenShare?: boolean;
@@ -23,6 +24,7 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
   avatarUrl,
   isSpeaking = false,
   isMuted = false,
+  isDeafened = false,
   isLocallyMuted = false,
   isScreenShare = false,
   hasScreenShare = false,
@@ -189,6 +191,11 @@ export const ParticipantTile: React.FC<ParticipantTileProps> = ({
         {isMuted && (
           <span title="Microfone desligado">
             <MicOff className="w-3 h-3 text-obsidian-rose shrink-0" />
+          </span>
+        )}
+        {isDeafened && (
+          <span title="Áudio desativado">
+            <HeadphoneOff className="w-3 h-3 text-obsidian-rose shrink-0" />
           </span>
         )}
         {isLocallyMuted && (

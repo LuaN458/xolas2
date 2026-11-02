@@ -261,7 +261,7 @@ export const App: React.FC = () => {
       }));
     };
 
-    const handleVoiceUserStateUpdated = (data: { channelId: string; userId: string; isMuted?: boolean }) => {
+    const handleVoiceUserStateUpdated = (data: { channelId: string; userId: string; isMuted?: boolean; isDeafened?: boolean }) => {
       if (!data?.channelId || !data?.userId) return;
       setVoiceParticipants((prev) => {
         const channelList = prev[data.channelId];
@@ -269,7 +269,13 @@ export const App: React.FC = () => {
         return {
           ...prev,
           [data.channelId]: channelList.map((p) =>
-            p.id === data.userId ? { ...p, isMuted: data.isMuted !== undefined ? Boolean(data.isMuted) : p.isMuted } : p
+            p.id === data.userId
+              ? {
+                  ...p,
+                  isMuted: data.isMuted !== undefined ? Boolean(data.isMuted) : p.isMuted,
+                  isDeafened: data.isDeafened !== undefined ? Boolean(data.isDeafened) : p.isDeafened,
+                }
+              : p
           ),
         };
       });
@@ -424,9 +430,29 @@ export const App: React.FC = () => {
       setRoles((prev) =>
         prev.map((r) => (r.id === data.role.id ? data.role : r))
       );
+
+      // Atualizar todos os membros em activeServerDetails que possuem esse cargo em tempo real!
+      setActiveServerDetails((prev) => {
+        if (!prev || !prev.members) return prev;
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.user.customRoleId === data.role.id || m.user.customRole?.id === data.role.id
+              ? {
+                  ...m,
+                  user: {
+                    ...m.user,
+                    customRole: data.role,
+                  },
+                }
+              : m
+          ),
+        };
+      });
+
       // Se o usuário logado possuir este cargo, atualizar suas permissões em tempo real sem stale closures!
       setUser((currentUser) => {
-        if (!currentUser || currentUser.customRoleId !== data.role.id) return currentUser;
+        if (!currentUser || (currentUser.customRoleId !== data.role.id && currentUser.customRole?.id !== data.role.id)) return currentUser;
         const updatedUser: User = {
           ...currentUser,
           customRole: data.role,
@@ -442,8 +468,29 @@ export const App: React.FC = () => {
     const handleRoleDeleted = (data: { roleId: string }) => {
       if (!data?.roleId) return;
       setRoles((prev) => prev.filter((r) => r.id !== data.roleId));
+
+      // Limpar cargo dos membros em activeServerDetails
+      setActiveServerDetails((prev) => {
+        if (!prev || !prev.members) return prev;
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.user.customRoleId === data.roleId || m.user.customRole?.id === data.roleId
+              ? {
+                  ...m,
+                  user: {
+                    ...m.user,
+                    customRoleId: null,
+                    customRole: undefined,
+                  },
+                }
+              : m
+          ),
+        };
+      });
+
       setUser((currentUser) => {
-        if (!currentUser || currentUser.customRoleId !== data.roleId) return currentUser;
+        if (!currentUser || (currentUser.customRoleId !== data.roleId && currentUser.customRole?.id !== data.roleId)) return currentUser;
         const updatedUser: User = {
           ...currentUser,
           customRoleId: null,

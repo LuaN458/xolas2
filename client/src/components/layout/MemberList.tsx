@@ -130,7 +130,9 @@ export const MemberList: React.FC<MemberListProps> = ({
   );
 
   // Informações de voz do membro selecionado no menu de contexto
-  const targetMember = contextMenu?.member;
+  const targetMember = contextMenu
+    ? members.find((m) => m.userId === contextMenu.member.userId || m.user.id === contextMenu.member.user.id) || contextMenu.member
+    : null;
   const targetUserId = targetMember?.user?.id;
   const isSelf = targetUserId === user?.id;
 

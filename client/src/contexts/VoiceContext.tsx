@@ -26,6 +26,7 @@ export interface ActiveParticipant {
   avatarUrl?: string;
   isSpeaking: boolean;
   isMuted: boolean;
+  isDeafened?: boolean;
   isLocal: boolean;
   screenTrack?: MediaStreamTrack;
   audioTrack?: MediaStreamTrack;
@@ -44,6 +45,7 @@ interface RemotePeerData {
   username: string;
   avatarUrl?: string;
   isMuted: boolean;
+  isDeafened?: boolean;
   isSpeaking: boolean;
   isScreenSharing: boolean;
   screenStreamId?: string | null;
@@ -363,6 +365,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       channelId: ch.id,
       serverId: ch.serverId,
       isMuted: isMutedRef.current,
+      isDeafened: isDeafenedRef.current,
       isSpeaking: !isMutedRef.current && isLocalSpeakingRef.current,
       isScreenSharing: isScreenSharingRef.current,
       screenStreamId: screenStreamRef.current?.id || null,
@@ -390,6 +393,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       avatarUrl: currentUser?.avatarUrl,
       isSpeaking: !isMutedRef.current && isLocalSpeakingRef.current,
       isMuted: isMutedRef.current,
+      isDeafened: isDeafenedRef.current,
       isLocal: true,
       screenTrack: currentScreen ? currentScreen.getVideoTracks()[0] : undefined,
       audioTrack: localMicStreamRef.current?.getAudioTracks()[0],
@@ -406,6 +410,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(p.username || p.id)}`,
         isSpeaking: !p.isMuted && p.isSpeaking,
         isMuted: p.isMuted,
+        isDeafened: p.isDeafened,
         isLocal: false,
         screenTrack: p.screenTrack,
         audioTrack: p.audioTrack,
@@ -577,14 +582,29 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [applyGainToPeer]);
 
-  const applyScreenAudioVolume = useCallback((audioEl: HTMLAudioElement) => {
-    if (isDeafenedRef.current || isStreamMutedRef.current) {
+  const applyScreenAudioVolume = useCallback((audioEl: HTMLAudioElement, peerId?: string) => {
+    const targetPeerId = peerId || audioEl.dataset.peerId || '';
+    const currentSelected = selectedScreenShareIdRef.current;
+    const watchedPeerId = currentSelected ? currentSelected.replace(/^(remote-)?screen-/, '') : null;
+
+    // O áudio da transmissão só deve tocar se o usuário estiver assistindo àquela tela específica
+    const isWatchingThisScreen = Boolean(
+      watchedPeerId &&
+      targetPeerId &&
+      (watchedPeerId === targetPeerId || targetPeerId.includes(watchedPeerId) || watchedPeerId.includes(targetPeerId))
+    );
+
+    if (!isWatchingThisScreen || isDeafenedRef.current || isStreamMutedRef.current) {
       audioEl.muted = true;
       audioEl.volume = 0;
+      try {
+        audioEl.pause();
+      } catch {}
     } else {
       audioEl.muted = false;
       const vol = (streamVolumeRef.current / 100) * (masterVolumeRef.current / 100);
       audioEl.volume = Math.max(0, Math.min(1, vol));
+      audioEl.play().catch(() => {});
     }
   }, []);
 
@@ -619,8 +639,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         audioEl = document.createElement('audio');
         audioEl.autoplay = true;
         (audioEl as any).playsInline = true;
+        audioEl.dataset.peerId = peerId;
         container.appendChild(audioEl);
         audioElementsRef.current.set(key, audioEl);
+      } else {
+        audioEl.dataset.peerId = peerId;
       }
 
       const mediaStream = stream || new MediaStream([track]);
@@ -628,8 +651,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         audioEl.srcObject = mediaStream;
       }
 
-      applyScreenAudioVolume(audioEl);
-      audioEl.play().catch(() => {});
+      applyScreenAudioVolume(audioEl, peerId);
 
       track.onended = () => {
         const el = audioElementsRef.current.get(key);
@@ -649,7 +671,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateAllScreenAudioVolumes = useCallback(() => {
     audioElementsRef.current.forEach((el, key) => {
       if (key.startsWith('screen:::')) {
-        applyScreenAudioVolume(el);
+        const parts = key.split(':::');
+        const peerId = parts[1];
+        applyScreenAudioVolume(el, peerId);
       }
     });
   }, [applyScreenAudioVolume]);
@@ -1855,6 +1879,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         username: string;
         avatarUrl?: string;
         isMuted?: boolean;
+        isDeafened?: boolean;
         isSpeaking?: boolean;
         isScreenSharing?: boolean;
         screenStreamId?: string | null;
@@ -1864,6 +1889,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         username: string;
         avatarUrl?: string;
         isMuted?: boolean;
+        isDeafened?: boolean;
         isSpeaking?: boolean;
         isScreenSharing?: boolean;
         screenStreamId?: string | null;
@@ -1881,6 +1907,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         username: peer.username,
         avatarUrl: peer.avatarUrl,
         isMuted: peer.isMuted ?? existing?.isMuted ?? false,
+        isDeafened: peer.isDeafened ?? existing?.isDeafened ?? false,
         isSpeaking: peer.isSpeaking ?? existing?.isSpeaking ?? false,
         isScreenSharing: peer.isScreenSharing ?? existing?.isScreenSharing ?? false,
         screenStreamId: peer.screenStreamId ?? existing?.screenStreamId ?? null,
@@ -1916,6 +1943,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       channelId,
       userId,
       isMuted: peerMuted,
+      isDeafened: peerDeafened,
       isSpeaking: peerSpeaking,
       isScreenSharing: peerSharing,
       screenStreamId,
@@ -1923,6 +1951,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       channelId: string;
       userId: string;
       isMuted?: boolean;
+      isDeafened?: boolean;
       isSpeaking?: boolean;
       isScreenSharing?: boolean;
       screenStreamId?: string | null;
@@ -1936,6 +1965,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           id: userId,
           username: 'Usuário',
           isMuted: false,
+          isDeafened: false,
           isSpeaking: false,
           isScreenSharing: false,
         };
@@ -1945,6 +1975,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (typeof peerMuted === 'boolean') {
         peer.isMuted = peerMuted;
         applyGainToPeer(userId);
+      }
+      if (typeof peerDeafened === 'boolean') {
+        peer.isDeafened = peerDeafened;
       }
       if (typeof peerSpeaking === 'boolean') peer.isSpeaking = peerSpeaking;
       if (typeof peerSharing === 'boolean') {
@@ -3438,7 +3471,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const watchScreenShare = useCallback(
     (shareId: string) => {
+      selectedScreenShareIdRef.current = shareId;
       setSelectedScreenShareId(shareId);
+      updateAllScreenAudioVolumes();
       const targetUserId = shareId.replace(/^(remote-)?screen-/, '');
       const ch = currentChannelRef.current;
       if (
@@ -3459,12 +3494,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
     },
-    [socket, user?.id]
+    [socket, user?.id, updateAllScreenAudioVolumes]
   );
 
   const stopWatchingScreenShare = useCallback(() => {
+    selectedScreenShareIdRef.current = null;
     setSelectedScreenShareId(null);
-  }, []);
+    updateAllScreenAudioVolumes();
+  }, [updateAllScreenAudioVolumes]);
+
+  // Efeito sincronizador para garantir que o áudio da tela seja silenciado imediatamente ao sair da transmissão
+  useEffect(() => {
+    selectedScreenShareIdRef.current = selectedScreenShareId;
+    updateAllScreenAudioVolumes();
+  }, [selectedScreenShareId, updateAllScreenAudioVolumes]);
 
   const setUserVolume = useCallback((userId: string, volume: number) => {
     const clamped = Math.max(0, Math.min(200, Math.round(volume)));

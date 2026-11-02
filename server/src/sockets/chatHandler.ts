@@ -17,6 +17,7 @@ export interface VoiceParticipant {
   username: string;
   avatarUrl?: string;
   isMuted?: boolean;
+  isDeafened?: boolean;
   isSpeaking?: boolean;
   isScreenSharing?: boolean;
   screenStreamId?: string | null;
@@ -699,6 +700,11 @@ export function setupSocketHandlers(io: Server): void {
               ? data.isMuted
               : (existingEntry?.isMuted ?? false);
 
+          const isDeafened =
+            typeof data?.isDeafened === 'boolean'
+              ? data.isDeafened
+              : (existingEntry?.isDeafened ?? false);
+
           const isSpeaking =
             typeof data?.isSpeaking === 'boolean'
               ? data.isSpeaking
@@ -722,6 +728,7 @@ export function setupSocketHandlers(io: Server): void {
               dbUser?.avatarUrl ||
               `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(safeUsername)}`,
             isMuted,
+            isDeafened,
             isSpeaking,
             isScreenSharing,
             screenStreamId: safeScreenStreamId,
@@ -959,6 +966,7 @@ export function setupSocketHandlers(io: Server): void {
         channelId?: unknown;
         serverId?: unknown;
         isMuted?: unknown;
+        isDeafened?: unknown;
         isSpeaking?: unknown;
         isScreenSharing?: unknown;
         screenStreamId?: unknown;
@@ -978,6 +986,7 @@ export function setupSocketHandlers(io: Server): void {
           if (room && room.has(user.userId)) {
             const p = room.get(user.userId)!;
             if (typeof data.isMuted === 'boolean') p.isMuted = data.isMuted;
+            if (typeof data.isDeafened === 'boolean') p.isDeafened = data.isDeafened;
             if (typeof data.isSpeaking === 'boolean') p.isSpeaking = data.isSpeaking;
             if (typeof data.isScreenSharing === 'boolean') p.isScreenSharing = data.isScreenSharing;
             if (safeScreenStreamId !== undefined) p.screenStreamId = safeScreenStreamId;
@@ -988,6 +997,7 @@ export function setupSocketHandlers(io: Server): void {
             userId: user.userId,
             username: user.username,
             isMuted: typeof data.isMuted === 'boolean' ? data.isMuted : undefined,
+            isDeafened: typeof data.isDeafened === 'boolean' ? data.isDeafened : undefined,
             isSpeaking: typeof data.isSpeaking === 'boolean' ? data.isSpeaking : undefined,
             isScreenSharing:
               typeof data.isScreenSharing === 'boolean' ? data.isScreenSharing : undefined,

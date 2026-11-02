@@ -16,6 +16,7 @@ import {
 import {
   Mic,
   MicOff,
+  HeadphoneOff,
   PhoneOff,
   Monitor,
   MonitorOff,
@@ -57,6 +58,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
     selectedScreenShareId,
     setSelectedScreenShareId,
     watchScreenShare,
+    stopWatchingScreenShare,
     setUserVolume,
     toggleMuteUser,
     getUserVolume,
@@ -171,6 +173,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
       avatarUrl?: string;
       isSpeaking: boolean;
       isMuted: boolean;
+      isDeafened: boolean;
       isLocal: boolean;
       hasScreenShare: boolean;
     }>();
@@ -184,6 +187,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
       avatarUrl: user?.avatarUrl,
       isSpeaking: localVp ? localVp.isSpeaking : false,
       isMuted,
+      isDeafened,
       isLocal: true,
       hasScreenShare: localHasScreenShare,
     });
@@ -198,6 +202,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
           avatarUrl: sp.avatarUrl,
           isSpeaking: false,
           isMuted: Boolean(sp.isMuted),
+          isDeafened: isLocal ? isDeafened : Boolean(sp.isDeafened),
           isLocal,
           hasScreenShare: Boolean(sp.isScreenSharing),
         });
@@ -216,13 +221,14 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
         avatarUrl: vp.avatarUrl,
         isSpeaking: vp.isSpeaking,
         isMuted: vp.isMuted,
+        isDeafened: vp.isLocal ? isDeafened : Boolean(vp.isDeafened),
         isLocal: vp.isLocal,
         hasScreenShare: vp.isLocal ? localHasScreenShare : hasScreen,
       });
     });
 
     return Array.from(map.values());
-  }, [user, isMuted, socketParticipants, voiceParticipants, isScreenSharing, screenStream, activeScreenShares]);
+  }, [user, isMuted, isDeafened, socketParticipants, voiceParticipants, isScreenSharing, screenStream, activeScreenShares]);
 
   // Transmissão de tela atualmente em foco
   const activeShare = useMemo(() => {
@@ -429,6 +435,12 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                             <Monitor className="w-3 h-3" />
                             <span>Ao Vivo</span>
                           </span>
+                        ) : p.isDeafened ? (
+                          <span className="text-rose-400 flex items-center space-x-1">
+                            <MicOff className="w-3 h-3" />
+                            <HeadphoneOff className="w-3 h-3" />
+                            <span>Sem Áudio</span>
+                          </span>
                         ) : p.isMuted ? (
                           <span className="text-rose-400 flex items-center space-x-0.5">
                             <MicOff className="w-3 h-3" />
@@ -477,7 +489,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                 </button>
               ) : (
                 <button
-                  onClick={() => setSelectedScreenShareId(null)}
+                  onClick={stopWatchingScreenShare}
                   className="h-10 px-3.5 rounded-xl flex items-center space-x-2 transition-all font-bold text-xs bg-indigo-600/80 hover:bg-indigo-600 text-white border border-indigo-400/50 shadow-lg shadow-indigo-600/30 ring-1 ring-indigo-400/40"
                   title={`Sair da Live (${stopShareShortcutText})`}
                 >
@@ -532,6 +544,7 @@ export const VoiceRoom: React.FC<VoiceRoomProps> = ({ channel, onDisconnect, soc
                     avatarUrl={p.avatarUrl}
                     isSpeaking={p.isSpeaking}
                     isMuted={p.isMuted}
+                    isDeafened={p.isDeafened}
                     isLocallyMuted={isUserMuted(p.id)}
                     hasScreenShare={p.hasScreenShare}
                     onWatchScreenShare={

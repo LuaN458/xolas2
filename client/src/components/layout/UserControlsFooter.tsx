@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, MicOff, Headphones, Settings, LogOut, Camera } from 'lucide-react';
+import { Mic, MicOff, Headphones, HeadphoneOff, Settings, LogOut, Camera } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useVoice } from '../../contexts/VoiceContext';
 
@@ -73,7 +73,7 @@ export const UserControlsFooter: React.FC<UserControlsFooterProps> = ({ onOpenSe
           }`}
           title={isDeafened ? 'Reativar Áudio' : 'Desativar Áudio'}
         >
-          <Headphones className="w-3.5 h-3.5" />
+          {isDeafened ? <HeadphoneOff className="w-3.5 h-3.5" /> : <Headphones className="w-3.5 h-3.5" />}
         </button>
 
         {/* Botão da Engrenagem com Destaque Visual */}

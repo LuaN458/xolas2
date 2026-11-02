@@ -15,6 +15,47 @@ interface MessageItemProps {
   onDelete?: (messageId: string) => void;
 }
 
+interface ContentPart {
+  type: 'text' | 'link';
+  value: string;
+  href?: string;
+}
+
+function parseMessageContent(text: string): ContentPart[] {
+  if (!text) return [];
+  const parts: ContentPart[] = [];
+  const regex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s]|(?:www\.[^\s<]+[^<.,:;"')\]\s]))/gi;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const url = match[0];
+    const matchStart = match.index;
+    if (matchStart > lastIndex) {
+      parts.push({ type: 'text', value: text.substring(lastIndex, matchStart) });
+    }
+    const href = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
+    parts.push({ type: 'link', value: url, href });
+    lastIndex = matchStart + url.length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: 'text', value: text.substring(lastIndex) });
+  }
+
+  return parts;
+}
+
+const handleOpenExternal = (e: React.MouseEvent, href: string) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (window.electronAPI?.openExternal) {
+    window.electronAPI.openExternal(href);
+  } else {
+    window.open(href, '_blank', 'noopener,noreferrer');
+  }
+};
+
 export const MessageItem: React.FC<MessageItemProps> = ({ message, isAdmin, onDelete }) => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -132,7 +173,24 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, isAdmin, onDe
 
         {message.content && (
           <p className="text-obsidian-text-secondary text-xs leading-relaxed break-words whitespace-pre-wrap select-text">
-            {message.content}
+            {parseMessageContent(message.content).map((part, index) => {
+              if (part.type === 'link' && part.href) {
+                return (
+                  <a
+                    key={index}
+                    href={part.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => handleOpenExternal(e, part.href!)}
+                    className="text-indigo-400 hover:text-indigo-300 underline underline-offset-2 break-all transition-colors cursor-pointer font-medium"
+                    title={`Abrir ${part.href} no navegador`}
+                  >
+                    {part.value}
+                  </a>
+                );
+              }
+              return <span key={index}>{part.value}</span>;
+            })}
           </p>
         )}
 

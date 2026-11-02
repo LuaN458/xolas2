@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MessageSquareText, Radio, Plus, PhoneOff, Monitor, ChevronDown, Volume2, MicOff } from 'lucide-react';
+import { MessageSquareText, Radio, Plus, PhoneOff, Monitor, ChevronDown, Volume2, MicOff, HeadphoneOff } from 'lucide-react';
 import { Server, Channel, CustomRole } from '../../types';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -12,6 +12,7 @@ export interface VoiceParticipantInfo {
   avatarUrl?: string;
   isScreenSharing?: boolean;
   isMuted?: boolean;
+  isDeafened?: boolean;
   isSpeaking?: boolean;
   screenStreamId?: string | null;
 }
@@ -177,17 +178,25 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
 
               if (isConnected) {
                 if (user) {
+                  const existing = participantMap.get(user.id);
                   participantMap.set(user.id, {
+                    ...existing,
                     id: user.id,
                     username: user.username,
                     avatarUrl: user.avatarUrl,
+                    isMuted: isMuted,
+                    isDeafened: isDeafened,
                   });
                 }
                 livekitParticipants.forEach((lp) => {
+                  const existing = participantMap.get(lp.id);
                   participantMap.set(lp.id, {
+                    ...existing,
                     id: lp.id,
                     username: lp.username,
                     avatarUrl: lp.avatarUrl,
+                    isMuted: lp.isMuted ?? existing?.isMuted,
+                    isDeafened: lp.isDeafened ?? existing?.isDeafened,
                   });
                 });
               }
@@ -295,19 +304,35 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                             </div>
 
                             {/* Indicador de Áudio Dinâmico */}
-                            <div className="shrink-0 flex items-center pl-1">
-                              {isMe && isMuted ? (
-                                <span title="Microfone mutado">
-                                  <MicOff className="w-3.5 h-3.5 text-obsidian-rose" />
-                                </span>
-                              ) : (
-                                <div className="flex items-end space-x-0.5 h-3 px-0.5" title="Áudio ativo">
-                                  <span className="w-0.5 bg-emerald-400 rounded-full h-2.5 animate-pulse" />
-                                  <span className="w-0.5 bg-emerald-400 rounded-full h-1.5 animate-pulse [animation-delay:150ms]" />
-                                  <span className="w-0.5 bg-emerald-400 rounded-full h-3 animate-pulse [animation-delay:300ms]" />
+                            {(() => {
+                              const participantMuted = isMe ? isMuted : Boolean(p.isMuted);
+                              const participantDeafened = isMe ? isDeafened : Boolean(p.isDeafened);
+
+                              return (
+                                <div className="shrink-0 flex items-center space-x-1 pl-1">
+                                  {participantDeafened ? (
+                                    <>
+                                      <span title="Microfone mutado">
+                                        <MicOff className="w-3.5 h-3.5 text-obsidian-rose" />
+                                      </span>
+                                      <span title="Áudio desativado">
+                                        <HeadphoneOff className="w-3.5 h-3.5 text-obsidian-rose" />
+                                      </span>
+                                    </>
+                                  ) : participantMuted ? (
+                                    <span title="Microfone mutado">
+                                      <MicOff className="w-3.5 h-3.5 text-obsidian-rose" />
+                                    </span>
+                                  ) : (
+                                    <div className="flex items-end space-x-0.5 h-3 px-0.5" title="Áudio ativo">
+                                      <span className="w-0.5 bg-emerald-400 rounded-full h-2.5 animate-pulse" />
+                                      <span className="w-0.5 bg-emerald-400 rounded-full h-1.5 animate-pulse [animation-delay:150ms]" />
+                                      <span className="w-0.5 bg-emerald-400 rounded-full h-3 animate-pulse [animation-delay:300ms]" />
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                            </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}

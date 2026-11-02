@@ -80,6 +80,11 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(currentRoleId);
+
+  useEffect(() => {
+    setSelectedRoleId(currentRoleId);
+  }, [currentRoleId]);
 
   // Fechar ao clicar fora ou pressionar ESC
   useEffect(() => {
@@ -112,14 +117,16 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
 
   const effectiveVolume = isMuted ? 0 : volume;
   const hasVoiceModeration = Boolean(onDisconnectVoice);
-  const activeRole = roles.find((r) => r.id === currentRoleId);
+  const activeRole = roles.find((r) => r.id === selectedRoleId);
 
   const handleRoleSelect = async (roleId: string | null) => {
     if (!onAssignRole || isAssigning) return;
     try {
       setIsAssigning(true);
+      setSelectedRoleId(roleId);
       await onAssignRole(roleId);
     } catch (err) {
+      setSelectedRoleId(currentRoleId);
       console.error('Erro ao atribuir cargo via menu de contexto:', err);
     } finally {
       setIsAssigning(false);
@@ -554,7 +561,7 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
               disabled={isAssigning}
               onClick={() => handleRoleSelect(null)}
               className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                !currentRoleId
+                !selectedRoleId
                   ? 'bg-white/10 text-white font-semibold'
                   : 'text-obsidian-text-secondary hover:text-white hover:bg-white/5'
               }`}
@@ -563,12 +570,12 @@ export const UserAudioContextMenu: React.FC<UserAudioContextMenuProps> = ({
                 <div className="w-2.5 h-2.5 rounded-full border border-white/20 bg-slate-500/40" />
                 <span>Sem cargo</span>
               </div>
-              {!currentRoleId && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+              {!selectedRoleId && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
             </button>
 
             {/* Lista de Cargos */}
             {roles.map((r) => {
-              const isSelected = currentRoleId === r.id;
+              const isSelected = selectedRoleId === r.id;
               return (
                 <button
                   key={r.id}
