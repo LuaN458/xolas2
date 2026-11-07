@@ -13,7 +13,6 @@ interface MessageItemProps {
   message: Message;
   isAdmin?: boolean;
   onDelete?: (messageId: string) => void;
-  layoutMode?: 'linear' | 'campsite' | 'compact';
 }
 
 interface ContentPart {
@@ -61,7 +60,6 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   message,
   isAdmin,
   onDelete,
-  layoutMode = 'linear',
 }) => {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -168,174 +166,11 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     }
   };
 
-  // Renderizador de Anexos
-  const renderAttachment = () => {
-    if (!attachmentUrl) return null;
-    return (
-      <div className="mt-2 inline-block max-w-sm sm:max-w-md">
-        {imageError ? (
-          <div className="p-3 rounded-xl bg-zinc-900 border border-rose-500/20 text-rose-300 text-xs flex items-center space-x-2">
-            <ImageOff className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>Falha ao carregar imagem.</span>
-          </div>
-        ) : (
-          <div
-            onClick={() => setLightboxOpen(true)}
-            className="relative group/img cursor-pointer overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 transition-all hover:border-zinc-700 hover:shadow-lg min-w-[14rem]"
-          >
-            {!imageLoaded && (
-              <div className="w-56 h-40 bg-zinc-900 animate-pulse flex flex-col items-center justify-center space-y-2 border border-zinc-800 rounded-xl">
-                <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
-                <span className="text-[10px] text-zinc-500 font-mono">Processando imagem...</span>
-              </div>
-            )}
+  // Resolução dinâmica de tag de cargo
+  const customRole = message.user.customRole;
+  const roleName = customRole?.name || (message.user.role === 'ADMIN' ? 'Admin' : null);
+  const roleColor = customRole?.color;
 
-            <img
-              ref={imgRef}
-              src={resolvedImageUrl}
-              alt="Anexo"
-              onLoad={handleImageLoad}
-              onError={() => setImageError(true)}
-              className={`max-h-72 max-w-full rounded-xl object-contain transition-all duration-200 group-hover/img:scale-[1.01] ${
-                imageLoaded
-                  ? 'block opacity-100'
-                  : 'absolute inset-0 w-0 h-0 opacity-0 pointer-events-none'
-              }`}
-            />
-
-            {imageLoaded && (
-              <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/25 transition-colors flex items-end justify-end p-2 opacity-0 group-hover/img:opacity-100">
-                <span className="text-[10px] bg-black/75 text-white px-2 py-0.5 rounded-md backdrop-blur-sm border border-white/10 font-mono">
-                  Ampliar
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const userRole =
-    (message.user as any)?.customRole?.name ||
-    ((message.user as any)?.role === 'ADMIN' ? 'Admin' : null);
-
-  // 1. MODO COMPACT (Dual-Pane / Alta Densidade)
-  if (layoutMode === 'compact') {
-    return (
-      <div className="py-1 px-2 rounded hover:bg-zinc-900/60 flex items-baseline gap-3 text-xs leading-5 relative group transition-colors">
-        <span className="text-[10px] font-mono text-zinc-500 shrink-0 tabular-nums">
-          {formatTime(message.createdAt)}
-        </span>
-        <span className="font-semibold text-zinc-200 shrink-0 hover:underline cursor-pointer">
-          {message.user.username}:
-        </span>
-        <div className="text-zinc-300 flex-1 min-w-0 break-words">
-          {parseMessageContent(message.content).map((part, index) =>
-            part.type === 'link' && part.href ? (
-              <a
-                key={index}
-                href={part.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => handleOpenExternal(e, part.href!)}
-                className="text-indigo-400 hover:text-indigo-300 underline underline-offset-2 break-all"
-              >
-                {part.value}
-              </a>
-            ) : (
-              <span key={index}>{part.value}</span>
-            )
-          )}
-          {renderAttachment()}
-        </div>
-
-        {isAdmin && onDelete && (
-          <button
-            type="button"
-            onClick={() => onDelete(message.id)}
-            title="Excluir mensagem"
-            className="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-rose-400 transition-opacity shrink-0"
-          >
-            <Trash2 className="w-3 h-3" />
-          </button>
-        )}
-
-        {lightboxOpen && (
-          <ImageLightboxModal
-            imageUrl={resolvedImageUrl}
-            senderName={message.user.username}
-            onClose={() => setLightboxOpen(false)}
-          />
-        )}
-      </div>
-    );
-  }
-
-  // 2. MODO CAMPSITE (Cards de Tópicos)
-  if (layoutMode === 'campsite') {
-    return (
-      <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 space-y-2 relative group hover:bg-zinc-900/50 transition-colors shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {userRole && (
-              <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-zinc-300">
-                {userRole}
-              </span>
-            )}
-            <span className="text-xs font-semibold text-zinc-200">{message.user.username}</span>
-          </div>
-          <span className="text-[10px] text-zinc-500 font-mono tabular-nums">
-            {formatTime(message.createdAt)}
-          </span>
-        </div>
-
-        <p className="text-xs text-zinc-300 leading-relaxed break-words whitespace-pre-wrap select-text">
-          {parseMessageContent(message.content).map((part, index) =>
-            part.type === 'link' && part.href ? (
-              <a
-                key={index}
-                href={part.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => handleOpenExternal(e, part.href!)}
-                className="text-indigo-400 hover:text-indigo-300 underline underline-offset-2 break-all"
-              >
-                {part.value}
-              </a>
-            ) : (
-              <span key={index}>{part.value}</span>
-            )
-          )}
-        </p>
-
-        {renderAttachment()}
-
-        {isAdmin && onDelete && (
-          <div className="absolute right-3 top-3 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              type="button"
-              onClick={() => onDelete(message.id)}
-              title="Excluir mensagem (Admin)"
-              className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-
-        {lightboxOpen && (
-          <ImageLightboxModal
-            imageUrl={resolvedImageUrl}
-            senderName={message.user.username}
-            onClose={() => setLightboxOpen(false)}
-          />
-        )}
-      </div>
-    );
-  }
-
-  // 3. MODO LINEAR / MONOLITH (Padrão)
   return (
     <article className="p-4 hover:bg-zinc-900/40 transition-colors relative group">
       <div className="flex items-start justify-between">
@@ -348,9 +183,22 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           <span className="text-xs font-semibold text-zinc-200 hover:underline cursor-pointer">
             {message.user.username}
           </span>
-          {userRole && (
-            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-              {userRole}
+          {roleName && (
+            <span
+              style={
+                roleColor
+                  ? {
+                      backgroundColor: `${roleColor}15`,
+                      color: roleColor,
+                      borderColor: `${roleColor}30`,
+                    }
+                  : undefined
+              }
+              className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+                roleColor ? '' : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+              }`}
+            >
+              {roleName}
             </span>
           )}
           <span className="text-[10px] text-zinc-500 font-mono tabular-nums">
@@ -389,7 +237,51 @@ export const MessageItem: React.FC<MessageItemProps> = ({
             <span key={index}>{part.value}</span>
           )
         )}
-        {renderAttachment()}
+
+        {/* Anexo de Imagem com Cache Inteligente */}
+        {attachmentUrl && (
+          <div className="mt-2 inline-block max-w-sm sm:max-w-md">
+            {imageError ? (
+              <div className="p-3 rounded-xl bg-zinc-900 border border-rose-500/20 text-rose-300 text-xs flex items-center space-x-2">
+                <ImageOff className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>Falha ao carregar imagem.</span>
+              </div>
+            ) : (
+              <div
+                onClick={() => setLightboxOpen(true)}
+                className="relative group/img cursor-pointer overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 transition-all hover:border-zinc-700 hover:shadow-lg min-w-[14rem]"
+              >
+                {!imageLoaded && (
+                  <div className="w-56 h-40 bg-zinc-900 animate-pulse flex flex-col items-center justify-center space-y-2 border border-zinc-800 rounded-xl">
+                    <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
+                    <span className="text-[10px] text-zinc-500 font-mono">Processando imagem...</span>
+                  </div>
+                )}
+
+                <img
+                  ref={imgRef}
+                  src={resolvedImageUrl}
+                  alt="Anexo"
+                  onLoad={handleImageLoad}
+                  onError={() => setImageError(true)}
+                  className={`max-h-72 max-w-full rounded-xl object-contain transition-all duration-200 group-hover/img:scale-[1.01] ${
+                    imageLoaded
+                      ? 'block opacity-100'
+                      : 'absolute inset-0 w-0 h-0 opacity-0 pointer-events-none'
+                  }`}
+                />
+
+                {imageLoaded && (
+                  <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/25 transition-colors flex items-end justify-end p-2 opacity-0 group-hover/img:opacity-100">
+                    <span className="text-[10px] bg-black/75 text-white px-2 py-0.5 rounded-md backdrop-blur-sm border border-white/10 font-mono">
+                      Ampliar
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {lightboxOpen && (

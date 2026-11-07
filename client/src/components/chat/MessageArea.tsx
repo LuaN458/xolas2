@@ -8,13 +8,9 @@ import { Hash } from 'lucide-react';
 
 interface MessageAreaProps {
   channel: Channel;
-  layoutMode?: 'linear' | 'campsite' | 'compact';
 }
 
-export const MessageArea: React.FC<MessageAreaProps> = ({
-  channel,
-  layoutMode = 'linear',
-}) => {
+export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
   const { user } = useAuth();
   const { socket } = useSocket();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -122,7 +118,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
           </p>
         </div>
 
-        {/* Mensagens */}
+        {/* Mensagens no Formato Linear Monolith */}
         {loading ? (
           <div className="text-center py-8 text-zinc-500 text-xs font-mono">
             Carregando discussões...
@@ -130,30 +126,6 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
         ) : messages.length === 0 ? (
           <div className="max-w-4xl mx-auto text-center py-12 text-zinc-500 text-xs">
             Nenhuma mensagem neste canal ainda. Seja o primeiro a enviar!
-          </div>
-        ) : layoutMode === 'campsite' ? (
-          <div className="max-w-4xl mx-auto w-full space-y-3">
-            {messages.map((msg) => (
-              <MessageItem
-                key={msg.id}
-                message={msg}
-                isAdmin={canDelete}
-                onDelete={handleDeleteMessage}
-                layoutMode="campsite"
-              />
-            ))}
-          </div>
-        ) : layoutMode === 'compact' ? (
-          <div className="max-w-4xl mx-auto w-full space-y-1">
-            {messages.map((msg) => (
-              <MessageItem
-                key={msg.id}
-                message={msg}
-                isAdmin={canDelete}
-                onDelete={handleDeleteMessage}
-                layoutMode="compact"
-              />
-            ))}
           </div>
         ) : (
           <div className="max-w-4xl mx-auto w-full divide-y divide-zinc-800/80 border border-zinc-800 rounded-xl bg-zinc-900/20 overflow-hidden shadow-sm">
@@ -163,7 +135,6 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
                 message={msg}
                 isAdmin={canDelete}
                 onDelete={handleDeleteMessage}
-                layoutMode="linear"
               />
             ))}
           </div>

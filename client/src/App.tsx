@@ -30,9 +30,6 @@ import { UpdateNotificationBanner } from './components/layout/UpdateNotification
 import { LoadingScreen } from './components/ui/LoadingScreen';
 import {
   MessageSquareText,
-  Sparkles,
-  Layers,
-  Sliders,
   Search,
   PanelLeft,
   Users,
@@ -80,8 +77,7 @@ export const App: React.FC = () => {
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [createChannelType, setCreateChannelType] = useState<'TEXT' | 'VOICE'>('TEXT');
 
-  // Estados do novo layout moderno
-  const [layoutMode, setLayoutMode] = useState<'linear' | 'campsite' | 'compact'>('linear');
+  // Estados do layout Linear Pro Studio
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [membersDrawerOpen, setMembersDrawerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -763,62 +759,40 @@ export const App: React.FC = () => {
       ) : (
         <>
           <div className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-100 font-sans antialiased overflow-hidden select-none">
-            {/* 1. Header Superior Unificado */}
-            <header className="h-14 border-b border-zinc-800 bg-zinc-900/90 px-4 flex items-center justify-between shrink-0 z-20">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 text-[11px] font-mono text-zinc-300 border border-zinc-700">
+            {/* 1. Header Superior Linear Pro Studio (h-12) */}
+            <header className="h-12 border-b border-zinc-800 bg-zinc-900/90 px-4 flex items-center justify-between shrink-0 z-20">
+              {/* Esquerda: Logo Xolas & Nome do Workspace */}
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 text-[11px] font-mono text-zinc-300 border border-zinc-700 shrink-0">
                   <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
                   <span>Xolas Desktop</span>
                 </div>
-
-                <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800">
-                  <button
-                    onClick={() => setLayoutMode('linear')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
-                      layoutMode === 'linear'
-                        ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>1. Linear / Monolith</span>
-                  </button>
-                  <button
-                    onClick={() => setLayoutMode('campsite')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
-                      layoutMode === 'campsite'
-                        ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <Layers className="w-3.5 h-3.5 text-amber-400" />
-                    <span>2. Campsite Topics</span>
-                  </button>
-                  <button
-                    onClick={() => setLayoutMode('compact')}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
-                      layoutMode === 'compact'
-                        ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    <Sliders className="w-3.5 h-3.5 text-blue-400" />
-                    <span>3. Compact Dual-Pane</span>
-                  </button>
-                </div>
+                {activeServerDetails && (
+                  <span className="text-xs font-semibold text-zinc-300 hidden md:inline truncate max-w-[180px]">
+                    {activeServerDetails.name}
+                  </span>
+                )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCommandPaletteOpen(true)}
-                  className="flex items-center gap-2 px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-950 border border-zinc-800 rounded-md transition-colors"
-                  title="Buscar discussões ou comandos (Ctrl+K)"
-                >
-                  <Search className="w-3.5 h-3.5 text-zinc-400" />
-                  <span className="hidden sm:inline">Buscar</span>
-                  <kbd className="text-[10px] bg-zinc-800 px-1 py-0.5 rounded font-mono text-zinc-400">⌘K</kbd>
-                </button>
+              {/* Centro: Barra de Busca Global / Command Palette Trigger */}
+              <div
+                onClick={() => setCommandPaletteOpen(true)}
+                className="w-72 md:w-96 flex items-center justify-between px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 text-zinc-400 text-xs cursor-pointer transition-all hover:border-zinc-700 shadow-sm"
+                title="Buscar discussões, canais ou comandos (Ctrl+K)"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <Search className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                  <span className="truncate text-zinc-500 text-[11px]">
+                    Buscar discussões, canais ou comandos...
+                  </span>
+                </div>
+                <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-800 border border-zinc-700 rounded text-zinc-400 shrink-0">
+                  Ctrl + K
+                </kbd>
+              </div>
 
+              {/* Direita: Ações de Utilidade (Admin, Toggle Sidebar, Membros) */}
+              <div className="flex items-center gap-2 shrink-0">
                 {canAccessAdmin && (
                   <button
                     onClick={() => setIsAdminModalOpen(true)}
@@ -840,7 +814,7 @@ export const App: React.FC = () => {
                   className={`p-1.5 rounded-md transition-colors ${
                     sidebarOpen ? 'bg-zinc-800 text-white' : 'hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200'
                   }`}
-                  title="Toggle Barra Lateral (⌘B ou Ctrl+B)"
+                  title="Alternar Barra Lateral (Ctrl+B)"
                 >
                   <PanelLeft className="w-4 h-4" />
                 </button>
@@ -857,34 +831,7 @@ export const App: React.FC = () => {
               </div>
             </header>
 
-            {/* 2. Sub-Banner Explicativo e Status de Rede */}
-            <div className="px-4 py-1.5 bg-zinc-900/60 border-b border-zinc-800 text-[11px] text-zinc-400 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-zinc-200 uppercase text-[10px] px-1.5 py-0.2 rounded bg-zinc-800 border border-zinc-700 font-mono">
-                  {layoutMode === 'linear' && 'Conceito: Linear (1px Borders + Monocromático)'}
-                  {layoutMode === 'campsite' && 'Conceito: Campsite (Discussões em cards de tópicos)'}
-                  {layoutMode === 'compact' && 'Conceito: Compact Dual-Pane (Máxima densidade)'}
-                </span>
-                <span className="text-zinc-400 hidden md:inline">
-                  Workspace unificado com comandos integrados e dock minimalista.
-                </span>
-              </div>
-              <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-400">
-                {!isConnected ? (
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                    {isReconnecting ? 'Reconectando...' : 'Desconectado'}
-                  </span>
-                ) : (
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Conectado
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* 3. Área Principal: Sidebar Unificada + Palco Central + Drawer de Membros */}
+            {/* 2. Área Principal: Sidebar Unificada + Palco Central + Drawer de Membros */}
             <div className="flex flex-1 overflow-hidden relative">
               {sidebarOpen && (
                 <ChannelSidebar
@@ -926,7 +873,7 @@ export const App: React.FC = () => {
                       />
                     ) : (
                       <>
-                        <MessageArea channel={activeChannel} layoutMode={layoutMode} />
+                        <MessageArea channel={activeChannel} />
                         <ChatInput
                           channelName={activeChannel.name}
                           onSendMessage={handleSendMessage}
@@ -965,8 +912,6 @@ export const App: React.FC = () => {
             <CommandPaletteModal
               isOpen={commandPaletteOpen}
               onClose={() => setCommandPaletteOpen(false)}
-              layoutMode={layoutMode}
-              onSelectLayoutMode={setLayoutMode}
               channels={activeServerDetails?.channels || []}
               onSelectChannel={handleSelectChannel}
               servers={servers}

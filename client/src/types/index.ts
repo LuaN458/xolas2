@@ -58,6 +58,9 @@ export interface Message {
     id: string;
     username: string;
     avatarUrl?: string;
+    role?: 'ADMIN' | 'USER';
+    customRole?: CustomRole | null;
+    customRoleId?: string | null;
   };
 }
 
