@@ -61,6 +61,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setMicInputGain,
     voiceActivationThreshold,
     setVoiceActivationThreshold,
+    leaveVoiceChannel,
   } = useVoice();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'audio' | 'keybindings' | 'updates'>('profile');
@@ -1566,7 +1567,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     </div>
                     <button
                       type="button"
-                      onClick={() => window.electronAPI?.restartAndInstall?.()}
+                      onClick={() => {
+                        try {
+                          leaveVoiceChannel();
+                        } catch {}
+                        window.electronAPI?.restartAndInstall?.();
+                      }}
                       className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-2 shadow-lg shadow-emerald-500/25 cursor-pointer shrink-0 ml-3"
                     >
                       <ArrowUpCircle className="w-4 h-4" />

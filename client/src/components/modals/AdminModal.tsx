@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../../lib/api';
-import { User, CustomRole } from '../../types';
+import { User, CustomRole, VercelMetricsData } from '../../types';
 import {
   Shield,
   Check,
@@ -20,6 +20,16 @@ import {
   Monitor,
   Edit2,
   Tag,
+  Server,
+  Cloud,
+  Globe,
+  Gauge,
+  ExternalLink,
+  Zap,
+  KeyRound,
+  AlertTriangle,
+  Radio,
+  Layers,
 } from 'lucide-react';
 
 interface AdminModalProps {
@@ -83,8 +93,25 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onClose,
   onPendingCountChange,
 }) => {
-  // Aba principal de nível superior: 'users' (Cadastros & Aprovações) ou 'roles' (Cargos & Permissões)
-  const [mainTab, setMainTab] = useState<'users' | 'roles'>('users');
+  // Aba principal de nível superior: 'users' (Cadastros & Aprovações), 'roles' (Cargos & Permissões) ou 'vercel' (Servidor Vercel & Métricas)
+  const [mainTab, setMainTab] = useState<'users' | 'roles' | 'vercel'>('users');
+
+  // Estados da aba Vercel
+  const [vercelMetrics, setVercelMetrics] = useState<VercelMetricsData | null>(null);
+  const [vercelLoading, setVercelLoading] = useState(false);
+  const [vercelRefreshing, setVercelRefreshing] = useState(false);
+  const [vercelStatus, setVercelStatus] = useState<{
+    hasToken: boolean;
+    projectId: string | null;
+    teamId: string | null;
+    maskedToken: string | null;
+  } | null>(null);
+  const [showVercelConfig, setShowVercelConfig] = useState(false);
+  const [vercelTokenInput, setVercelTokenInput] = useState('');
+  const [vercelProjectIdInput, setVercelProjectIdInput] = useState('');
+  const [vercelTeamIdInput, setVercelTeamIdInput] = useState('');
+  const [vercelTesting, setVercelTesting] = useState(false);
+  const [vercelSaving, setVercelSaving] = useState(false);
 
   // Sub-abas de aprovação de usuários
   const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
@@ -94,6 +121,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Estado da aba de Cargos
   const [roles, setRoles] = useState<CustomRole[]>([]);
@@ -104,12 +132,23 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [rolePermissions, setRolePermissions] = useState<string[]>([]);
   const [savingRole, setSavingRole] = useState(false);
 
-  const showFeedback = (type: 'success' | 'error', message: string) => {
+  const showFeedback = useCallback((type: 'success' | 'error', message: string) => {
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+    }
     setFeedback({ type, message });
-    setTimeout(() => {
+    feedbackTimeoutRef.current = setTimeout(() => {
       setFeedback((prev) => (prev?.message === message ? null : prev));
     }, 4000);
-  };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -127,7 +166,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [onPendingCountChange]);
+  }, [onPendingCountChange, showFeedback]);
 
   const fetchRoles = useCallback(async () => {
     setRolesLoading(true);
@@ -141,12 +180,91 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   }, []);
 
+  const fetchVercelStatus = useCallback(async () => {
+    try {
+      const res = await api.get('/api/admin/vercel/status');
+      if (res.data?.config) {
+        setVercelStatus(res.data.config);
+        if (res.data.config.projectId) {
+          setVercelProjectIdInput(res.data.config.projectId);
+        }
+        if (res.data.config.teamId) {
+          setVercelTeamIdInput(res.data.config.teamId);
+        }
+      }
+    } catch {}
+  }, []);
+
+  const fetchVercelMetrics = useCallback(async (forceRefresh = false) => {
+    if (forceRefresh) setVercelRefreshing(true);
+    else setVercelLoading(true);
+    try {
+      const res = await api.get('/api/admin/vercel/metrics', {
+        params: { refresh: forceRefresh ? 'true' : undefined },
+      });
+      if (res.data?.metrics) {
+        setVercelMetrics(res.data.metrics);
+      }
+    } catch (err: any) {
+      showFeedback('error', 'Falha ao buscar métricas da Vercel: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setVercelLoading(false);
+      setVercelRefreshing(false);
+    }
+  }, [showFeedback]);
+
+  const handleTestVercel = async () => {
+    setVercelTesting(true);
+    try {
+      const res = await api.post('/api/admin/vercel/test', {
+        token: vercelTokenInput.trim() || undefined,
+        projectId: vercelProjectIdInput.trim() || undefined,
+        teamId: vercelTeamIdInput.trim() || undefined,
+      });
+      if (res.data?.success) {
+        showFeedback('success', res.data.message || 'Conexão com a Vercel bem-sucedida!');
+      } else {
+        showFeedback('error', res.data?.message || 'Falha ao conectar com a Vercel.');
+      }
+    } catch (err: any) {
+      showFeedback('error', err.response?.data?.message || 'Erro ao testar conexão.');
+    } finally {
+      setVercelTesting(false);
+    }
+  };
+
+  const handleSaveVercelConfig = async () => {
+    setVercelSaving(true);
+    try {
+      const res = await api.post('/api/admin/vercel/config', {
+        token: vercelTokenInput.trim() || undefined,
+        projectId: vercelProjectIdInput.trim() || undefined,
+        teamId: vercelTeamIdInput.trim() || undefined,
+      });
+      if (res.data?.success) {
+        showFeedback('success', 'Configurações da Vercel salvas com sucesso!');
+        setShowVercelConfig(false);
+        setVercelTokenInput('');
+        fetchVercelStatus();
+        fetchVercelMetrics(true);
+      }
+    } catch (err: any) {
+      showFeedback('error', err.response?.data?.error || 'Erro ao salvar configurações.');
+    } finally {
+      setVercelSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       fetchUsers();
       fetchRoles();
+      if (mainTab === 'vercel') {
+        fetchVercelStatus();
+        fetchVercelMetrics();
+      }
     }
-  }, [isOpen, fetchUsers, fetchRoles]);
+  }, [isOpen, mainTab, fetchUsers, fetchRoles, fetchVercelStatus, fetchVercelMetrics]);
 
   if (!isOpen) return null;
 
@@ -379,14 +497,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => {
-                  fetchUsers();
-                  fetchRoles();
+                  if (mainTab === 'vercel') {
+                    fetchVercelMetrics(true);
+                    fetchVercelStatus();
+                  } else {
+                    fetchUsers();
+                    fetchRoles();
+                  }
                 }}
-                disabled={loading || rolesLoading}
+                disabled={loading || rolesLoading || vercelRefreshing || vercelLoading}
                 className="p-2 rounded-lg text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card transition-all"
                 title="Recarregar dados"
               >
-                <RefreshCw className={`w-4 h-4 ${loading || rolesLoading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 ${loading || rolesLoading || vercelRefreshing || vercelLoading ? 'animate-spin' : ''}`} />
               </button>
               <button
                 onClick={onClose}
@@ -397,11 +520,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             </div>
           </div>
 
-          {/* Abas Principais: Cadastros vs Cargos */}
-          <div className="flex items-center space-x-2 px-6 pt-1 pb-3">
+          {/* Abas Principais: Cadastros vs Cargos vs Servidor Vercel */}
+          <div className="flex items-center space-x-2 px-6 pt-1 pb-3 overflow-x-auto">
             <button
               onClick={() => setMainTab('users')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all shrink-0 ${
                 mainTab === 'users'
                   ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/40'
                   : 'bg-obsidian-card/60 text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card border border-obsidian-border'
@@ -418,7 +541,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
             <button
               onClick={() => setMainTab('roles')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all shrink-0 ${
                 mainTab === 'roles'
                   ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/40'
                   : 'bg-obsidian-card/60 text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card border border-obsidian-border'
@@ -430,6 +553,30 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/30 text-indigo-300 text-[10px] font-mono font-bold">
                   {roles.length}
                 </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setMainTab('vercel')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all shrink-0 ${
+                mainTab === 'vercel'
+                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/40'
+                  : 'bg-obsidian-card/60 text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card border border-obsidian-border'
+              }`}
+            >
+              <Server className="w-4 h-4 text-cyan-400" />
+              <span>Servidor Vercel & Métricas</span>
+              {vercelMetrics?.configured && (
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    vercelMetrics.metrics.status === 'healthy'
+                      ? 'bg-emerald-400 ring-2 ring-emerald-400/30'
+                      : vercelMetrics.metrics.status === 'degraded'
+                      ? 'bg-amber-400 ring-2 ring-amber-400/30'
+                      : 'bg-rose-400 ring-2 ring-rose-400/30'
+                  }`}
+                  title={`Status Vercel: ${vercelMetrics.metrics.status}`}
+                />
               )}
             </button>
           </div>
@@ -913,6 +1060,477 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* CONTEÚDO DA ABA 3: SERVIDOR VERCEL & MÉTRICAS */}
+        {mainTab === 'vercel' && (
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* Barra de Status e Ações do Servidor Vercel */}
+            <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-obsidian-card border border-obsidian-border shadow-lg">
+              <div className="flex items-center space-x-3.5">
+                <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500/20 to-cyan-500/10 border border-indigo-500/30 text-indigo-400 shadow-inner">
+                  <Server className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-sm font-bold text-white tracking-wide">
+                      {vercelMetrics?.projectName ? `Projeto: ${vercelMetrics.projectName}` : 'Infraestrutura Vercel'}
+                    </h3>
+                    {vercelMetrics?.configured ? (
+                      <span
+                        className={`inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                          vercelMetrics.metrics.status === 'healthy'
+                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                            : vercelMetrics.metrics.status === 'degraded'
+                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                            : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            vercelMetrics.metrics.status === 'healthy'
+                              ? 'bg-emerald-400 animate-pulse'
+                              : vercelMetrics.metrics.status === 'degraded'
+                              ? 'bg-amber-400'
+                              : 'bg-rose-400'
+                          }`}
+                        />
+                        <span>
+                          {vercelMetrics.metrics.status === 'healthy'
+                            ? 'Operacional'
+                            : vercelMetrics.metrics.status === 'degraded'
+                            ? 'Degradado'
+                            : 'Falha'}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 border border-amber-500/30 text-amber-300">
+                        Não Configurado
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-obsidian-text-muted mt-0.5">
+                    {vercelMetrics?.framework
+                      ? `Framework: ${vercelMetrics.framework.toUpperCase()} • Edge Network • Latência: ${vercelMetrics.latencyMs || 0}ms`
+                      : 'Hospedagem Fullstack e Métricas de Servidor'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowVercelConfig((prev) => !prev)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all border ${
+                    showVercelConfig
+                      ? 'bg-indigo-600 text-white border-indigo-400/50 shadow-md shadow-indigo-600/30'
+                      : 'bg-obsidian-surface text-obsidian-text-secondary hover:text-white hover:bg-obsidian-card border-obsidian-border'
+                  }`}
+                  title="Configurar credenciais da Vercel"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{showVercelConfig ? 'Ocultar Chaves' : 'Credenciais'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetchVercelMetrics(true);
+                    fetchVercelStatus();
+                  }}
+                  disabled={vercelRefreshing || vercelLoading}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-obsidian-surface hover:bg-obsidian-card text-obsidian-text-secondary hover:text-white border border-obsidian-border transition-all flex items-center space-x-1.5 shadow-sm"
+                  title="Atualizar métricas em tempo real"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${vercelRefreshing ? 'animate-spin' : ''}`} />
+                  <span>Atualizar</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Painel Expansível de Configuração das Chaves Vercel */}
+            {(showVercelConfig || !vercelMetrics?.configured) && (
+              <div className="p-5 rounded-2xl bg-obsidian-card/80 border border-indigo-500/30 shadow-xl space-y-4 animate-in fade-in duration-200">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-1.5">
+                      <KeyRound className="w-4 h-4 text-indigo-400" />
+                      <span>Configuração da Integração Vercel</span>
+                    </h4>
+                    <p className="text-[11px] text-obsidian-text-muted mt-1 leading-relaxed">
+                      Insira o seu <strong>Personal Access Token</strong> da Vercel e o <strong>Project ID</strong> para sincronizar métricas de deploy, erros e requisições. As chaves são armazenadas com segurança no servidor.
+                    </p>
+                  </div>
+                  {vercelStatus?.maskedToken && (
+                    <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/30">
+                      Token Ativo: {vercelStatus.maskedToken}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-obsidian-text-secondary">
+                      Vercel API Token (Bearer)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder={vercelStatus?.hasToken ? '••••••••••••••••••••••••' : 'Cole seu Token da Vercel'}
+                      value={vercelTokenInput}
+                      onChange={(e) => setVercelTokenInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-obsidian-surface border border-obsidian-border rounded-xl text-xs text-white placeholder-obsidian-text-muted focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-obsidian-text-secondary">
+                      Project ID (ex: prj_...)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="prj_..."
+                      value={vercelProjectIdInput}
+                      onChange={(e) => setVercelProjectIdInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-obsidian-surface border border-obsidian-border rounded-xl text-xs text-white placeholder-obsidian-text-muted focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5 sm:col-span-2 md:col-span-1">
+                    <label className="text-[11px] font-semibold text-obsidian-text-secondary">
+                      Team ID (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="team_... (opcional)"
+                      value={vercelTeamIdInput}
+                      onChange={(e) => setVercelTeamIdInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-obsidian-surface border border-obsidian-border rounded-xl text-xs text-white placeholder-obsidian-text-muted focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-obsidian-border/50">
+                  <span className="text-[10px] text-obsidian-text-muted">
+                    Obtenha seu token em{' '}
+                    <a
+                      href="https://vercel.com/account/tokens"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-indigo-400 hover:underline inline-flex items-center space-x-1"
+                    >
+                      <span>vercel.com/account/tokens</span>
+                      <ExternalLink className="w-2.5 h-2.5 inline" />
+                    </a>
+                  </span>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleTestVercel}
+                      disabled={vercelTesting}
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-obsidian-surface hover:bg-obsidian-border/40 text-obsidian-text-primary border border-obsidian-border transition-all flex items-center space-x-1.5"
+                    >
+                      {vercelTesting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      <span>Testar Conexão</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveVercelConfig}
+                      disabled={vercelSaving}
+                      className="px-4 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 transition-all flex items-center space-x-1.5"
+                    >
+                      {vercelSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                      <span>Salvar Credenciais</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Aviso Informativo de Compatibilidade WebSocket Fullstack */}
+            <div className="p-4 rounded-2xl bg-indigo-950/20 border border-indigo-500/25 flex items-start space-x-3.5 backdrop-blur-sm">
+              <div className="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shrink-0 mt-0.5">
+                <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-xs font-bold text-white flex items-center space-x-2">
+                  <span>Arquitetura Híbrida Fullstack: Vercel + WebSocket</span>
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    Dual Host
+                  </span>
+                </h4>
+                <p className="text-[11px] text-obsidian-text-secondary leading-relaxed">
+                  As rotas HTTP da API e o frontend SPA são executados na Vercel com CDN global de alta performance. As conexões persistentes de tempo real (Socket.IO, chat e canais de voz WebRTC) operam com segurança através do host WebSocket dedicado (<strong>{vercelMetrics?.websocketCompatibilityNotice?.recommendedSocketHost || 'xolas-server.onrender.com'}</strong>).
+                </p>
+              </div>
+            </div>
+
+            {/* Loading Skeleton */}
+            {vercelLoading && !vercelMetrics && (
+              <div className="space-y-4 animate-pulse">
+                <div className="h-28 bg-obsidian-card rounded-2xl border border-obsidian-border" />
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="h-24 bg-obsidian-card rounded-2xl border border-obsidian-border" />
+                  <div className="h-24 bg-obsidian-card rounded-2xl border border-obsidian-border" />
+                  <div className="h-24 bg-obsidian-card rounded-2xl border border-obsidian-border" />
+                  <div className="h-24 bg-obsidian-card rounded-2xl border border-obsidian-border" />
+                </div>
+              </div>
+            )}
+
+            {/* CONTEÚDO PRINCIPAL DE MÉTRICAS (QUANDO CARREGADO) */}
+            {vercelMetrics && (
+              <>
+                {/* Card de Deploy em Produção */}
+                <div className="p-5 rounded-2xl bg-obsidian-card border border-obsidian-border shadow-lg space-y-4">
+                  <div className="flex items-center justify-between border-b border-obsidian-border/50 pb-3">
+                    <div className="flex items-center space-x-2.5">
+                      <Layers className="w-4 h-4 text-indigo-400" />
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        Deploy Ativo em Produção
+                      </h4>
+                    </div>
+
+                    {vercelMetrics.productionDeployment?.url && (
+                      <a
+                        href={vercelMetrics.productionDeployment.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center space-x-1 font-mono font-semibold transition-colors"
+                      >
+                        <span>{vercelMetrics.productionDeployment.url.replace(/^https?:\/\//, '')}</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+
+                  {vercelMetrics.productionDeployment ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border/60">
+                        <span className="text-[10px] font-semibold text-obsidian-text-muted uppercase">Status</span>
+                        <div className="flex items-center space-x-1.5 mt-1">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              vercelMetrics.productionDeployment.state === 'READY'
+                                ? 'bg-emerald-400'
+                                : vercelMetrics.productionDeployment.state === 'BUILDING'
+                                ? 'bg-amber-400 animate-pulse'
+                                : 'bg-rose-400'
+                            }`}
+                          />
+                          <span className="text-xs font-bold text-white font-mono">
+                            {vercelMetrics.productionDeployment.state}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border/60">
+                        <span className="text-[10px] font-semibold text-obsidian-text-muted uppercase">Branch / Ref</span>
+                        <p className="text-xs font-bold text-white font-mono mt-1 truncate">
+                          {vercelMetrics.productionDeployment.branch || 'main'}
+                          {vercelMetrics.productionDeployment.commitSha && ` (${vercelMetrics.productionDeployment.commitSha})`}
+                        </p>
+                      </div>
+
+                      <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border/60">
+                        <span className="text-[10px] font-semibold text-obsidian-text-muted uppercase">Tempo de Build</span>
+                        <p className="text-xs font-bold text-white font-mono mt-1">
+                          {vercelMetrics.productionDeployment.buildDurationSeconds !== undefined
+                            ? `${vercelMetrics.productionDeployment.buildDurationSeconds}s`
+                            : 'Instantâneo'}
+                        </p>
+                      </div>
+
+                      <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border/60">
+                        <span className="text-[10px] font-semibold text-obsidian-text-muted uppercase">Data do Deploy</span>
+                        <p className="text-xs font-bold text-white font-mono mt-1 truncate">
+                          {new Date(vercelMetrics.productionDeployment.createdAt).toLocaleDateString('pt-BR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-obsidian-text-muted italic">
+                      Nenhum deploy ativo registrado no momento para este projeto.
+                    </p>
+                  )}
+
+                  {vercelMetrics.productionDeployment?.commitMessage && (
+                    <div className="p-2.5 bg-obsidian-surface/60 rounded-xl border border-obsidian-border/40 text-[11px] text-obsidian-text-secondary font-mono truncate">
+                      Commit: <span className="text-white">{vercelMetrics.productionDeployment.commitMessage}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Grid das 4 Métricas Principais da Vercel */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Métrica 1: Requisições & Invocações */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-obsidian-card to-obsidian-surface border border-obsidian-border shadow-md space-y-2">
+                    <div className="flex items-center justify-between text-cyan-400">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted">
+                        Requisições
+                      </span>
+                      <div className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                        <Zap className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="text-xl font-extrabold text-white font-mono">
+                      {vercelMetrics.metrics.totalRequestsEstimate.toLocaleString('pt-BR')}
+                    </div>
+                    <p className="text-[10px] text-obsidian-text-muted">
+                      Invocações Edge & Serverless
+                    </p>
+                  </div>
+
+                  {/* Métrica 2: Latência Média */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-obsidian-card to-obsidian-surface border border-obsidian-border shadow-md space-y-2">
+                    <div className="flex items-center justify-between text-emerald-400">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted">
+                        Latência Média
+                      </span>
+                      <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                        <Gauge className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="text-xl font-extrabold text-white font-mono">
+                      {vercelMetrics.metrics.latencyMs} <span className="text-xs font-normal text-obsidian-text-muted">ms</span>
+                    </div>
+                    <p className="text-[10px] text-emerald-400 font-medium">
+                      Ultra-baixa latência Edge
+                    </p>
+                  </div>
+
+                  {/* Métrica 3: Taxa de Erros 4xx/5xx */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-obsidian-card to-obsidian-surface border border-obsidian-border shadow-md space-y-2">
+                    <div className="flex items-center justify-between text-indigo-400">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted">
+                        Taxa de Erros
+                      </span>
+                      <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+                        <ShieldCheck className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="text-xl font-extrabold text-white font-mono">
+                      {vercelMetrics.metrics.errorRatePercent.toFixed(2)}%
+                    </div>
+                    <p className="text-[10px] text-emerald-400 font-medium">
+                      Integridade 99.9%
+                    </p>
+                  </div>
+
+                  {/* Métrica 4: Bandwidth / Transferência */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-obsidian-card to-obsidian-surface border border-obsidian-border shadow-md space-y-2">
+                    <div className="flex items-center justify-between text-purple-400">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted">
+                        Largura de Banda
+                      </span>
+                      <div className="p-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                        <Globe className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="text-xl font-extrabold text-white font-mono">
+                      {(vercelMetrics.metrics.bandwidthBytesEstimate / (1024 * 1024)).toFixed(1)}{' '}
+                      <span className="text-xs font-normal text-obsidian-text-muted">MB</span>
+                    </div>
+                    <p className="text-[10px] text-obsidian-text-muted">
+                      Tráfego Outbound CDN
+                    </p>
+                  </div>
+                </div>
+
+                {/* Domínios e Infraestrutura */}
+                {vercelMetrics.domains && vercelMetrics.domains.length > 0 && (
+                  <div className="p-5 rounded-2xl bg-obsidian-card border border-obsidian-border shadow-lg space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <Globe className="w-4 h-4 text-cyan-400" />
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        Domínios Registrados & Certificados SSL
+                      </h4>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {vercelMetrics.domains.map((dom) => (
+                        <div
+                          key={dom.name}
+                          className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border flex items-center justify-between"
+                        >
+                          <div className="truncate pr-2">
+                            <span className="text-xs font-mono font-bold text-white truncate block">
+                              {dom.name}
+                            </span>
+                            <span className="text-[10px] text-obsidian-text-muted">
+                              SSL Ativo • Vercel Edge
+                            </span>
+                          </div>
+                          <span className="p-1 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
+                            <Check className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Histórico dos Últimos Deploys */}
+                {vercelMetrics.recentDeployments && vercelMetrics.recentDeployments.length > 0 && (
+                  <div className="p-5 rounded-2xl bg-obsidian-card border border-obsidian-border shadow-lg space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <Clock className="w-4 h-4 text-indigo-400" />
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        Deploys Recentes
+                      </h4>
+                    </div>
+
+                    <div className="divide-y divide-obsidian-border/60">
+                      {vercelMetrics.recentDeployments.map((dep) => (
+                        <div
+                          key={dep.id}
+                          className="py-2.5 flex items-center justify-between text-xs transition-colors hover:bg-obsidian-surface/40 px-2 rounded-lg"
+                        >
+                          <div className="flex items-center space-x-3 truncate pr-3">
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                dep.state === 'READY'
+                                  ? 'bg-emerald-400'
+                                  : dep.state === 'BUILDING'
+                                  ? 'bg-amber-400 animate-pulse'
+                                  : 'bg-rose-400'
+                              }`}
+                            />
+                            <div className="truncate">
+                              <span className="font-semibold text-white truncate block">
+                                {dep.commitMessage}
+                              </span>
+                              <span className="text-[10px] text-obsidian-text-muted font-mono">
+                                por {dep.creator} • {new Date(dep.createdAt).toLocaleString('pt-BR')}
+                              </span>
+                            </div>
+                          </div>
+
+                          {dep.url && (
+                            <a
+                              href={dep.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-indigo-400 hover:text-indigo-300 font-mono flex items-center space-x-1 shrink-0"
+                            >
+                              <span>Visualizar</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

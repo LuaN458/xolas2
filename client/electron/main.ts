@@ -393,16 +393,42 @@ ipcMain.handle('check-for-updates', async () => {
   }
 });
 
-ipcMain.handle('restart-and-install', () => {
-  console.log('[AutoUpdater] Executando restart-and-install com reinicialização forçada');
+ipcMain.handle('restart-and-install', async () => {
+  console.log('[AutoUpdater] Executando restart-and-install com encerramento forçado de chamadas');
   if (isQuittingForUpdate) return;
   isQuittingForUpdate = true;
 
+  // 1. Notificar todas as janelas para desmontar WebRTC, microfone e emitir leave-voice ao socket
+  const allWindows = BrowserWindow.getAllWindows();
+  for (const win of allWindows) {
+    try {
+      if (!win.isDestroyed()) {
+        win.webContents.send('prepare-for-restart');
+        win.webContents.setAudioMuted(true);
+      }
+    } catch {}
+  }
+
+  // 2. Parar imediatamente processos auxiliares de áudio e atalhos
   stopProcessAudioCapture();
   stopHotkeyHelper();
   try {
     globalShortcut.unregisterAll();
   } catch {}
+
+  // 3. Aguardar breve janela (150ms) para envio do socket leave-voice pelo renderer
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  // 4. Parar carregamento e destruir todas as janelas para cortar imediatamente o Chromium renderer e liberar drivers de som
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (!win.isDestroyed()) {
+        win.webContents.stop();
+        win.removeAllListeners('close');
+        win.destroy();
+      }
+    } catch {}
+  }
 
   if (!app.isPackaged) {
     console.log('[AutoUpdater] Ambiente de desenvolvimento: simulando reinicialização');
@@ -412,27 +438,23 @@ ipcMain.handle('restart-and-install', () => {
   }
 
   try {
-    // 1. Ocultar janelas para resposta visual imediata sem abortar o ciclo do processo
-    const windows = BrowserWindow.getAllWindows();
-    for (const win of windows) {
-      try {
-        win.hide();
-      } catch {}
-    }
-
-    // 2. Executar quitAndInstall com modo silencioso e forceRunAfter ativado
-    // isSilent = true instala em background em ~2s sem popups do Windows
-    // isForceRunAfter = true instrui o electron-updater e NSIS a reabrir a aplicação
-    setImmediate(() => {
-      autoUpdater.quitAndInstall(true, true);
-    });
+    // 5. Executar quitAndInstall com auto-run ativado
+    console.log('[AutoUpdater] Disparando quitAndInstall...');
+    autoUpdater.quitAndInstall(false, true);
   } catch (err) {
     console.error('[AutoUpdater] Falha ao executar quitAndInstall:', err);
     try {
       app.relaunch();
       app.exit(0);
     } catch {}
+    return;
   }
+
+  // 6. Garantir encerramento do processo Xolas.exe para liberar arquivos para o instalador NSIS
+  setTimeout(() => {
+    console.log('[AutoUpdater] Encerramento forçado de segurança pós-instalador');
+    app.exit(0);
+  }, 1200);
 });
 
 ipcMain.handle('get-app-version', () => {
@@ -833,9 +855,6 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (isQuittingForUpdate) {
-    return;
-  }
   stopProcessAudioCapture();
   stopHotkeyHelper();
   if (process.platform !== 'darwin') {

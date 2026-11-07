@@ -81,6 +81,51 @@ export interface UpdateProgress {
   total: number;
 }
 
+export interface VercelMetricsData {
+  configured: boolean;
+  projectId?: string;
+  projectName?: string;
+  framework?: string;
+  latencyMs?: number;
+  lastChecked: string;
+  productionDeployment?: {
+    id: string;
+    url: string;
+    state: string;
+    createdAt: number;
+    readyAt?: number;
+    buildDurationSeconds?: number;
+    commitMessage?: string;
+    commitSha?: string;
+    branch?: string;
+  } | null;
+  recentDeployments: Array<{
+    id: string;
+    url: string;
+    state: string;
+    createdAt: number;
+    creator?: string;
+    commitMessage?: string;
+  }>;
+  domains: Array<{
+    name: string;
+    apexName?: string;
+    verified?: boolean;
+  }>;
+  metrics: {
+    totalRequestsEstimate: number;
+    errorRatePercent: number;
+    latencyMs: number;
+    bandwidthBytesEstimate: number;
+    status: 'healthy' | 'degraded' | 'error' | 'not_configured';
+  };
+  websocketCompatibilityNotice: {
+    isServerless: boolean;
+    notice: string;
+    recommendedSocketHost: string;
+  };
+}
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -91,6 +136,7 @@ declare global {
       getAppVersion?: () => Promise<string>;
       checkForUpdates?: () => Promise<{ status: string; version: string; error?: string; result?: any }>;
       restartAndInstall?: () => Promise<void>;
+      onPrepareForRestart?: (callback: () => void) => () => void;
       onUpdateAvailable?: (callback: (info: UpdateInfo) => void) => () => void;
       onUpdateProgress?: (callback: (progress: UpdateProgress) => void) => () => void;
       onUpdateDownloaded?: (callback: (info: UpdateInfo) => void) => () => void;

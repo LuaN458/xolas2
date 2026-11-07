@@ -2462,6 +2462,23 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const leaveVoiceChannelRef = useRef(leaveVoiceChannel);
   leaveVoiceChannelRef.current = leaveVoiceChannel;
 
+  // Ouvir sinal de reinicialização imediata do processo principal do Electron e expor teardown global
+  useEffect(() => {
+    (window as any).__xolasLeaveVoice = () => leaveVoiceChannelRef.current();
+
+    if (!window.electronAPI?.onPrepareForRestart) return;
+
+    const unreg = window.electronAPI.onPrepareForRestart(() => {
+      console.log('[Voice] Sinal de preparação para reinicialização recebido. Encerrando canal de voz imediatamente...');
+      leaveVoiceChannelRef.current();
+    });
+
+    return () => {
+      delete (window as any).__xolasLeaveVoice;
+      unreg();
+    };
+  }, []);
+
   // Teardown automático de voz, faixas de mídia e processos nativos ao deslogar ou expirar sessão
   useEffect(() => {
     const handleAuthLogout = () => {

@@ -1,7 +1,7 @@
 {
   "name": "xolas",
   "productName": "Xolas",
-  "version": "1.0.68",
+  "version": "1.0.70",
   "description": "Xolas - Aplicativo Desktop de Comunicação e Transmissão Studio Obsidian",
   "author": "Xolas",
   "type": "module",
@@ -11,6 +11,7 @@
     "compile:audio": "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /optimize+ /out:electron\\wasapi-loopback.exe electron\\wasapi-loopback.cs",
     "compile:hotkey": "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /nologo /optimize+ /win32icon:build\\icon.ico /out:electron\\hotkey-helper.exe electron\\hotkey-helper.cs",
     "build": "npm run compile:audio && npm run compile:hotkey && tsc && vite build",
+    "build:web": "tsc && vite build",
     "preview": "vite preview",
     "pack": "npm run build && electron-builder --dir",
     "dist:win": "npm run build && electron-builder --win nsis",

@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware, adminMiddleware, AuthRequest } from '../middlewares/auth';
 import { ensureScalarString, isValidIdentifier, sanitizeText } from '../middlewares/security';
+import { vercelService } from '../services/vercelService';
 import {
   notifyAdminsPendingUpdate,
   notifyUserApprovalStatus,
@@ -514,6 +515,76 @@ router.patch('/users/:id/custom-role', async (req: AuthRequest, res: Response): 
   } catch (error) {
     console.error('Erro ao atribuir cargo ao usuário:', error);
     res.status(500).json({ error: 'Erro ao atribuir cargo.' });
+  }
+});
+
+// ==========================================
+// Rotas de Monitoramento e Métricas da Vercel
+// ==========================================
+
+// Obter status de configuração da integração Vercel
+router.get('/vercel/status', async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const config = vercelService.getActiveConfig();
+    res.json({
+      success: true,
+      configured: config.hasToken && Boolean(config.projectId),
+      config,
+    });
+  } catch (error) {
+    console.error('Erro ao verificar status da Vercel:', error);
+    res.status(500).json({ error: 'Erro ao verificar status da Vercel.' });
+  }
+});
+
+// Obter métricas completas do projeto na Vercel
+router.get('/vercel/metrics', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const forceRefresh = req.query.refresh === 'true';
+    const metrics = await vercelService.getMetrics(forceRefresh);
+    res.json({ success: true, metrics });
+  } catch (error) {
+    console.error('Erro ao buscar métricas da Vercel:', error);
+    res.status(500).json({ error: 'Erro ao buscar métricas da Vercel.' });
+  }
+});
+
+// Testar conexão com a API da Vercel
+router.post('/vercel/test', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { token, projectId, teamId } = req.body || {};
+    const sanitizedToken = typeof token === 'string' ? token.trim() : undefined;
+    const sanitizedProjectId = typeof projectId === 'string' ? projectId.trim() : undefined;
+    const sanitizedTeamId = typeof teamId === 'string' ? teamId.trim() : undefined;
+
+    const result = await vercelService.testConnection(sanitizedToken, sanitizedProjectId, sanitizedTeamId);
+    res.json(result);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Falha ao testar conexão.';
+    console.error('Erro ao testar conexão Vercel:', message);
+    res.status(500).json({ success: false, message });
+  }
+});
+
+// Atualizar credenciais da Vercel em runtime
+router.post('/vercel/config', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { token, projectId, teamId } = req.body || {};
+    vercelService.updateConfig(
+      typeof token === 'string' ? token : undefined,
+      typeof projectId === 'string' ? projectId : undefined,
+      typeof teamId === 'string' ? teamId : undefined
+    );
+
+    const config = vercelService.getActiveConfig();
+    res.json({
+      success: true,
+      message: 'Configuração da Vercel atualizada com sucesso.',
+      config,
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar configurações da Vercel:', error);
+    res.status(500).json({ error: 'Erro ao atualizar configurações da Vercel.' });
   }
 });
 

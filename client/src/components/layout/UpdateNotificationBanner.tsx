@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Download, RefreshCw, X, ArrowUpCircle } from 'lucide-react';
 import { UpdateInfo, UpdateProgress } from '../../types';
+import { useVoice } from '../../contexts/VoiceContext';
 
 export const UpdateNotificationBanner: React.FC = () => {
+  const { leaveVoiceChannel } = useVoice();
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
@@ -42,6 +44,9 @@ export const UpdateNotificationBanner: React.FC = () => {
   }
 
   const handleRestart = () => {
+    try {
+      leaveVoiceChannel();
+    } catch {}
     window.electronAPI?.restartAndInstall?.();
   };
 

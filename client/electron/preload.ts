@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   restartAndInstall: () => ipcRenderer.invoke('restart-and-install'),
+  onPrepareForRestart: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('prepare-for-restart', handler);
+    return () => ipcRenderer.removeListener('prepare-for-restart', handler);
+  },
   onUpdateAvailable: (callback: (info: any) => void) => {
     const handler = (_event: any, info: any) => callback(info);
     ipcRenderer.on('update-available', handler);

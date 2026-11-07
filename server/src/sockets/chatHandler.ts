@@ -633,6 +633,7 @@ export function setupSocketHandlers(io: Server): void {
         serverId?: unknown;
         channelId?: unknown;
         isMuted?: unknown;
+        isDeafened?: unknown;
         isSpeaking?: unknown;
         isScreenSharing?: unknown;
         screenStreamId?: unknown;

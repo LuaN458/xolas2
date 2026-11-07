@@ -151,11 +151,15 @@ async function ensureDatabaseAdminAndApprovalBootstrap() {
 
 const PORT = process.env.PORT || 3001;
 
-server.listen(PORT, () => {
-  console.log(`🚀 Servidor Discord-Clone rodando na porta ${PORT}`);
-  console.log(`📡 WebSocket pronto para conexões`);
-  ensureDatabaseAdminAndApprovalBootstrap();
-});
+if (!process.env.VERCEL) {
+  server.listen(PORT, () => {
+    console.log(`🚀 Servidor Discord-Clone rodando na porta ${PORT}`);
+    console.log(`📡 WebSocket pronto para conexões`);
+    ensureDatabaseAdminAndApprovalBootstrap();
+  });
+}
+
+export { app, server, io };
 
 // Encerramento seguro e gracioso
 let isShuttingDown = false;

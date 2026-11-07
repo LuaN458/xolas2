@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowUpCircle, Sparkles, Download, ExternalLink, RefreshCw } from 'lucide-react';
 import { UpdateInfo, UpdateProgress } from '../../types';
+import { useVoice } from '../../contexts/VoiceContext';
 
 interface ForceUpdateModalProps {
   isLoggedIn: boolean;
 }
 
 export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }) => {
+  const { leaveVoiceChannel } = useVoice();
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
@@ -49,6 +51,9 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
     if (countdown === null || isRestarting) return;
     if (countdown <= 0) {
       setIsRestarting(true);
+      try {
+        leaveVoiceChannel();
+      } catch {}
       window.electronAPI?.restartAndInstall?.()?.catch((err) => {
         console.error('Falha ao reiniciar:', err);
         setIsRestarting(false);
@@ -77,6 +82,9 @@ export const ForceUpdateModal: React.FC<ForceUpdateModalProps> = ({ isLoggedIn }
   const handleRestartNow = () => {
     if (isRestarting) return;
     setIsRestarting(true);
+    try {
+      leaveVoiceChannel();
+    } catch {}
     window.electronAPI?.restartAndInstall?.()?.catch((err) => {
       console.error('Falha ao reiniciar:', err);
       setIsRestarting(false);
