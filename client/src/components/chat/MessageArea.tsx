@@ -4,13 +4,17 @@ import { useSocket } from '../../contexts/SocketContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { Channel, Message } from '../../types';
 import { MessageItem } from './MessageItem';
-import { MessageSquareText } from 'lucide-react';
+import { Hash } from 'lucide-react';
 
 interface MessageAreaProps {
   channel: Channel;
+  layoutMode?: 'linear' | 'campsite' | 'compact';
 }
 
-export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
+export const MessageArea: React.FC<MessageAreaProps> = ({
+  channel,
+  layoutMode = 'linear',
+}) => {
   const { user } = useAuth();
   const { socket } = useSocket();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -23,7 +27,6 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
   const handleDeleteMessage = useCallback(
     async (messageId: string) => {
       if (!canDelete) return;
-      // Remoção otimista imediata na UI
       setMessages((prev) => prev.filter((m) => m.id !== messageId));
 
       if (socket) {
@@ -36,7 +39,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
       try {
         await api.delete(`/api/channels/${channel.id}/messages/${messageId}`);
       } catch (err) {
-        console.warn('Exclusão de mensagem via HTTP falhou (ou já processada via socket):', err);
+        console.warn('Exclusão de mensagem falhou:', err);
       }
     },
     [canDelete, socket, channel.id]
@@ -50,7 +53,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
       try {
         const response = await api.get(`/api/channels/${channel.id}/messages`);
         if (isMounted) {
-          setMessages(response.data.messages);
+          setMessages(response.data.messages || []);
         }
       } catch (err) {
         console.error('Falha ao carregar mensagens:', err);
@@ -71,7 +74,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
 
       const handleNewMessage = (msg: Message) => {
         if (msg.channelId === channel.id) {
-          setMessages((prev) => [...prev, msg]);
+          setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
         }
       };
 
@@ -104,34 +107,63 @@ export const MessageArea: React.FC<MessageAreaProps> = ({ channel }) => {
   }, [messages]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col justify-between bg-obsidian-bg">
+    <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 flex flex-col justify-between bg-zinc-950 custom-scroll select-none">
       <div>
-        {/* Banner de início do canal (Studio Minimalista) */}
-        <div className="px-3 py-6 mb-4 border-b border-obsidian-border">
-          <div className="w-10 h-10 rounded-xl bg-obsidian-card border border-obsidian-border flex items-center justify-center text-obsidian-accent mb-3">
-            <MessageSquareText className="w-5 h-5" />
+        {/* Banner de início do canal */}
+        <div className="max-w-4xl mx-auto w-full px-2 py-6 mb-6 border-b border-zinc-800">
+          <div className="w-9 h-9 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-indigo-400 mb-3 shadow-sm">
+            <Hash className="w-5 h-5" />
           </div>
-          <h2 className="text-lg font-bold text-obsidian-text-primary mb-1">
+          <h2 className="text-base font-bold text-zinc-100 mb-1 tracking-tight">
             #{channel.name}
           </h2>
-          <p className="text-obsidian-text-muted text-xs">
+          <p className="text-zinc-400 text-xs">
             Início do histórico de discussões neste espaço.
           </p>
         </div>
 
-        {/* Lista de Mensagens */}
+        {/* Mensagens */}
         {loading ? (
-          <div className="text-center py-8 text-obsidian-text-muted text-xs font-mono">
-            Carregando mensagens...
+          <div className="text-center py-8 text-zinc-500 text-xs font-mono">
+            Carregando discussões...
           </div>
-        ) : (
-          <div className="space-y-1">
+        ) : messages.length === 0 ? (
+          <div className="max-w-4xl mx-auto text-center py-12 text-zinc-500 text-xs">
+            Nenhuma mensagem neste canal ainda. Seja o primeiro a enviar!
+          </div>
+        ) : layoutMode === 'campsite' ? (
+          <div className="max-w-4xl mx-auto w-full space-y-3">
             {messages.map((msg) => (
               <MessageItem
                 key={msg.id}
                 message={msg}
                 isAdmin={canDelete}
                 onDelete={handleDeleteMessage}
+                layoutMode="campsite"
+              />
+            ))}
+          </div>
+        ) : layoutMode === 'compact' ? (
+          <div className="max-w-4xl mx-auto w-full space-y-1">
+            {messages.map((msg) => (
+              <MessageItem
+                key={msg.id}
+                message={msg}
+                isAdmin={canDelete}
+                onDelete={handleDeleteMessage}
+                layoutMode="compact"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="max-w-4xl mx-auto w-full divide-y divide-zinc-800/80 border border-zinc-800 rounded-xl bg-zinc-900/20 overflow-hidden shadow-sm">
+            {messages.map((msg) => (
+              <MessageItem
+                key={msg.id}
+                message={msg}
+                isAdmin={canDelete}
+                onDelete={handleDeleteMessage}
+                layoutMode="linear"
               />
             ))}
           </div>

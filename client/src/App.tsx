@@ -13,9 +13,7 @@ import {
 } from './lib/authStorage';
 import { Server, Channel, CustomRole, User } from './types';
 
-import { ServerSidebar } from './components/layout/ServerSidebar';
 import { ChannelSidebar, VoiceParticipantInfo } from './components/layout/ChannelSidebar';
-import { UserControlsFooter } from './components/layout/UserControlsFooter';
 import { MemberList } from './components/layout/MemberList';
 import { ChatHeader } from './components/chat/ChatHeader';
 import { MessageArea } from './components/chat/MessageArea';
@@ -27,9 +25,19 @@ import { SettingsModal } from './components/modals/SettingsModal';
 import { AuthModal } from './components/modals/AuthModal';
 import { AdminModal } from './components/modals/AdminModal';
 import { ForceUpdateModal } from './components/modals/ForceUpdateModal';
+import { CommandPaletteModal } from './components/modals/CommandPaletteModal';
 import { UpdateNotificationBanner } from './components/layout/UpdateNotificationBanner';
 import { LoadingScreen } from './components/ui/LoadingScreen';
-import { MessageSquareText } from 'lucide-react';
+import {
+  MessageSquareText,
+  Sparkles,
+  Layers,
+  Sliders,
+  Search,
+  PanelLeft,
+  Users,
+  Shield,
+} from 'lucide-react';
 
 export const App: React.FC = () => {
   const { user, loading, setUser, token } = useAuth();
@@ -71,6 +79,36 @@ export const App: React.FC = () => {
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [createChannelType, setCreateChannelType] = useState<'TEXT' | 'VOICE'>('TEXT');
+
+  // Estados do novo layout moderno
+  const [layoutMode, setLayoutMode] = useState<'linear' | 'campsite' | 'compact'>('linear');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [membersDrawerOpen, setMembersDrawerOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  // Atalhos de teclado globais (Ctrl+K para Command Palette, Ctrl+B para Sidebar)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        const target = e.target as HTMLElement | null;
+        const isInput =
+          target &&
+          (target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.isContentEditable);
+        if (isInput) return;
+
+        e.preventDefault();
+        setSidebarOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Estados de inicialização e prontidão do software
   const [isAppReady, setIsAppReady] = useState(false);
@@ -642,15 +680,18 @@ export const App: React.FC = () => {
       const minDisplayTime = 800;
       const delay = Math.max(0, minDisplayTime - elapsed);
 
+      let readyTimer: ReturnType<typeof setTimeout> | null = null;
       const fadeTimer = setTimeout(() => {
         setIsFadingOut(true);
-        const readyTimer = setTimeout(() => {
+        readyTimer = setTimeout(() => {
           setIsAppReady(true);
         }, 300);
-        return () => clearTimeout(readyTimer);
       }, delay);
 
-      return () => clearTimeout(fadeTimer);
+      return () => {
+        clearTimeout(fadeTimer);
+        if (readyTimer) clearTimeout(readyTimer);
+      };
     }
   }, [user, isConnected, initialServersLoaded, isAppReady]);
 
@@ -721,143 +762,273 @@ export const App: React.FC = () => {
         <AuthModal />
       ) : (
         <>
-          <div className="h-screen w-screen flex bg-obsidian-bg overflow-hidden font-sans text-obsidian-text-primary antialiased">
-          {/* 1. Dock Lateral de Espaços (Linear Style) */}
-          <ServerSidebar
-            servers={servers}
-            activeServerId={activeServerId}
-            onSelectServer={(id) => setActiveServerId(id)}
-            onOpenCreateModal={() => setIsCreateServerOpen(true)}
-            isAdmin={canAccessAdmin}
-            pendingApprovalsCount={pendingApprovalsCount}
-            onOpenAdminModal={() => setIsAdminModalOpen(true)}
-          />
+          <div className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-100 font-sans antialiased overflow-hidden select-none">
+            {/* 1. Header Superior Unificado */}
+            <header className="h-14 border-b border-zinc-800 bg-zinc-900/90 px-4 flex items-center justify-between shrink-0 z-20">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-zinc-800 text-[11px] font-mono text-zinc-300 border border-zinc-700">
+                  <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+                  <span>Xolas Desktop</span>
+                </div>
 
-          {/* 2. Barra Lateral de Canais + Perfil de Usuário Ancorado na Base */}
-          <div className="w-72 bg-obsidian-surface flex flex-col h-full shrink-0 border-r border-obsidian-border justify-between">
-            <ChannelSidebar
-              server={activeServerDetails}
-              activeChannelId={activeChannel?.id || null}
-              voiceParticipants={voiceParticipants}
-              onSelectChannel={handleSelectChannel}
-              onDisconnectVoice={redirectToGeneralChat}
-              onOpenCreateChannelModal={(type) => {
-                setCreateChannelType(type);
-                setIsCreateChannelOpen(true);
-              }}
-              roles={roles}
-              onAssignCustomRole={handleAssignCustomRole}
-            />
-            <UserControlsFooter onOpenSettings={() => setIsSettingsOpen(true)} />
-          </div>
+                <div className="flex items-center bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                  <button
+                    onClick={() => setLayoutMode('linear')}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+                      layoutMode === 'linear'
+                        ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>1. Linear / Monolith</span>
+                  </button>
+                  <button
+                    onClick={() => setLayoutMode('campsite')}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+                      layoutMode === 'campsite'
+                        ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5 text-amber-400" />
+                    <span>2. Campsite Topics</span>
+                  </button>
+                  <button
+                    onClick={() => setLayoutMode('compact')}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 ${
+                      layoutMode === 'compact'
+                        ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    <Sliders className="w-3.5 h-3.5 text-blue-400" />
+                    <span>3. Compact Dual-Pane</span>
+                  </button>
+                </div>
+              </div>
 
-          {/* 3. Área Central (Discussão ou Estúdio de Voz) */}
-          <main className="flex-1 flex flex-col min-w-0 bg-obsidian-bg relative">
-            {user && !isConnected && (
-              <div className="bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-xs py-1.5 px-4 text-center shrink-0 z-20 flex items-center justify-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                <span>
-                  {isReconnecting
-                    ? 'Reconectando ao servidor...'
-                    : connectionError || 'Desconectado do servidor. Tentando reconectar...'}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCommandPaletteOpen(true)}
+                  className="flex items-center gap-2 px-2.5 py-1 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-950 border border-zinc-800 rounded-md transition-colors"
+                  title="Buscar discussões ou comandos (Ctrl+K)"
+                >
+                  <Search className="w-3.5 h-3.5 text-zinc-400" />
+                  <span className="hidden sm:inline">Buscar</span>
+                  <kbd className="text-[10px] bg-zinc-800 px-1 py-0.5 rounded font-mono text-zinc-400">⌘K</kbd>
+                </button>
+
+                {canAccessAdmin && (
+                  <button
+                    onClick={() => setIsAdminModalOpen(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 transition-colors"
+                    title="Painel de Administração"
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    <span className="hidden md:inline">Admin</span>
+                    {pendingApprovalsCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-bold">
+                        {pendingApprovalsCount > 9 ? '9+' : pendingApprovalsCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    sidebarOpen ? 'bg-zinc-800 text-white' : 'hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                  title="Toggle Barra Lateral (⌘B ou Ctrl+B)"
+                >
+                  <PanelLeft className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={() => setMembersDrawerOpen(!membersDrawerOpen)}
+                  className={`p-1.5 rounded-md transition-colors ${
+                    membersDrawerOpen ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                  }`}
+                  title="Participantes"
+                >
+                  <Users className="w-4 h-4" />
+                </button>
+              </div>
+            </header>
+
+            {/* 2. Sub-Banner Explicativo e Status de Rede */}
+            <div className="px-4 py-1.5 bg-zinc-900/60 border-b border-zinc-800 text-[11px] text-zinc-400 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-zinc-200 uppercase text-[10px] px-1.5 py-0.2 rounded bg-zinc-800 border border-zinc-700 font-mono">
+                  {layoutMode === 'linear' && 'Conceito: Linear (1px Borders + Monocromático)'}
+                  {layoutMode === 'campsite' && 'Conceito: Campsite (Discussões em cards de tópicos)'}
+                  {layoutMode === 'compact' && 'Conceito: Compact Dual-Pane (Máxima densidade)'}
+                </span>
+                <span className="text-zinc-400 hidden md:inline">
+                  Workspace unificado com comandos integrados e dock minimalista.
                 </span>
               </div>
-            )}
-            {activeChannel ? (
-              <>
-                <ChatHeader channel={activeChannel} />
-                {activeChannel.type === 'VOICE' ? (
-                  <VoiceRoom
-                    channel={activeChannel}
-                    onDisconnect={redirectToGeneralChat}
-                    socketParticipants={voiceParticipants[activeChannel.id] || []}
-                  />
+              <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-400">
+                {!isConnected ? (
+                  <span className="text-amber-400 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    {isReconnecting ? 'Reconectando...' : 'Desconectado'}
+                  </span>
                 ) : (
-                  <>
-                    <MessageArea channel={activeChannel} />
-                    <ChatInput
-                      channelName={activeChannel.name}
-                      onSendMessage={handleSendMessage}
-                    />
-                  </>
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Conectado
+                  </span>
                 )}
-              </>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-obsidian-text-muted">
-                <div className="w-12 h-12 rounded-2xl bg-obsidian-card border border-obsidian-border flex items-center justify-center text-obsidian-accent mb-3">
-                  <MessageSquareText className="w-6 h-6" />
-                </div>
-                <h3 className="text-sm font-bold text-obsidian-text-primary mb-1">Nenhum canal ativo</h3>
-                <p className="text-xs max-w-xs text-obsidian-text-muted">
-                  Selecione um canal na barra lateral para iniciar a transmissão ou conversa.
-                </p>
               </div>
-            )}
-          </main>
+            </div>
 
-          {/* 4. Barra Lateral de Participantes (apenas em canais de texto) */}
-          {activeServerDetails && activeChannel?.type === 'TEXT' && (
-            <MemberList
-              members={activeServerDetails.members || []}
-              onlineUserIds={onlineUserIds}
-              server={activeServerDetails}
-              voiceParticipants={voiceParticipants}
-              roles={roles}
-              onAssignCustomRole={handleAssignCustomRole}
-            />
-          )}
+            {/* 3. Área Principal: Sidebar Unificada + Palco Central + Drawer de Membros */}
+            <div className="flex flex-1 overflow-hidden relative">
+              {sidebarOpen && (
+                <ChannelSidebar
+                  server={activeServerDetails}
+                  servers={servers}
+                  activeChannelId={activeChannel?.id || null}
+                  voiceParticipants={voiceParticipants}
+                  onSelectChannel={handleSelectChannel}
+                  onDisconnectVoice={redirectToGeneralChat}
+                  onOpenCreateChannelModal={(type) => {
+                    setCreateChannelType(type);
+                    setIsCreateChannelOpen(true);
+                  }}
+                  roles={roles}
+                  onAssignCustomRole={handleAssignCustomRole}
+                  onSelectServer={(id) => setActiveServerId(id)}
+                  onOpenCreateServerModal={() => setIsCreateServerOpen(true)}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+                />
+              )}
 
-          {/* Modais */}
-          <CreateServerModal
-            isOpen={isCreateServerOpen}
-            onClose={() => setIsCreateServerOpen(false)}
-            onServerCreated={(newServer) => {
-              setServers((prev) => {
-                const next = [...prev, newServer];
-                persistCachedServers(next);
-                return next;
-              });
-              setActiveServerId(newServer.id);
-            }}
-          />
+              {/* Palco Central: Chat ou Estúdio de Voz */}
+              <main className="flex-1 flex flex-col min-w-0 bg-zinc-950 relative overflow-hidden">
+                {activeChannel ? (
+                  <>
+                    <ChatHeader
+                      channel={activeChannel}
+                      onToggleMembersDrawer={() => setMembersDrawerOpen(!membersDrawerOpen)}
+                      membersCount={activeServerDetails?.members?.length || 0}
+                      isMembersDrawerOpen={membersDrawerOpen}
+                      onOpenSearch={() => setCommandPaletteOpen(true)}
+                    />
+                    {activeChannel.type === 'VOICE' ? (
+                      <VoiceRoom
+                        channel={activeChannel}
+                        onDisconnect={redirectToGeneralChat}
+                        socketParticipants={voiceParticipants[activeChannel.id] || []}
+                      />
+                    ) : (
+                      <>
+                        <MessageArea channel={activeChannel} layoutMode={layoutMode} />
+                        <ChatInput
+                          channelName={activeChannel.name}
+                          onSendMessage={handleSendMessage}
+                        />
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-zinc-500">
+                    <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-indigo-400 mb-3 shadow-sm">
+                      <MessageSquareText className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-sm font-bold text-zinc-200 mb-1">Nenhum canal ativo</h3>
+                    <p className="text-xs max-w-xs text-zinc-400">
+                      Selecione um canal na barra lateral para iniciar a transmissão ou conversa.
+                    </p>
+                  </div>
+                )}
+              </main>
 
-          {activeServerDetails && (
-            <CreateChannelModal
-              isOpen={isCreateChannelOpen}
-              serverId={activeServerDetails.id}
-              initialType={createChannelType}
-              onClose={() => setIsCreateChannelOpen(false)}
-              onChannelCreated={(newChannel) => {
-                setActiveServerDetails((prev) => {
-                  if (!prev) return null;
-                  const updated = {
-                    ...prev,
-                    channels: [...prev.channels, newChannel],
-                  };
-                  persistCachedServerDetails(updated);
-                  return updated;
-                });
-                setActiveChannel(newChannel);
-                if (newChannel.type === 'VOICE') {
-                  joinVoiceChannel(newChannel);
-                }
+              {/* Gaveta de Membros Retrátil */}
+              {membersDrawerOpen && activeServerDetails && (
+                <MemberList
+                  members={activeServerDetails.members || []}
+                  onlineUserIds={onlineUserIds}
+                  server={activeServerDetails}
+                  voiceParticipants={voiceParticipants}
+                  roles={roles}
+                  onAssignCustomRole={handleAssignCustomRole}
+                  onClose={() => setMembersDrawerOpen(false)}
+                />
+              )}
+            </div>
+
+            {/* Modais do Sistema */}
+            <CommandPaletteModal
+              isOpen={commandPaletteOpen}
+              onClose={() => setCommandPaletteOpen(false)}
+              layoutMode={layoutMode}
+              onSelectLayoutMode={setLayoutMode}
+              channels={activeServerDetails?.channels || []}
+              onSelectChannel={handleSelectChannel}
+              servers={servers}
+              activeServerId={activeServerId}
+              onSelectServer={(id) => setActiveServerId(id)}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenAdmin={() => setIsAdminModalOpen(true)}
+              isAdmin={canAccessAdmin}
+              onOpenCreateChannel={() => {
+                setCreateChannelType('TEXT');
+                setIsCreateChannelOpen(true);
               }}
             />
-          )}
 
-          {/* Modal de Configurações (Apelido & Microfone) */}
-          <SettingsModal
-            isOpen={isSettingsOpen}
-            onClose={() => setIsSettingsOpen(false)}
-          />
+            <CreateServerModal
+              isOpen={isCreateServerOpen}
+              onClose={() => setIsCreateServerOpen(false)}
+              onServerCreated={(newServer) => {
+                setServers((prev) => {
+                  const next = [...prev, newServer];
+                  persistCachedServers(next);
+                  return next;
+                });
+                setActiveServerId(newServer.id);
+              }}
+            />
 
-          {/* Modal de Administração (Aprovação / Recusa / Moderação) */}
-          <AdminModal
-            isOpen={isAdminModalOpen}
-            onClose={() => setIsAdminModalOpen(false)}
-            onPendingCountChange={setPendingApprovalsCount}
-          />
-        </div>
+            {activeServerDetails && (
+              <CreateChannelModal
+                isOpen={isCreateChannelOpen}
+                serverId={activeServerDetails.id}
+                initialType={createChannelType}
+                onClose={() => setIsCreateChannelOpen(false)}
+                onChannelCreated={(newChannel) => {
+                  setActiveServerDetails((prev) => {
+                    if (!prev) return null;
+                    const updated = {
+                      ...prev,
+                      channels: [...prev.channels, newChannel],
+                    };
+                    persistCachedServerDetails(updated);
+                    return updated;
+                  });
+                  setActiveChannel(newChannel);
+                  if (newChannel.type === 'VOICE') {
+                    joinVoiceChannel(newChannel);
+                  }
+                }}
+              />
+            )}
+
+            <SettingsModal
+              isOpen={isSettingsOpen}
+              onClose={() => setIsSettingsOpen(false)}
+            />
+
+            <AdminModal
+              isOpen={isAdminModalOpen}
+              onClose={() => setIsAdminModalOpen(false)}
+              onPendingCountChange={setPendingApprovalsCount}
+            />
+          </div>
 
         {/* Animação de entrada e carregamento no startup (overlay fluido até estar pronto) */}
         {!isAppReady && (

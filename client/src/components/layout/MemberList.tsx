@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Member, Server, CustomRole } from '../../types';
-import { Shield } from 'lucide-react';
+import { Shield, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useSocket } from '../../contexts/SocketContext';
@@ -15,6 +15,7 @@ interface MemberListProps {
   roles?: CustomRole[];
   onAssignCustomRole?: (userId: string, customRoleId: string | null) => Promise<void>;
   onWatchScreenShare?: (participant: VoiceParticipantInfo) => void;
+  onClose?: () => void;
 }
 
 export const MemberList: React.FC<MemberListProps> = ({
@@ -25,6 +26,7 @@ export const MemberList: React.FC<MemberListProps> = ({
   roles = [],
   onAssignCustomRole,
   onWatchScreenShare,
+  onClose,
 }) => {
   const { user } = useAuth();
   const { socket } = useSocket();
@@ -79,8 +81,8 @@ export const MemberList: React.FC<MemberListProps> = ({
     <div
       key={member.id}
       onContextMenu={(e) => handleMemberContextMenu(e, member)}
-      className={`flex items-center space-x-2.5 px-2 py-1.5 rounded-lg hover:bg-obsidian-card cursor-pointer transition-all group ${
-        isOnline ? 'opacity-100' : 'opacity-60 hover:opacity-100'
+      className={`flex items-center space-x-2.5 px-2 py-1.5 rounded-lg hover:bg-zinc-900 cursor-pointer transition-colors group ${
+        isOnline ? 'opacity-100' : 'opacity-50 hover:opacity-100'
       }`}
     >
       <div className="relative shrink-0">
@@ -90,27 +92,27 @@ export const MemberList: React.FC<MemberListProps> = ({
             `https://api.dicebear.com/7.x/bottts/svg?seed=${member.user.username}`
           }
           alt={member.user.username}
-          className="w-7 h-7 rounded-lg bg-obsidian-card border border-obsidian-border"
+          className="w-7 h-7 rounded-full bg-zinc-800 border border-zinc-700 object-cover"
         />
         <div
-          className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-obsidian-surface ${
-            isOnline ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50' : 'bg-slate-500'
+          className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-zinc-950 ${
+            isOnline ? 'bg-emerald-400' : 'bg-zinc-600'
           }`}
           title={isOnline ? 'Disponível' : 'Offline'}
         />
       </div>
 
-      <div className="min-w-0 flex items-center space-x-1.5 flex-1">
+      <div className="min-w-0 flex items-center space-x-1.5 flex-1 truncate">
         <span
           className={`text-xs font-medium truncate ${
-            isOnline ? 'text-obsidian-text-primary group-hover:text-white' : 'text-obsidian-text-muted group-hover:text-obsidian-text-secondary'
+            isOnline ? 'text-zinc-200 group-hover:text-white' : 'text-zinc-400 group-hover:text-zinc-200'
           }`}
         >
           {member.user.username}
         </span>
         {member.role === 'ADMIN' ? (
           <span title="Administrador">
-            <Shield className="w-3 h-3 text-obsidian-accent shrink-0" />
+            <Shield className="w-3 h-3 text-indigo-400 shrink-0" />
           </span>
         ) : member.user.customRole ? (
           <span
@@ -131,7 +133,11 @@ export const MemberList: React.FC<MemberListProps> = ({
 
   // Informações de voz do membro selecionado no menu de contexto
   const targetMember = contextMenu
-    ? members.find((m) => m.userId === contextMenu.member.userId || m.user.id === contextMenu.member.user.id) || contextMenu.member
+    ? members.find(
+        (m) =>
+          m.userId === contextMenu.member.userId ||
+          m.user.id === contextMenu.member.user.id
+      ) || contextMenu.member
     : null;
   const targetUserId = targetMember?.user?.id;
   const isSelf = targetUserId === user?.id;
@@ -173,39 +179,60 @@ export const MemberList: React.FC<MemberListProps> = ({
 
   return (
     <>
-      <aside className="w-56 bg-obsidian-surface flex flex-col shrink-0 select-none border-l border-obsidian-border p-3.5 overflow-y-auto">
-        {/* 1. Seção Disponível (Online) */}
-        <div className="text-[10px] font-bold text-obsidian-text-muted tracking-wider uppercase mb-2 px-1 flex items-center justify-between">
-          <span>Disponível</span>
-          <span className="font-mono text-[9px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded">
-            {onlineMembers.length}
+      <aside className="w-64 border-l border-zinc-800 bg-zinc-950 flex flex-col shrink-0 z-20 select-none h-full animate-in slide-in-from-right-4 duration-150">
+        {/* Header da Gaveta */}
+        <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
+          <span className="text-xs font-semibold text-zinc-200">
+            Participantes ({members.length})
           </span>
-        </div>
-
-        <div className="space-y-0.5 mb-5">
-          {onlineMembers.map((member) => renderMemberItem(member, true))}
-          {onlineMembers.length === 0 && (
-            <div className="text-[11px] text-obsidian-text-muted px-2 py-1 italic">
-              Nenhum membro ativo
-            </div>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              title="Fechar painel de participantes"
+            >
+              <X className="w-4 h-4" />
+            </button>
           )}
         </div>
 
-        {/* 2. Seção Offline */}
-        {offlineMembers.length > 0 && (
-          <>
-            <div className="text-[10px] font-bold text-obsidian-text-muted tracking-wider uppercase mb-2 px-1 flex items-center justify-between">
-              <span>Offline</span>
-              <span className="font-mono text-[9px] text-slate-400 bg-slate-500/10 px-1.5 py-0.2 rounded">
-                {offlineMembers.length}
+        {/* Conteúdo com scroll */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-4 custom-scroll">
+          {/* Seção Disponível (Online) */}
+          <div>
+            <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 px-1 flex items-center justify-between font-mono">
+              <span>Disponível</span>
+              <span className="text-[9px] text-emerald-400 bg-emerald-950 px-1.5 py-0.2 rounded border border-emerald-800">
+                {onlineMembers.length}
               </span>
             </div>
 
             <div className="space-y-0.5">
-              {offlineMembers.map((member) => renderMemberItem(member, false))}
+              {onlineMembers.map((member) => renderMemberItem(member, true))}
+              {onlineMembers.length === 0 && (
+                <div className="text-xs text-zinc-500 px-2 py-1 italic">
+                  Nenhum membro ativo
+                </div>
+              )}
             </div>
-          </>
-        )}
+          </div>
+
+          {/* Seção Offline */}
+          {offlineMembers.length > 0 && (
+            <div>
+              <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 px-1 flex items-center justify-between font-mono">
+                <span>Offline</span>
+                <span className="text-[9px] text-zinc-400 bg-zinc-900 px-1.5 py-0.2 rounded border border-zinc-800">
+                  {offlineMembers.length}
+                </span>
+              </div>
+
+              <div className="space-y-0.5">
+                {offlineMembers.map((member) => renderMemberItem(member, false))}
+              </div>
+            </div>
+          )}
+        </div>
       </aside>
 
       {/* Menu de Contexto do Membro com Botão Direito */}
