@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useSocket } from '../../contexts/SocketContext';
@@ -68,6 +68,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [newNickname, setNewNickname] = useState(user?.username || '');
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const statusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showStatusMessage = useCallback((type: 'success' | 'error', text: string, duration = 3500) => {
+    if (statusTimeoutRef.current) {
+      clearTimeout(statusTimeoutRef.current);
+    }
+    setStatusMessage({ type, text });
+    statusTimeoutRef.current = setTimeout(() => {
+      setStatusMessage(null);
+    }, duration);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (statusTimeoutRef.current) {
+        clearTimeout(statusTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Estados de Teclas de Atalho
   const [keybindings, setKeybindings] = useState<UserKeybindings>(() => getUserSettings().keybindings);
@@ -485,14 +504,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       }
 
       setPreviewAvatar(updated.avatarUrl || '');
-      setStatusMessage({ type: 'success', text: 'Foto de perfil atualizada com sucesso!' });
-      setTimeout(() => setStatusMessage(null), 3000);
+      showStatusMessage('success', 'Foto de perfil atualizada com sucesso!');
     } catch (err: any) {
       console.error('Erro ao atualizar foto de perfil:', err);
-      setStatusMessage({
-        type: 'error',
-        text: err.response?.data?.error || 'Não foi possível atualizar a foto de perfil.',
-      });
+      showStatusMessage(
+        'error',
+        err.response?.data?.error || 'Não foi possível atualizar a foto de perfil.'
+      );
     } finally {
       setAvatarLoading(false);
     }
@@ -599,13 +617,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         });
       }
 
-      setStatusMessage({ type: 'success', text: 'Apelido atualizado com sucesso!' });
-      setTimeout(() => setStatusMessage(null), 3000);
+      showStatusMessage('success', 'Apelido atualizado com sucesso!');
     } catch (err: any) {
-      setStatusMessage({
-        type: 'error',
-        text: err.response?.data?.error || 'Erro ao atualizar apelido.',
-      });
+      showStatusMessage('error', err.response?.data?.error || 'Erro ao atualizar apelido.');
     } finally {
       setLoading(false);
     }
@@ -616,12 +630,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     if (!currentPassword || !newPassword) return;
 
     if (newPassword.length < 4) {
-      setStatusMessage({ type: 'error', text: 'A nova senha deve ter no mínimo 4 caracteres.' });
+      showStatusMessage('error', 'A nova senha deve ter no mínimo 4 caracteres.');
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setStatusMessage({ type: 'error', text: 'A confirmação de senha não coincide com a nova senha.' });
+      showStatusMessage('error', 'A confirmação de senha não coincide com a nova senha.');
       return;
     }
 
@@ -634,16 +648,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         newPassword,
       });
 
-      setStatusMessage({ type: 'success', text: res.data?.message || 'Senha atualizada com sucesso!' });
+      showStatusMessage('success', res.data?.message || 'Senha atualizada com sucesso!', 4000);
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setTimeout(() => setStatusMessage(null), 4000);
     } catch (err: any) {
-      setStatusMessage({
-        type: 'error',
-        text: err.response?.data?.error || 'Erro ao atualizar senha. Verifique a senha atual.',
-      });
+      showStatusMessage(
+        'error',
+        err.response?.data?.error || 'Erro ao atualizar senha. Verifique a senha atual.'
+      );
     } finally {
       setPasswordLoading(false);
     }
@@ -653,10 +666,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 select-none animate-in fade-in">
-      <div className="bg-obsidian-surface rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl border border-obsidian-border flex flex-col max-h-[85vh]">
+      <div className="bg-zinc-950 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl border border-zinc-800 flex flex-col max-h-[85vh]">
         {/* Cabeçalho */}
-        <div className="p-4 px-6 border-b border-obsidian-border flex items-center justify-between">
-          <h2 className="text-sm font-bold text-obsidian-text-primary tracking-tight">
+        <div className="p-4 px-6 border-b border-zinc-800 flex items-center justify-between">
+          <h2 className="text-sm font-bold text-zinc-100 tracking-tight">
             Configurações
           </h2>
           <button
@@ -664,20 +677,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               stopMicTest();
               onClose();
             }}
-            className="text-obsidian-text-muted hover:text-white transition-colors p-1 rounded-lg hover:bg-obsidian-card"
+            className="text-zinc-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-zinc-900"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Abas com Pílulas e Alto Contraste */}
-        <div className="flex border-b border-obsidian-border bg-obsidian-bg px-6 py-2.5 gap-2 text-xs font-semibold">
+        {/* Abas com Pílulas e Alto Contraste (Updates obrigatoriamente por último) */}
+        <div className="flex border-b border-zinc-800 bg-zinc-900/60 px-6 py-2.5 gap-2 text-xs font-semibold overflow-x-auto">
           <button
             onClick={() => setActiveTab('profile')}
-            className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
+            className={`px-3.5 py-1.5 rounded-lg flex items-center space-x-2 transition-all border shrink-0 ${
               activeTab === 'profile'
-                ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
-                : 'text-obsidian-text-secondary border-transparent hover:text-white hover:bg-obsidian-card/60'
+                ? 'bg-zinc-800 text-white border-zinc-700 shadow-sm'
+                : 'text-zinc-400 border-transparent hover:text-white hover:bg-zinc-800/60'
             }`}
           >
             <User className="w-4 h-4 text-indigo-400" />
@@ -686,10 +699,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           <button
             onClick={() => setActiveTab('audio')}
-            className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
+            className={`px-3.5 py-1.5 rounded-lg flex items-center space-x-2 transition-all border shrink-0 ${
               activeTab === 'audio'
-                ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
-                : 'text-obsidian-text-secondary border-transparent hover:text-white hover:bg-obsidian-card/60'
+                ? 'bg-zinc-800 text-white border-zinc-700 shadow-sm'
+                : 'text-zinc-400 border-transparent hover:text-white hover:bg-zinc-800/60'
             }`}
           >
             <Mic className="w-4 h-4 text-emerald-400" />
@@ -698,10 +711,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           <button
             onClick={() => setActiveTab('keybindings')}
-            className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
+            className={`px-3.5 py-1.5 rounded-lg flex items-center space-x-2 transition-all border shrink-0 ${
               activeTab === 'keybindings'
-                ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
-                : 'text-obsidian-text-secondary border-transparent hover:text-white hover:bg-obsidian-card/60'
+                ? 'bg-zinc-800 text-white border-zinc-700 shadow-sm'
+                : 'text-zinc-400 border-transparent hover:text-white hover:bg-zinc-800/60'
             }`}
           >
             <Keyboard className="w-4 h-4 text-purple-400" />
@@ -710,10 +723,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
           <button
             onClick={() => setActiveTab('updates')}
-            className={`px-3.5 py-2 rounded-xl flex items-center space-x-2 transition-all border ${
+            className={`px-3.5 py-1.5 rounded-lg flex items-center space-x-2 transition-all border shrink-0 ${
               activeTab === 'updates'
-                ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
-                : 'text-obsidian-text-secondary border-transparent hover:text-white hover:bg-obsidian-card/60'
+                ? 'bg-zinc-800 text-white border-zinc-700 shadow-sm'
+                : 'text-zinc-400 border-transparent hover:text-white hover:bg-zinc-800/60'
             }`}
           >
             <Sparkles className="w-4 h-4 text-indigo-400" />
@@ -728,7 +741,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               className={`mb-4 p-3 rounded-xl flex items-center space-x-2 text-xs border ${
                 statusMessage.type === 'success'
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                  : 'bg-obsidian-rose/10 border-obsidian-rose/30 text-obsidian-rose'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
               }`}
             >
               {statusMessage.type === 'success' ? (
@@ -743,7 +756,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           {activeTab === 'profile' && (
             <div className="space-y-6">
               {/* Estúdio de Foto de Perfil (Avatar do Usuário) */}
-              <div className="p-4 bg-obsidian-card rounded-2xl border border-obsidian-border space-y-4 shadow-sm">
+              <div className="p-4 bg-zinc-900 rounded-2xl border border-zinc-800 space-y-4 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2 text-white font-semibold text-xs">
                     <div className="p-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
@@ -773,7 +786,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         `https://api.dicebear.com/7.x/bottts/svg?seed=${user?.username || 'user'}`
                       }
                       alt={user?.username}
-                      className="w-20 h-20 rounded-2xl bg-obsidian-surface border-2 border-obsidian-border group-hover:border-indigo-500/60 shadow-lg object-cover transition-all"
+                      className="w-20 h-20 rounded-2xl bg-zinc-950 border-2 border-zinc-800 group-hover:border-indigo-500/60 shadow-lg object-cover transition-all"
                     />
                     {/* Overlay de Câmera ao passar o mouse */}
                     <div className="absolute inset-0 bg-black/60 rounded-2xl flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-[1px]">
@@ -781,7 +794,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       <span className="text-[9px] font-bold text-white uppercase tracking-wider">Alterar</span>
                     </div>
 
-                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-obsidian-emerald rounded-full border-2 border-obsidian-card shadow-sm" />
+                    <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-zinc-900 shadow-sm" />
                   </div>
 
                   {/* Ações e Informações */}
@@ -790,7 +803,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       <div className="text-white font-bold text-sm truncate">
                         {user?.username}
                       </div>
-                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
                         Escolha uma imagem do computador, insira um link ou gere um novo robô aleatório.
                       </p>
                     </div>
@@ -813,7 +826,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         type="button"
                         onClick={handleGenerateRandomAvatar}
                         disabled={avatarLoading}
-                        className="px-3 py-1.5 bg-obsidian-surface hover:bg-obsidian-surface-hover hover:text-white border border-obsidian-border text-obsidian-text-secondary rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                        className="px-3 py-1.5 bg-zinc-950 hover:bg-zinc-900 hover:text-white border border-zinc-800 text-zinc-400 rounded-xl text-xs flex items-center space-x-1.5 transition-all"
                         title="Gerar um novo avatar robô aleatório"
                       >
                         <Shuffle className="w-3.5 h-3.5 text-amber-400" />
@@ -825,7 +838,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         type="button"
                         onClick={() => setShowUrlInput((v) => !v)}
                         disabled={avatarLoading}
-                        className="px-3 py-1.5 bg-obsidian-surface hover:bg-obsidian-surface-hover hover:text-white border border-obsidian-border text-obsidian-text-secondary rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                        className="px-3 py-1.5 bg-zinc-950 hover:bg-zinc-900 hover:text-white border border-zinc-800 text-zinc-400 rounded-xl text-xs flex items-center space-x-1.5 transition-all"
                       >
                         <Link className="w-3.5 h-3.5 text-sky-400" />
                         <span>{showUrlInput ? 'Ocultar Link' : 'Colar Link'}</span>
@@ -837,7 +850,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                           type="button"
                           onClick={handleResetDefaultAvatar}
                           disabled={avatarLoading}
-                          className="px-2.5 py-1.5 bg-obsidian-surface hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-400 border border-obsidian-border text-obsidian-text-muted rounded-xl text-xs flex items-center space-x-1.5 transition-all"
+                          className="px-2.5 py-1.5 bg-zinc-950 hover:bg-rose-500/10 hover:border-rose-500/30 hover:text-rose-400 border border-zinc-800 text-zinc-500 rounded-xl text-xs flex items-center space-x-1.5 transition-all"
                           title="Restaurar o avatar inicial padrão"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -855,7 +868,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                           onChange={(e) => setAvatarUrlInput(e.target.value)}
                           placeholder="https://exemplo.com/sua-foto.png"
                           required
-                          className="flex-1 bg-obsidian-surface border border-obsidian-border rounded-xl p-2 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60 placeholder-obsidian-text-muted font-mono"
+                          className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl p-2 text-zinc-100 text-xs outline-none focus:border-indigo-500/60 placeholder-zinc-500 font-mono"
                         />
                         <button
                           type="submit"
@@ -882,7 +895,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               {/* Aba de Apelido */}
               <form onSubmit={handleSaveNickname} className="space-y-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-2">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
                     Novo Apelido (Nome de Exibição)
                   </label>
                   <input
@@ -891,9 +904,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     onChange={(e) => setNewNickname(e.target.value)}
                     placeholder="Seu novo apelido"
                     required
-                    className="w-full bg-obsidian-card border border-obsidian-border rounded-xl p-2.5 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 text-xs outline-none focus:border-indigo-500/60"
                   />
-                  <p className="text-[11px] text-obsidian-text-muted mt-1.5">
+                  <p className="text-[11px] text-zinc-500 mt-1.5">
                     Esse nome aparecerá para todos nos canais de texto e salas de transmissão.
                   </p>
                 </div>
@@ -910,7 +923,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </form>
 
             {/* Seção de Segurança & Alteração de Senha */}
-            <div className="border-t border-obsidian-border mt-6 pt-5">
+            <div className="border-t border-zinc-800 mt-6 pt-5">
               <div className="flex items-center space-x-2 text-white font-semibold text-xs mb-3">
                 <div className="p-1 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
                   <Lock className="w-3.5 h-3.5" />
@@ -918,9 +931,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <span>Segurança & Alteração de Senha</span>
               </div>
 
-              <form onSubmit={handleSavePassword} className="space-y-3.5 bg-obsidian-card/40 p-4 rounded-xl border border-obsidian-border">
+              <form onSubmit={handleSavePassword} className="space-y-3.5 bg-zinc-900/40 p-4 rounded-xl border border-zinc-800">
                 <div>
-                  <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-1.5">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
                     Senha Atual
                   </label>
                   <input
@@ -929,13 +942,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     placeholder="Digite sua senha atual"
                     required
-                    className="w-full bg-obsidian-card border border-obsidian-border rounded-xl p-2.5 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60 placeholder-obsidian-text-muted"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 text-xs outline-none focus:border-indigo-500/60 placeholder-zinc-500"
                   />
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-1.5">
+                    <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
                       Nova Senha
                     </label>
                     <input
@@ -944,12 +957,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="Mínimo 4 caracteres"
                       required
-                      className="w-full bg-obsidian-card border border-obsidian-border rounded-xl p-2.5 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60 placeholder-obsidian-text-muted"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 text-xs outline-none focus:border-indigo-500/60 placeholder-zinc-500"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-1.5">
+                    <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
                       Confirmar Nova Senha
                     </label>
                     <input
@@ -958,7 +971,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="Repita a nova senha"
                       required
-                      className="w-full bg-obsidian-card border border-obsidian-border rounded-xl p-2.5 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60 placeholder-obsidian-text-muted"
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 text-xs outline-none focus:border-indigo-500/60 placeholder-zinc-500"
                     />
                   </div>
                 </div>
@@ -967,7 +980,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   <button
                     type="submit"
                     disabled={passwordLoading || !currentPassword || !newPassword || !confirmPassword}
-                    className="px-5 py-2.5 bg-obsidian-card hover:bg-obsidian-card-hover border border-obsidian-border hover:border-indigo-500/50 text-white hover:text-indigo-400 disabled:opacity-40 rounded-xl font-bold text-xs transition-all shadow-sm flex items-center space-x-1.5"
+                    className="px-5 py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-indigo-500/50 text-white hover:text-indigo-400 disabled:opacity-40 rounded-xl font-bold text-xs transition-all shadow-sm flex items-center space-x-1.5"
                   >
                     <Lock className="w-3.5 h-3.5" />
                     <span>{passwordLoading ? 'Atualizando...' : 'Atualizar Senha'}</span>
@@ -982,7 +995,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             /* Aba de Áudio & Microfone */
             <div className="space-y-6">
               <div>
-                <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-2">
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
                   Dispositivo de Entrada (Microfone)
                 </label>
                 <select
@@ -992,7 +1005,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     const found = audioDevices.find((d) => d.deviceId === devId);
                     setSelectedAudioDeviceId(devId, found?.label);
                   }}
-                  className="w-full bg-obsidian-card border border-obsidian-border rounded-xl p-2.5 text-obsidian-text-primary text-xs outline-none focus:border-obsidian-accent/60 cursor-pointer"
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 text-zinc-100 text-xs outline-none focus:border-indigo-500/60 cursor-pointer"
                 >
                   <option value="default">Padrão do Sistema</option>
                   {audioDevices.map((device, idx) => (
@@ -1001,13 +1014,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     </option>
                   ))}
                 </select>
-                <p className="text-[11px] text-obsidian-text-muted mt-1.5">
+                <p className="text-[11px] text-zinc-500 mt-1.5">
                   Selecione o microfone que deseja utilizar nas transmissões e salas de voz.
                 </p>
               </div>
 
-              {/* Card Único Integrado: Ganho do Microfone & Portão de Voz (Studio Obsidian) */}
-              <div className="p-5 bg-obsidian-card rounded-2xl border border-obsidian-border shadow-xl space-y-4">
+              {/* Card Único Integrado: Ganho do Microfone & Portão de Voz (Studio) */}
+              <div className="p-5 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-xl space-y-4">
                 {/* Seção Superior: Ganho / Sensibilidade do Microfone */}
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between text-xs">
@@ -1017,10 +1030,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       </div>
                       <div>
                         <span className="font-semibold text-white tracking-tight">Sensibilidade do Microfone</span>
-                        <p className="text-[10px] text-obsidian-text-muted">Ajuste a intensidade e ganho geral de captação da sua voz</p>
+                        <p className="text-[10px] text-zinc-500">Ajuste a intensidade e ganho geral de captação da sua voz</p>
                       </div>
                     </div>
-                    <span className="text-xs font-mono font-bold text-emerald-400 bg-obsidian-surface px-2.5 py-1 rounded-lg border border-obsidian-border tabular-nums shadow-sm">
+                    <span className="text-xs font-mono font-bold text-emerald-400 bg-zinc-950 px-2.5 py-1 rounded-lg border border-zinc-800 tabular-nums shadow-sm">
                       {micInputGain}%
                     </span>
                   </div>
@@ -1031,16 +1044,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     max="100"
                     value={micInputGain}
                     onChange={(e) => setMicInputGain(Number(e.target.value))}
-                    className="w-full h-1.5 bg-obsidian-surface rounded-lg appearance-none cursor-pointer accent-emerald-500 hover:accent-emerald-400"
+                    className="w-full h-1.5 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-emerald-500 hover:accent-emerald-400"
                     title={`Sensibilidade do microfone: ${micInputGain}%`}
                   />
                 </div>
 
                 {/* Divisor Elegante de Estúdio */}
-                <div className="border-t border-obsidian-border/60 pt-3.5 space-y-3">
+                <div className="border-t border-zinc-800/60 pt-3.5 space-y-3">
                   {/* Cabeçalho do Portão de Voz com Indicador de Transmissão */}
                   <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center space-x-2 text-obsidian-text-secondary font-medium">
+                    <div className="flex items-center space-x-2 text-zinc-400 font-medium">
                       <Volume2 className="w-4 h-4 text-emerald-400" />
                       <span className="text-white font-medium">Sensibilidade de Entrada (Ativação por Voz)</span>
                     </div>
@@ -1051,8 +1064,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         <span>Transmitindo ({volumeLevel}% / {Math.round(-60 + (volumeLevel / 100) * 60)} dBFS)</span>
                       </span>
                     ) : (
-                      <span className="text-[10px] font-mono text-obsidian-text-muted bg-obsidian-surface px-2.5 py-0.5 rounded-full border border-obsidian-border flex items-center space-x-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-obsidian-border" />
+                      <span className="text-[10px] font-mono text-zinc-500 bg-zinc-950 px-2.5 py-0.5 rounded-full border border-zinc-800 flex items-center space-x-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-zinc-700" />
                         <span>Silenciado ({volumeLevel}% / {Math.round(-60 + (volumeLevel / 100) * 60)} dBFS)</span>
                       </span>
                     )}
@@ -1064,7 +1077,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     onPointerMove={handleThresholdPointerMove}
                     onPointerUp={handleThresholdPointerUp}
                     onPointerCancel={handleThresholdPointerUp}
-                    className="relative w-full h-7 bg-obsidian-surface rounded-xl overflow-hidden border border-obsidian-border select-none flex items-center cursor-pointer touch-none shadow-inner"
+                    className="relative w-full h-7 bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800 select-none flex items-center cursor-pointer touch-none shadow-inner"
                   >
                     {/* Região Cortada / Ruído de Fundo (Âmbar Translúcido Suave) */}
                     <div
@@ -1108,11 +1121,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   </div>
 
                   {/* Legendas Numéricas de Precisão */}
-                  <div className="flex items-center justify-between text-[11px] text-obsidian-text-muted font-mono">
+                  <div className="flex items-center justify-between text-[11px] text-zinc-500 font-mono">
                     <span>0% (Mais sensível)</span>
-                    <span className="text-white font-bold bg-obsidian-surface px-2.5 py-0.5 rounded-lg border border-obsidian-border text-xs flex items-center space-x-1.5">
+                    <span className="text-white font-bold bg-zinc-950 px-2.5 py-0.5 rounded-lg border border-zinc-800 text-xs flex items-center space-x-1.5">
                       <span>Corte em {voiceActivationThreshold}%</span>
-                      <span className="text-obsidian-text-muted text-[10px]">
+                      <span className="text-zinc-500 text-[10px]">
                         ({Math.round(-60 + (voiceActivationThreshold / 100) * 60)} dBFS)
                       </span>
                     </span>
@@ -1120,15 +1133,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   </div>
 
                   {/* Presets Rápidos de Calibração em Pills Minimalistas */}
-                  <div className="flex items-center flex-wrap gap-2 pt-1 border-t border-obsidian-border/40">
-                    <span className="text-[10px] text-obsidian-text-muted font-medium">Calibração Rápida:</span>
+                  <div className="flex items-center flex-wrap gap-2 pt-1 border-t border-zinc-800/40">
+                    <span className="text-[10px] text-zinc-500 font-medium">Calibração Rápida:</span>
                     <button
                       type="button"
                       onClick={() => setVoiceActivationThreshold(0)}
                       className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
                         voiceActivationThreshold === 0
                           ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300 font-bold shadow-sm shadow-indigo-500/20'
-                          : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-800/80'
                       }`}
                       title="Mantém o microfone 100% aberto sem nenhum corte (transmissão contínua)"
                     >
@@ -1140,7 +1153,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
                         voiceActivationThreshold === 15
                           ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
-                          : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-800/80'
                       }`}
                     >
                       Sensível (15%)
@@ -1151,10 +1164,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
                         voiceActivationThreshold === 20
                           ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
-                          : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700'
                       }`}
                     >
-                      Padrão / Discord (20%) ⭐
+                      Padrão Recomendado (20%)
                     </button>
                     <button
                       type="button"
@@ -1162,27 +1175,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       className={`px-2.5 py-1 text-[10px] rounded-lg border font-mono transition-all ${
                         voiceActivationThreshold === 40
                           ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold shadow-sm shadow-emerald-500/20'
-                          : 'bg-obsidian-surface border-obsidian-border text-obsidian-text-secondary hover:text-white hover:border-obsidian-border/80'
+                          : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-800/80'
                       }`}
                     >
                       Ambiente Barulhento (40%)
                     </button>
                   </div>
 
-                  <p className="text-[10px] text-obsidian-text-muted leading-relaxed">
+                  <p className="text-[10px] text-zinc-500 leading-relaxed">
                     Arraste o marcador para ajustar: sons à esquerda da linha serão bloqueados (cortando barulhos de teclado e respiração), e sons que ultrapassarem a linha serão transmitidos para todos na sala.
                   </p>
                 </div>
               </div>
 
               {/* Volume Geral de Saída das Transmissões e Salas */}
-              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3">
+              <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800 space-y-3">
                 <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-2 text-obsidian-text-secondary font-medium">
+                  <div className="flex items-center space-x-2 text-zinc-400 font-medium">
                     <Volume2 className="w-4 h-4 text-indigo-400" />
                     <span>Volume Geral de Reprodução</span>
                   </div>
-                  <span className="text-xs font-mono font-bold text-white bg-obsidian-surface px-2 py-0.5 rounded-lg border border-obsidian-border tabular-nums">
+                  <span className="text-xs font-mono font-bold text-white bg-zinc-950 px-2 py-0.5 rounded-lg border border-zinc-800 tabular-nums">
                     {masterVolume}%
                   </span>
                 </div>
@@ -1192,9 +1205,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   max="100"
                   value={masterVolume}
                   onChange={(e) => setMasterVolume(Number(e.target.value))}
-                  className="w-full h-1.5 bg-obsidian-surface rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400"
+                  className="w-full h-1.5 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400"
                 />
-                <p className="text-[10px] text-obsidian-text-muted">
+                <p className="text-[10px] text-zinc-500">
                   Ajuste o volume geral para transmissões de tela e salas de áudio.
                 </p>
               </div>
@@ -1213,7 +1226,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           {activeTab === 'keybindings' && (
             <div className="space-y-6 animate-in fade-in duration-200">
               {/* Cabeçalho do Card */}
-              <div className="p-5 bg-obsidian-card rounded-2xl border border-obsidian-border space-y-4">
+              <div className="p-5 bg-zinc-900 rounded-2xl border border-zinc-800 space-y-4">
                 <div className="flex items-center space-x-3.5">
                   <div className="p-3 rounded-2xl bg-purple-600/20 border border-purple-500/30 text-purple-400 shadow-inner">
                     <Keyboard className="w-5 h-5 text-purple-400" />
@@ -1222,7 +1235,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <h3 className="text-sm font-bold text-white tracking-wide">
                       Teclas de Atalho Globais
                     </h3>
-                    <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
                       Configure atalhos de teclado para controlar o microfone e som. Os atalhos funcionam globalmente no Windows, mesmo com jogos em tela cheia ou com o app minimizado.
                     </p>
                   </div>
@@ -1232,7 +1245,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               {/* Lista de Atalhos Disponíveis */}
               <div className="space-y-3">
                 {/* 1. Silenciar / Ativar Microfone */}
-                <div className="p-4 bg-obsidian-card rounded-2xl border border-obsidian-border flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="p-4 bg-zinc-900 rounded-2xl border border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-start space-x-3">
                     <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0 mt-0.5">
                       <Mic className="w-4 h-4" />
@@ -1240,9 +1253,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <div>
                       <h4 className="text-xs font-bold text-white flex items-center space-x-2">
                         <span>Silenciar Microfone</span>
-                        <span className="text-[10px] text-obsidian-text-muted font-normal">(Alternar Mudo)</span>
+                        <span className="text-[10px] text-zinc-500 font-normal">(Alternar Mudo)</span>
                       </h4>
-                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
                         Liga ou silencia o microfone com confirmação sonora de bipe suave.
                       </p>
                     </div>
@@ -1255,7 +1268,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       className={`min-w-[150px] px-3.5 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
                         recordingAction === 'toggleMute'
                           ? 'bg-purple-600/20 border-purple-500 text-purple-300 ring-2 ring-purple-500/40 animate-pulse'
-                          : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-white hover:border-obsidian-accent/50'
+                          : 'bg-zinc-950 hover:bg-zinc-950/80 border-zinc-800 text-white hover:border-indigo-500/50'
                       }`}
                     >
                       {recordingAction === 'toggleMute' ? (
@@ -1280,15 +1293,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         <div className="flex items-center space-x-1">
                           {formatAcceleratorForDisplay(keybindings.toggleMute).map((key, i) => (
                             <React.Fragment key={i}>
-                              {i > 0 && <span className="text-obsidian-text-muted text-[10px]">+</span>}
-                              <kbd className="px-2 py-0.5 bg-obsidian-card border border-obsidian-border rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
+                              {i > 0 && <span className="text-zinc-500 text-[10px]">+</span>}
+                              <kbd className="px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
                                 {key}
                               </kbd>
                             </React.Fragment>
                           ))}
                         </div>
                       ) : (
-                        <span className="text-obsidian-text-muted italic">Nenhum atalho</span>
+                        <span className="text-zinc-500 italic">Nenhum atalho</span>
                       )}
                     </button>
 
@@ -1296,7 +1309,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       <button
                         type="button"
                         onClick={() => handleClearKeybinding('toggleMute')}
-                        className="p-2 rounded-xl bg-obsidian-surface hover:bg-rose-500/10 border border-obsidian-border hover:border-rose-500/30 text-obsidian-text-muted hover:text-rose-400 transition-colors"
+                        className="p-2 rounded-xl bg-zinc-950 hover:bg-rose-500/10 border border-zinc-800 hover:border-rose-500/30 text-zinc-500 hover:text-rose-400 transition-colors"
                         title="Limpar atalho"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1306,7 +1319,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <button
                       type="button"
                       onClick={() => handleResetKeybinding('toggleMute')}
-                      className="p-2 rounded-xl bg-obsidian-surface hover:bg-obsidian-card border border-obsidian-border text-obsidian-text-muted hover:text-white transition-colors"
+                      className="p-2 rounded-xl bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-white transition-colors"
                       title="Restaurar padrão (Ctrl+Shift+M)"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -1315,7 +1328,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
 
                 {/* 2. Ensordecer / Desensordecer Áudio */}
-                <div className="p-4 bg-obsidian-card rounded-2xl border border-obsidian-border flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="p-4 bg-zinc-900 rounded-2xl border border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-start space-x-3">
                     <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shrink-0 mt-0.5">
                       <Volume2 className="w-4 h-4" />
@@ -1323,9 +1336,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <div>
                       <h4 className="text-xs font-bold text-white flex items-center space-x-2">
                         <span>Ensordecer Áudio</span>
-                        <span className="text-[10px] text-obsidian-text-muted font-normal">(Alternar Ensordecer)</span>
+                        <span className="text-[10px] text-zinc-500 font-normal">(Alternar Ensordecer)</span>
                       </h4>
-                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
                         Muta seu microfone e silencia todo o áudio recebido da chamada de voz.
                       </p>
                     </div>
@@ -1338,7 +1351,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       className={`min-w-[150px] px-3.5 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
                         recordingAction === 'toggleDeafen'
                           ? 'bg-purple-600/20 border-purple-500 text-purple-300 ring-2 ring-purple-500/40 animate-pulse'
-                          : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-white hover:border-obsidian-accent/50'
+                          : 'bg-zinc-950 hover:bg-zinc-950/80 border-zinc-800 text-white hover:border-indigo-500/50'
                       }`}
                     >
                       {recordingAction === 'toggleDeafen' ? (
@@ -1363,15 +1376,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         <div className="flex items-center space-x-1">
                           {formatAcceleratorForDisplay(keybindings.toggleDeafen).map((key, i) => (
                             <React.Fragment key={i}>
-                              {i > 0 && <span className="text-obsidian-text-muted text-[10px]">+</span>}
-                              <kbd className="px-2 py-0.5 bg-obsidian-card border border-obsidian-border rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
+                              {i > 0 && <span className="text-zinc-500 text-[10px]">+</span>}
+                              <kbd className="px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
                                 {key}
                               </kbd>
                             </React.Fragment>
                           ))}
                         </div>
                       ) : (
-                        <span className="text-obsidian-text-muted italic">Nenhum atalho</span>
+                        <span className="text-zinc-500 italic">Nenhum atalho</span>
                       )}
                     </button>
 
@@ -1379,7 +1392,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       <button
                         type="button"
                         onClick={() => handleClearKeybinding('toggleDeafen')}
-                        className="p-2 rounded-xl bg-obsidian-surface hover:bg-rose-500/10 border border-obsidian-border hover:border-rose-500/30 text-obsidian-text-muted hover:text-rose-400 transition-colors"
+                        className="p-2 rounded-xl bg-zinc-950 hover:bg-rose-500/10 border border-zinc-800 hover:border-rose-500/30 text-zinc-500 hover:text-rose-400 transition-colors"
                         title="Limpar atalho"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1389,7 +1402,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <button
                       type="button"
                       onClick={() => handleResetKeybinding('toggleDeafen')}
-                      className="p-2 rounded-xl bg-obsidian-surface hover:bg-obsidian-card border border-obsidian-border text-obsidian-text-muted hover:text-white transition-colors"
+                      className="p-2 rounded-xl bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-white transition-colors"
                       title="Restaurar padrão (Ctrl+Shift+D)"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -1398,14 +1411,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
 
                 {/* Card 3: Sair da Transmissão / Live */}
-                <div className="p-4 bg-obsidian-card/40 rounded-2xl border border-obsidian-border flex items-center justify-between space-x-4 hover:border-obsidian-border-light transition-all">
+                <div className="p-4 bg-zinc-900/40 rounded-2xl border border-zinc-800 flex items-center justify-between space-x-4 hover:border-zinc-700 transition-all">
                   <div className="flex items-center space-x-3.5 min-w-0">
                     <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center shrink-0">
                       <MonitorOff className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
                       <h4 className="text-xs font-bold text-white tracking-tight">Sair da Transmissão / Live</h4>
-                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
                         Sai da transmissão de tela em foco (modo espectador) ou encerra seu compartilhamento de tela ativo.
                       </p>
                     </div>
@@ -1418,7 +1431,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       className={`min-w-[150px] px-3.5 py-2 rounded-xl text-xs font-medium border flex items-center justify-center space-x-1.5 transition-all cursor-pointer ${
                         recordingAction === 'stopScreenShare'
                           ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 ring-2 ring-indigo-500/40 animate-pulse'
-                          : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-white hover:border-obsidian-accent/50'
+                          : 'bg-zinc-950 hover:bg-zinc-950/80 border-zinc-800 text-white hover:border-indigo-500/50'
                       }`}
                     >
                       {recordingAction === 'stopScreenShare' ? (
@@ -1443,15 +1456,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         <div className="flex items-center space-x-1">
                           {formatAcceleratorForDisplay(keybindings.stopScreenShare).map((key, i) => (
                             <React.Fragment key={i}>
-                              {i > 0 && <span className="text-obsidian-text-muted text-[10px]">+</span>}
-                              <kbd className="px-2 py-0.5 bg-obsidian-card border border-obsidian-border rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
+                              {i > 0 && <span className="text-zinc-500 text-[10px]">+</span>}
+                              <kbd className="px-2 py-0.5 bg-zinc-900 border border-zinc-800 rounded-md text-[11px] font-mono font-bold text-white shadow-sm">
                                 {key}
                               </kbd>
                             </React.Fragment>
                           ))}
                         </div>
                       ) : (
-                        <span className="text-obsidian-text-muted italic">Nenhum atalho</span>
+                        <span className="text-zinc-500 italic">Nenhum atalho</span>
                       )}
                     </button>
 
@@ -1459,7 +1472,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       <button
                         type="button"
                         onClick={() => handleClearKeybinding('stopScreenShare')}
-                        className="p-2 rounded-xl bg-obsidian-surface hover:bg-rose-500/10 border border-obsidian-border hover:border-rose-500/30 text-obsidian-text-muted hover:text-rose-400 transition-colors"
+                        className="p-2 rounded-xl bg-zinc-950 hover:bg-rose-500/10 border border-zinc-800 hover:border-rose-500/30 text-zinc-500 hover:text-rose-400 transition-colors"
                         title="Limpar atalho"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1469,7 +1482,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <button
                       type="button"
                       onClick={() => handleResetKeybinding('stopScreenShare')}
-                      className="p-2 rounded-xl bg-obsidian-surface hover:bg-obsidian-card border border-obsidian-border text-obsidian-text-muted hover:text-white transition-colors"
+                      className="p-2 rounded-xl bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-white transition-colors"
                       title="Restaurar padrão (Ctrl+Shift+S)"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
@@ -1484,7 +1497,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 <div className="space-y-1">
                   <span className="font-semibold text-purple-200 block">Atalhos Globais Ativos no Windows</span>
                   <p className="text-[11px] text-purple-300/80 leading-relaxed">
-                    Você pode pressionar as teclas configuradas a qualquer momento, mesmo quando estiver jogando jogos em tela cheia ou com o Xolas minimizado na bandeja. Pressione <kbd className="px-1.5 py-0.5 bg-obsidian-card border border-purple-500/30 rounded text-[10px] font-mono font-bold text-white">ESC</kbd> para cancelar uma gravação.
+                    Você pode pressionar as teclas configuradas a qualquer momento, mesmo quando estiver jogando jogos em tela cheia ou com o Xolas minimizado na bandeja. Pressione <kbd className="px-1.5 py-0.5 bg-zinc-900 border border-purple-500/30 rounded text-[10px] font-mono font-bold text-white">ESC</kbd> para cancelar uma gravação.
                   </p>
                 </div>
               </div>
@@ -1495,7 +1508,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           {activeTab === 'updates' && (
             <div className="space-y-5 animate-in fade-in duration-200">
               {/* Card de Destaque da Versão */}
-              <div className="p-5 bg-obsidian-card rounded-2xl border border-obsidian-border space-y-4">
+              <div className="p-5 bg-zinc-900 rounded-2xl border border-zinc-800 space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3.5">
                     <div className="p-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400 shadow-inner">
@@ -1504,12 +1517,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     <div>
                       <div className="flex items-center space-x-2">
                         <h3 className="text-sm font-bold text-white tracking-wide">Xolas Desktop</h3>
-                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-obsidian-surface text-indigo-300 border border-obsidian-border shadow-sm">
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-zinc-950 text-indigo-300 border border-zinc-800 shadow-sm">
                           v{appVersion}
                         </span>
                       </div>
-                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
-                        Aplicativo de Comunicação e Transmissão Studio Obsidian
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
+                        Aplicativo de Comunicação e Transmissão Xolas Studio
                       </p>
                     </div>
                   </div>
@@ -1526,9 +1539,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 </div>
 
                 {/* Status do Sistema */}
-                <div className="p-3.5 bg-obsidian-surface rounded-xl border border-obsidian-border flex items-center space-x-2.5 text-xs">
+                <div className="p-3.5 bg-zinc-950 rounded-xl border border-zinc-800 flex items-center space-x-2.5 text-xs">
                   <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${isCheckingUpdate || isDownloading ? 'bg-indigo-400 animate-ping' : isUpdateReady ? 'bg-emerald-400 animate-bounce' : 'bg-emerald-400 animate-pulse'}`} />
-                  <span className="text-obsidian-text-secondary font-medium">Status do Sistema:</span>
+                  <span className="text-zinc-400 font-medium">Status do Sistema:</span>
                   <span className="text-white font-medium text-[11px] truncate flex-1">
                     {updateStatus || 'Você está utilizando a versão mais recente.'}
                   </span>
@@ -1536,7 +1549,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
                 {/* Barra de Progresso Durante o Download */}
                 {isDownloading && (
-                  <div className="p-3.5 bg-obsidian-surface rounded-xl border border-indigo-500/30 space-y-2 animate-in fade-in duration-200">
+                  <div className="p-3.5 bg-zinc-950 rounded-xl border border-indigo-500/30 space-y-2 animate-in fade-in duration-200">
                     <div className="flex justify-between text-xs">
                       <span className="flex items-center space-x-1.5 text-indigo-400 font-semibold">
                         <Download className="w-3.5 h-3.5 animate-bounce" />
@@ -1544,7 +1557,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                       </span>
                       <span className="font-mono font-bold text-indigo-300">{downloadProgress}%</span>
                     </div>
-                    <div className="w-full h-2 bg-obsidian-card rounded-full overflow-hidden border border-obsidian-border">
+                    <div className="w-full h-2 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
                       <div
                         className="h-full bg-gradient-to-r from-indigo-500 via-indigo-400 to-emerald-400 rounded-full transition-all duration-300"
                         style={{ width: `${Math.max(5, downloadProgress)}%` }}
@@ -1561,7 +1574,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                         <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
                         <span>Nova versão pronta para instalação!</span>
                       </h4>
-                      <p className="text-[11px] text-obsidian-text-muted mt-0.5">
+                      <p className="text-[11px] text-zinc-500 mt-0.5">
                         A versão {availableVersion ? `v${availableVersion}` : ''} foi baixada. Reinicie o Xolas para aplicar.
                       </p>
                     </div>
@@ -1583,17 +1596,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </div>
 
               {/* Informações do Canal e Distribuição */}
-              <div className="p-4 bg-obsidian-card rounded-xl border border-obsidian-border space-y-3">
-                <h4 className="text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider">
+              <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800 space-y-3">
+                <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
                   Canal de Distribuição
                 </h4>
                 <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border">
-                    <span className="text-[10px] text-obsidian-text-muted block mb-0.5">Provedor Oficial</span>
+                  <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+                    <span className="text-[10px] text-zinc-500 block mb-0.5">Provedor Oficial</span>
                     <span className="font-semibold text-white">GitHub Releases</span>
                   </div>
-                  <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border">
-                    <span className="text-[10px] text-obsidian-text-muted block mb-0.5">Repositório</span>
+                  <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+                    <span className="text-[10px] text-zinc-500 block mb-0.5">Repositório</span>
                     <span className="font-semibold text-indigo-400 font-mono">LuaN458/xolas2</span>
                   </div>
                 </div>

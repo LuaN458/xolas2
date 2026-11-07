@@ -179,7 +179,7 @@ export const MemberList: React.FC<MemberListProps> = ({
 
   return (
     <>
-      <aside className="w-64 border-l border-zinc-800 bg-zinc-950 flex flex-col shrink-0 z-20 select-none h-full animate-in slide-in-from-right-4 duration-150">
+      <aside className="w-64 border-l border-zinc-800 bg-zinc-950 flex flex-col shrink-0 z-40 md:z-20 select-none h-full fixed md:static inset-y-0 right-0 shadow-2xl md:shadow-none animate-in slide-in-from-right-4 duration-150">
         {/* Header da Gaveta */}
         <div className="h-12 px-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
           <span className="text-xs font-semibold text-zinc-200">

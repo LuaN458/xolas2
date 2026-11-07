@@ -299,6 +299,18 @@ export function setupSocketHandlers(io: Server): void {
         .catch(() => {});
     }
 
+    // Ouvinte de ping para medição real de latência / RTT do cliente
+    socket.on('app:ping', (timestampOrCb: unknown, maybeCb?: unknown) => {
+      const now = Date.now();
+      if (typeof maybeCb === 'function') {
+        maybeCb(now);
+      } else if (typeof timestampOrCb === 'function') {
+        timestampOrCb(now);
+      } else {
+        socket.emit('app:pong', { clientTimestamp: timestampOrCb, serverTimestamp: now });
+      }
+    });
+
     // Ouvinte para buscar contagem de pendências (com verificação dinâmica)
     socket.on('admin:get-pending-count', async () => {
       try {

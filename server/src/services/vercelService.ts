@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 interface VercelRuntimeConfig {
   apiToken: string | null;
   projectId: string | null;
@@ -110,6 +113,19 @@ export interface VercelMetricsData {
   };
 }
 
+function getVercelConfigFilePath(): string {
+  const cwd = process.cwd();
+  if (fs.existsSync(path.resolve(cwd, 'data')) || fs.existsSync(path.resolve(cwd, 'src', 'index.ts'))) {
+    return path.resolve(cwd, 'data', 'vercel-config.json');
+  }
+  if (fs.existsSync(path.resolve(cwd, 'server', 'data')) || fs.existsSync(path.resolve(cwd, 'server'))) {
+    return path.resolve(cwd, 'server', 'data', 'vercel-config.json');
+  }
+  return cwd.endsWith('server')
+    ? path.resolve(cwd, 'data', 'vercel-config.json')
+    : path.resolve(cwd, 'server', 'data', 'vercel-config.json');
+}
+
 class VercelService {
   private runtimeConfig: VercelRuntimeConfig = {
     apiToken: null,
@@ -126,6 +142,45 @@ class VercelService {
     this.runtimeConfig.apiToken = process.env.VERCEL_API_TOKEN || null;
     this.runtimeConfig.projectId = process.env.VERCEL_PROJECT_ID || null;
     this.runtimeConfig.teamId = process.env.VERCEL_TEAM_ID || null;
+    this.loadPersistedConfig();
+  }
+
+  private loadPersistedConfig(): void {
+    try {
+      const filePath = getVercelConfigFilePath();
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          if (typeof parsed.apiToken === 'string' && parsed.apiToken.trim() && !this.runtimeConfig.apiToken) {
+            this.runtimeConfig.apiToken = parsed.apiToken.trim();
+          }
+          if (typeof parsed.projectId === 'string' && parsed.projectId.trim() && !this.runtimeConfig.projectId) {
+            this.runtimeConfig.projectId = parsed.projectId.trim();
+          }
+          if (typeof parsed.teamId === 'string' && parsed.teamId.trim() && !this.runtimeConfig.teamId) {
+            this.runtimeConfig.teamId = parsed.teamId.trim();
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Falha ao carregar credenciais persistidas da Vercel (arquivo corrompido ou inacessível):', err);
+    }
+  }
+
+  private savePersistedConfig(): void {
+    try {
+      const filePath = getVercelConfigFilePath();
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const tempPath = `${filePath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(this.runtimeConfig, null, 2), 'utf8');
+      fs.renameSync(tempPath, filePath);
+    } catch (err) {
+      console.warn('Falha ao salvar credenciais persistidas da Vercel:', err);
+    }
   }
 
   public getActiveConfig(): {
@@ -167,6 +222,8 @@ class VercelService {
     if (typeof teamId === 'string') {
       this.runtimeConfig.teamId = teamId.trim() || null;
     }
+    // Salvar persistentemente no arquivo de dados
+    this.savePersistedConfig();
     // Invalidar cache ao alterar credenciais
     this.cachedMetrics = null;
     this.cacheExpiresAt = 0;

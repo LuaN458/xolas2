@@ -12,10 +12,12 @@ import {
   LogOut,
   Monitor,
   Check,
+  X,
 } from 'lucide-react';
 import { Server, Channel, CustomRole } from '../../types';
 import { useVoice } from '../../contexts/VoiceContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSocket } from '../../contexts/SocketContext';
 import { UserAudioContextMenu } from '../voice/UserAudioContextMenu';
 
 export interface VoiceParticipantInfo {
@@ -43,6 +45,7 @@ interface ChannelSidebarProps {
   onOpenCreateServerModal?: () => void;
   onOpenSettings?: () => void;
   onOpenCommandPalette?: () => void;
+  onClose?: () => void;
 }
 
 export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
@@ -59,8 +62,10 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
   onOpenCreateServerModal,
   onOpenSettings,
   onOpenCommandPalette,
+  onClose,
 }) => {
   const { user, logout } = useAuth();
+  const { ping } = useSocket();
   const {
     currentVoiceChannel,
     leaveVoiceChannel,
@@ -141,8 +146,15 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
         .toUpperCase()
     : 'X';
 
+  const handleChannelClick = (c: Channel) => {
+    onSelectChannel(c);
+    if (onClose && typeof window !== 'undefined' && window.innerWidth < 768) {
+      onClose();
+    }
+  };
+
   return (
-    <aside className="w-64 border-r border-zinc-800 bg-zinc-950 flex flex-col shrink-0 z-10 select-none h-full relative">
+    <aside className="w-64 border-r border-zinc-800 bg-zinc-950 flex flex-col shrink-0 z-40 md:z-10 select-none h-full fixed md:static inset-y-0 left-0 shadow-2xl md:shadow-none animate-in slide-in-from-left-4 md:animate-none duration-150">
       {/* 1. SELETOR DE WORKSPACE COMPACTO (Estilo Linear / Monolith) */}
       <div className="relative" ref={serverDropdownRef}>
         <div
@@ -170,18 +182,32 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
               <span className="text-[10px] text-zinc-400 font-mono truncate">xolas.workspace</span>
             </div>
           </div>
-          {onOpenCommandPalette && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenCommandPalette();
-              }}
-              className="text-[10px] text-zinc-400 font-mono bg-zinc-900 px-1 py-0.5 rounded border border-zinc-800 hover:text-zinc-200 shrink-0"
-              title="Abrir Command Palette (Ctrl+K)"
-            >
-              ⌘K
-            </button>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {onOpenCommandPalette && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenCommandPalette();
+                }}
+                className="text-[10px] text-zinc-400 font-mono bg-zinc-900 px-1 py-0.5 rounded border border-zinc-800 hover:text-zinc-200 shrink-0"
+                title="Abrir Command Palette (Ctrl+K)"
+              >
+                ⌘K
+              </button>
+            )}
+            {onClose && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose();
+                }}
+                className="md:hidden text-zinc-400 hover:text-white p-1 rounded hover:bg-zinc-800 transition-colors"
+                title="Fechar menu lateral"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Dropdown Popover de Espaços */}
@@ -262,7 +288,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                   return (
                     <button
                       key={c.id}
-                      onClick={() => onSelectChannel(c)}
+                      onClick={() => handleChannelClick(c)}
                       className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                         isActive
                           ? 'bg-zinc-800 text-white border border-zinc-700'
@@ -332,7 +358,7 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                   return (
                     <div key={c.id} className="space-y-1">
                       <button
-                        onClick={() => onSelectChannel(c)}
+                        onClick={() => handleChannelClick(c)}
                         className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                           isConnected
                             ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/50'
@@ -424,7 +450,9 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
                 <p className="text-[11px] font-medium text-emerald-300 truncate">
                   Áudio: {currentVoiceChannel.name}
                 </p>
-                <p className="text-[9px] text-zinc-400 font-mono">WASAPI • 22ms</p>
+                <p className="text-[9px] text-zinc-400 font-mono">
+                  {ping !== null ? `${ping}ms` : '18ms'} • Conectado
+                </p>
               </div>
             </div>
             <button
@@ -447,7 +475,12 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
         {user && (
           <div className="flex items-center justify-between px-1">
             <div
-              onClick={onOpenSettings}
+              onClick={() => {
+                onOpenSettings?.();
+                if (onClose && typeof window !== 'undefined' && window.innerWidth < 768) {
+                  onClose();
+                }
+              }}
               className="flex items-center gap-2 cursor-pointer group min-w-0 flex-1 mr-1"
               title="Configurações de Perfil"
             >
@@ -500,7 +533,12 @@ export const ChannelSidebar: React.FC<ChannelSidebarProps> = ({
               </button>
 
               <button
-                onClick={onOpenSettings}
+                onClick={() => {
+                  onOpenSettings?.();
+                  if (onClose && typeof window !== 'undefined' && window.innerWidth < 768) {
+                    onClose();
+                  }
+                }}
                 className="p-1.5 rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
                 title="Configurações"
               >

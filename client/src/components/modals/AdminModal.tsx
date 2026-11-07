@@ -88,6 +88,25 @@ const COLOR_PRESETS = [
   { name: 'Azul', value: '#3b82f6' },
 ];
 
+const getVercelLocalSetting = (key: string): string => {
+  try {
+    return (typeof window !== 'undefined' && localStorage.getItem(key)) || '';
+  } catch {
+    return '';
+  }
+};
+
+const setVercelLocalSetting = (key: string, value: string | null) => {
+  try {
+    if (typeof window === 'undefined') return;
+    if (value) {
+      localStorage.setItem(key, value);
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch {}
+};
+
 export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
   onClose,
@@ -107,9 +126,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     maskedToken: string | null;
   } | null>(null);
   const [showVercelConfig, setShowVercelConfig] = useState(false);
-  const [vercelTokenInput, setVercelTokenInput] = useState('');
-  const [vercelProjectIdInput, setVercelProjectIdInput] = useState('');
-  const [vercelTeamIdInput, setVercelTeamIdInput] = useState('');
+  const [vercelTokenInput, setVercelTokenInput] = useState(() => getVercelLocalSetting('xolas_vercel_token'));
+  const [vercelProjectIdInput, setVercelProjectIdInput] = useState(() => getVercelLocalSetting('xolas_vercel_project_id'));
+  const [vercelTeamIdInput, setVercelTeamIdInput] = useState(() => getVercelLocalSetting('xolas_vercel_team_id'));
   const [vercelTesting, setVercelTesting] = useState(false);
   const [vercelSaving, setVercelSaving] = useState(false);
 
@@ -187,9 +206,25 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         setVercelStatus(res.data.config);
         if (res.data.config.projectId) {
           setVercelProjectIdInput(res.data.config.projectId);
+          setVercelLocalSetting('xolas_vercel_project_id', res.data.config.projectId);
+        } else {
+          const savedProj = getVercelLocalSetting('xolas_vercel_project_id');
+          if (savedProj) setVercelProjectIdInput(savedProj);
         }
+
         if (res.data.config.teamId) {
           setVercelTeamIdInput(res.data.config.teamId);
+          setVercelLocalSetting('xolas_vercel_team_id', res.data.config.teamId);
+        } else {
+          const savedTeam = getVercelLocalSetting('xolas_vercel_team_id');
+          if (savedTeam) setVercelTeamIdInput(savedTeam);
+        }
+
+        if (!res.data.config.hasToken) {
+          const savedToken = getVercelLocalSetting('xolas_vercel_token');
+          if (savedToken) {
+            setVercelTokenInput(savedToken);
+          }
         }
       }
     } catch {}
@@ -236,15 +271,30 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const handleSaveVercelConfig = async () => {
     setVercelSaving(true);
     try {
+      const cleanToken = vercelTokenInput.trim();
+      const cleanProjectId = vercelProjectIdInput.trim();
+      const cleanTeamId = vercelTeamIdInput.trim();
+
+      if (cleanToken) {
+        setVercelLocalSetting('xolas_vercel_token', cleanToken);
+      }
+      if (cleanProjectId) {
+        setVercelLocalSetting('xolas_vercel_project_id', cleanProjectId);
+      }
+      if (cleanTeamId) {
+        setVercelLocalSetting('xolas_vercel_team_id', cleanTeamId);
+      } else {
+        setVercelLocalSetting('xolas_vercel_team_id', null);
+      }
+
       const res = await api.post('/api/admin/vercel/config', {
-        token: vercelTokenInput.trim() || undefined,
-        projectId: vercelProjectIdInput.trim() || undefined,
-        teamId: vercelTeamIdInput.trim() || undefined,
+        token: cleanToken || undefined,
+        projectId: cleanProjectId || undefined,
+        teamId: cleanTeamId || undefined,
       });
       if (res.data?.success) {
         showFeedback('success', 'Configurações da Vercel salvas com sucesso!');
         setShowVercelConfig(false);
-        setVercelTokenInput('');
         fetchVercelStatus();
         fetchVercelMetrics(true);
       }
@@ -473,22 +523,22 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 select-none z-50">
-      <div className="bg-obsidian-surface rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl border border-obsidian-border overflow-hidden">
+      <div className="bg-zinc-950 rounded-2xl w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl border border-zinc-800 overflow-hidden">
         {/* Cabeçalho com Abas Principais de Nível Superior */}
-        <div className="flex flex-col border-b border-obsidian-border bg-obsidian-card/40">
+        <div className="flex flex-col border-b border-zinc-800 bg-zinc-900/40">
           <div className="flex items-center justify-between px-6 pt-4 pb-3">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-md shadow-indigo-500/10">
                 <Shield className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-obsidian-text-primary tracking-tight flex items-center space-x-2">
+                <h2 className="text-base font-bold text-zinc-100 tracking-tight flex items-center space-x-2">
                   <span>Painel de Administração</span>
                   <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                     Xolas Studio
                   </span>
                 </h2>
-                <p className="text-xs text-obsidian-text-muted">
+                <p className="text-xs text-zinc-500">
                   Gerencie aprovações de novos membros e crie cargos com permissões modulares
                 </p>
               </div>
@@ -506,14 +556,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   }
                 }}
                 disabled={loading || rolesLoading || vercelRefreshing || vercelLoading}
-                className="p-2 rounded-lg text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card transition-all"
+                className="p-2 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900 transition-all"
                 title="Recarregar dados"
               >
                 <RefreshCw className={`w-4 h-4 ${loading || rolesLoading || vercelRefreshing || vercelLoading ? 'animate-spin' : ''}`} />
               </button>
               <button
                 onClick={onClose}
-                className="p-2 rounded-lg text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card transition-all"
+                className="p-2 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900 transition-all"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -524,16 +574,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           <div className="flex items-center space-x-2 px-6 pt-1 pb-3 overflow-x-auto">
             <button
               onClick={() => setMainTab('users')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-2 transition-all shrink-0 ${
                 mainTab === 'users'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/40'
-                  : 'bg-obsidian-card/60 text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card border border-obsidian-border'
+                  ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-900 border border-transparent'
               }`}
             >
-              <UserCheck className="w-4 h-4" />
+              <UserCheck className="w-4 h-4 text-indigo-400" />
               <span>Cadastros & Aprovações</span>
               {counts.pending > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-extrabold animate-pulse">
+                <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-bold animate-pulse">
                   {counts.pending}
                 </span>
               )}
@@ -541,16 +591,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
             <button
               onClick={() => setMainTab('roles')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-2 transition-all shrink-0 ${
                 mainTab === 'roles'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/40'
-                  : 'bg-obsidian-card/60 text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card border border-obsidian-border'
+                  ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-900 border border-transparent'
               }`}
             >
-              <Award className="w-4 h-4" />
+              <Award className="w-4 h-4 text-indigo-400" />
               <span>Cargos & Permissões</span>
               {roles.length > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/30 text-indigo-300 text-[10px] font-mono font-bold">
+                <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-mono font-medium">
                   {roles.length}
                 </span>
               )}
@@ -558,13 +608,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
             <button
               onClick={() => setMainTab('vercel')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition-all shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-2 transition-all shrink-0 ${
                 mainTab === 'vercel'
-                  ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-400/40'
-                  : 'bg-obsidian-card/60 text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card border border-obsidian-border'
+                  ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-900 border border-transparent'
               }`}
             >
-              <Server className="w-4 h-4 text-cyan-400" />
+              <Server className="w-4 h-4 text-indigo-400" />
               <span>Servidor Vercel & Métricas</span>
               {vercelMetrics?.configured && (
                 <span
@@ -604,14 +654,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         {mainTab === 'users' && (
           <>
             {/* Barra de Filtros e Busca */}
-            <div className="px-6 pt-4 pb-3 flex flex-wrap items-center justify-between gap-3 border-b border-obsidian-border bg-obsidian-surface">
+            <div className="px-6 pt-4 pb-3 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950">
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setActiveTab('pending')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all ${
                     activeTab === 'pending'
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                      : 'text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card'
+                      : 'text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900'
                   }`}
                 >
                   <Clock className="w-3.5 h-3.5" />
@@ -628,7 +678,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all ${
                     activeTab === 'approved'
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                      : 'text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card'
+                      : 'text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900'
                   }`}
                 >
                   <Users className="w-3.5 h-3.5" />
@@ -640,7 +690,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all ${
                     activeTab === 'rejected'
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                      : 'text-obsidian-text-muted hover:text-obsidian-text-primary hover:bg-obsidian-card'
+                      : 'text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900'
                   }`}
                 >
                   <X className="w-3.5 h-3.5" />
@@ -649,13 +699,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </div>
 
               <div className="relative min-w-[200px]">
-                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-obsidian-text-muted" />
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-zinc-500" />
                 <input
                   type="text"
                   placeholder="Buscar por nickname..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 bg-obsidian-card border border-obsidian-border rounded-lg text-xs text-obsidian-text-primary placeholder:text-obsidian-text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full pl-9 pr-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
             </div>
@@ -663,14 +713,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             {/* Lista de Usuários */}
             <div className="flex-1 overflow-y-auto p-6 space-y-3 custom-scrollbar">
               {loading && users.length === 0 ? (
-                <div className="py-16 text-center text-obsidian-text-muted text-xs flex flex-col items-center justify-center space-y-3">
+                <div className="py-16 text-center text-zinc-500 text-xs flex flex-col items-center justify-center space-y-3">
                   <RefreshCw className="w-6 h-6 animate-spin text-indigo-400" />
                   <span>Carregando usuários...</span>
                 </div>
               ) : filteredUsers.length === 0 ? (
-                <div className="py-16 text-center text-obsidian-text-muted text-xs flex flex-col items-center justify-center space-y-2">
+                <div className="py-16 text-center text-zinc-500 text-xs flex flex-col items-center justify-center space-y-2">
                   <ShieldCheck className="w-10 h-10 text-emerald-400/50 mb-1" />
-                  <span className="font-semibold text-obsidian-text-primary text-sm">
+                  <span className="font-semibold text-zinc-100 text-sm">
                     {activeTab === 'pending'
                       ? 'Nenhuma solicitação pendente!'
                       : 'Nenhum usuário encontrado nesta aba.'}
@@ -688,7 +738,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   return (
                     <div
                       key={u.id}
-                      className="bg-obsidian-card rounded-xl p-3.5 border border-obsidian-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-obsidian-border/80 transition-all"
+                      className="bg-zinc-900 rounded-xl p-3.5 border border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-zinc-800/80 transition-all"
                     >
                       <div className="flex items-center space-x-3 min-w-0">
                         <img
@@ -697,11 +747,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(u.username)}`
                           }
                           alt={u.username}
-                          className="w-10 h-10 rounded-xl bg-obsidian-surface border border-obsidian-border shrink-0 object-cover"
+                          className="w-10 h-10 rounded-xl bg-zinc-950 border border-zinc-800 shrink-0 object-cover"
                         />
                         <div className="min-w-0">
                           <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                            <span className="font-semibold text-sm text-obsidian-text-primary truncate">
+                            <span className="font-semibold text-sm text-zinc-100 truncate">
                               {u.username}
                             </span>
                             {u.role === 'ADMIN' && (
@@ -732,7 +782,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-obsidian-text-muted flex items-center space-x-2 truncate mt-0.5">
+                          <div className="text-[11px] text-zinc-500 flex items-center space-x-2 truncate mt-0.5">
                             <span>{u.email}</span>
                             {u.createdAt && (
                               <>
@@ -748,11 +798,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       <div className="flex items-center space-x-2 shrink-0 self-end sm:self-center">
                         {activeTab === 'approved' && (
                           <div className="flex items-center space-x-1.5 mr-1">
-                            <Tag className="w-3.5 h-3.5 text-obsidian-text-muted" />
+                            <Tag className="w-3.5 h-3.5 text-zinc-500" />
                             <select
                               value={u.customRoleId || ''}
                               onChange={(e) => handleAssignCustomRole(u.id, e.target.value || null)}
-                              className="bg-obsidian-surface border border-obsidian-border rounded-lg px-2 py-1 text-xs text-obsidian-text-secondary hover:text-white focus:outline-none focus:border-indigo-500 cursor-pointer transition-colors max-w-[140px] truncate"
+                              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-zinc-400 hover:text-white focus:outline-none focus:border-indigo-500 cursor-pointer transition-colors max-w-[140px] truncate"
                               title="Definir cargo do usuário"
                             >
                               <option value="">Sem cargo (Padrão)</option>
@@ -792,7 +842,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <button
                               onClick={() => handleToggleRole(u)}
                               disabled={isActionLoading}
-                              className="px-2.5 py-1.5 bg-obsidian-surface hover:bg-obsidian-surface/80 border border-obsidian-border text-obsidian-text-primary rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                              className="px-2.5 py-1.5 bg-zinc-950 hover:bg-zinc-950/80 border border-zinc-800 text-zinc-100 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
                               title={u.role === 'ADMIN' ? 'Remover Admin' : 'Tornar Admin'}
                             >
                               {u.role === 'ADMIN' ? 'Rebaixar' : 'Admin'}
@@ -843,12 +893,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             {/* Formulário de Criação / Edição de Cargo */}
             <form
               onSubmit={handleSaveRole}
-              className="bg-obsidian-card rounded-2xl p-5 border border-obsidian-border shadow-lg space-y-4"
+              className="bg-zinc-900 rounded-2xl p-5 border border-zinc-800 shadow-lg space-y-4"
             >
-              <div className="flex items-center justify-between pb-3 border-b border-obsidian-border/70">
+              <div className="flex items-center justify-between pb-3 border-b border-zinc-800/70">
                 <div className="flex items-center space-x-2">
                   <Award className="w-4 h-4 text-indigo-400" />
-                  <h3 className="text-sm font-bold text-obsidian-text-primary">
+                  <h3 className="text-sm font-bold text-zinc-100">
                     {editingRoleId ? 'Editar Cargo' : 'Criar Novo Cargo'}
                   </h3>
                 </div>
@@ -857,7 +907,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   <button
                     type="button"
                     onClick={handleResetRoleForm}
-                    className="text-xs text-obsidian-text-muted hover:text-white transition-colors"
+                    className="text-xs text-zinc-500 hover:text-white transition-colors"
                   >
                     Cancelar Edição
                   </button>
@@ -867,7 +917,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {/* Linha 1: Nome do Cargo e Seletor de Cor */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-1.5">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
                     Nome do Cargo
                   </label>
                   <input
@@ -877,12 +927,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     placeholder="Ex: Moderador, Staff, VIP, Co-Dono..."
                     maxLength={32}
                     required
-                    className="w-full bg-obsidian-surface border border-obsidian-border rounded-xl px-3 py-2 text-xs text-obsidian-text-primary placeholder:text-obsidian-text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-1.5">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-1.5">
                     Cor da Insígnia (Badge)
                   </label>
                   <div className="flex items-center space-x-2 pt-0.5">
@@ -916,7 +966,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
               {/* Linha 2: Caixas para Marcar (Checkboxes de Funções) */}
               <div>
-                <label className="block text-[10px] font-bold text-obsidian-text-muted uppercase tracking-wider mb-2">
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
                   Funções & Permissões Autorizadas
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -931,7 +981,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         className={`p-3 rounded-xl border flex items-start space-x-3 cursor-pointer transition-all ${
                           isChecked
                             ? 'bg-indigo-600/15 border-indigo-500/50 text-white shadow-sm'
-                            : 'bg-obsidian-surface hover:bg-obsidian-surface/80 border-obsidian-border text-obsidian-text-muted hover:text-obsidian-text-secondary'
+                            : 'bg-zinc-950 hover:bg-zinc-950/80 border-zinc-800 text-zinc-500 hover:text-zinc-400'
                         }`}
                       >
                         {/* Checkbox estilizado */}
@@ -939,18 +989,18 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           className={`w-4 h-4 rounded-md border mt-0.5 shrink-0 flex items-center justify-center transition-colors ${
                             isChecked
                               ? 'bg-indigo-600 border-indigo-400'
-                              : 'border-white/30 bg-obsidian-card'
+                              : 'border-white/30 bg-zinc-900'
                           }`}
                         >
                           {isChecked && <Check className="w-3 h-3 text-white" />}
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs font-semibold flex items-center space-x-1.5 text-obsidian-text-primary">
+                          <div className="text-xs font-semibold flex items-center space-x-1.5 text-zinc-100">
                             <Icon className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                             <span>{perm.name}</span>
                           </div>
-                          <p className="text-[11px] text-obsidian-text-muted leading-tight mt-0.5">
+                          <p className="text-[11px] text-zinc-500 leading-tight mt-0.5">
                             {perm.description}
                           </p>
                         </div>
@@ -975,20 +1025,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             {/* Lista de Cargos Criados */}
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs px-1">
-                <span className="font-bold text-obsidian-text-muted uppercase tracking-wider text-[10px]">
+                <span className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">
                   Cargos Existentes ({roles.length})
                 </span>
-                <span className="text-obsidian-text-muted text-[11px]">
+                <span className="text-zinc-500 text-[11px]">
                   Atribua aos usuários na aba "Cadastros & Aprovações"
                 </span>
               </div>
 
               {rolesLoading && roles.length === 0 ? (
-                <div className="py-8 text-center text-obsidian-text-muted text-xs">
+                <div className="py-8 text-center text-zinc-500 text-xs">
                   Carregando cargos...
                 </div>
               ) : roles.length === 0 ? (
-                <div className="p-8 text-center bg-obsidian-card rounded-2xl border border-obsidian-border text-obsidian-text-muted text-xs">
+                <div className="p-8 text-center bg-zinc-900 rounded-2xl border border-zinc-800 text-zinc-500 text-xs">
                   Nenhum cargo customizado criado ainda. Crie seu primeiro cargo no formulário acima!
                 </div>
               ) : (
@@ -996,7 +1046,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   {roles.map((r) => (
                     <div
                       key={r.id}
-                      className="bg-obsidian-card rounded-2xl p-4 border border-obsidian-border flex flex-col justify-between space-y-3 hover:border-obsidian-border/80 transition-all"
+                      className="bg-zinc-900 rounded-2xl p-4 border border-zinc-800 flex flex-col justify-between space-y-3 hover:border-zinc-800/80 transition-all"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
@@ -1010,7 +1060,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           >
                             {r.name}
                           </span>
-                          <span className="text-[11px] text-obsidian-text-muted font-mono">
+                          <span className="text-[11px] text-zinc-500 font-mono">
                             {r.userCount || 0} {r.userCount === 1 ? 'membro' : 'membros'}
                           </span>
                         </div>
@@ -1019,7 +1069,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleEditRole(r)}
-                            className="p-1.5 rounded-lg text-obsidian-text-muted hover:text-white hover:bg-white/10 transition-colors"
+                            className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-white/10 transition-colors"
                             title="Editar Cargo"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -1027,7 +1077,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleDeleteRole(r)}
-                            className="p-1.5 rounded-lg text-obsidian-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                            className="p-1.5 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
                             title="Excluir Cargo"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1036,21 +1086,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </div>
 
                       {/* Lista resumida de permissões ativas */}
-                      <div className="flex flex-wrap gap-1.5 pt-1 border-t border-obsidian-border/60">
+                      <div className="flex flex-wrap gap-1.5 pt-1 border-t border-zinc-800/60">
                         {r.permissions && r.permissions.length > 0 ? (
                           r.permissions.map((pId) => {
                             const pObj = SYSTEM_PERMISSIONS.find((sp) => sp.id === pId);
                             return (
                               <span
                                 key={pId}
-                                className="px-2 py-0.5 rounded text-[10px] font-semibold bg-obsidian-surface text-obsidian-text-secondary border border-obsidian-border"
+                                className="px-2 py-0.5 rounded text-[10px] font-semibold bg-zinc-950 text-zinc-400 border border-zinc-800"
                               >
                                 {pObj?.name || pId}
                               </span>
                             );
                           })
                         ) : (
-                          <span className="text-[10px] text-obsidian-text-muted italic">
+                          <span className="text-[10px] text-zinc-500 italic">
                             Nenhuma permissão especial marcada
                           </span>
                         )}
@@ -1067,7 +1117,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         {mainTab === 'vercel' && (
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
             {/* Barra de Status e Ações do Servidor Vercel */}
-            <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-obsidian-card border border-obsidian-border shadow-lg">
+            <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-lg">
               <div className="flex items-center space-x-3.5">
                 <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500/20 to-cyan-500/10 border border-indigo-500/30 text-indigo-400 shadow-inner">
                   <Server className="w-5 h-5 text-cyan-400" />
@@ -1110,7 +1160,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-obsidian-text-muted mt-0.5">
+                  <p className="text-xs text-zinc-500 mt-0.5">
                     {vercelMetrics?.framework
                       ? `Framework: ${vercelMetrics.framework.toUpperCase()} • Edge Network • Latência: ${vercelMetrics.latencyMs || 0}ms`
                       : 'Hospedagem Fullstack e Métricas de Servidor'}
@@ -1125,7 +1175,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-all border ${
                     showVercelConfig
                       ? 'bg-indigo-600 text-white border-indigo-400/50 shadow-md shadow-indigo-600/30'
-                      : 'bg-obsidian-surface text-obsidian-text-secondary hover:text-white hover:bg-obsidian-card border-obsidian-border'
+                      : 'bg-zinc-950 text-zinc-400 hover:text-white hover:bg-zinc-900 border-zinc-800'
                   }`}
                   title="Configurar credenciais da Vercel"
                 >
@@ -1140,7 +1190,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     fetchVercelStatus();
                   }}
                   disabled={vercelRefreshing || vercelLoading}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-obsidian-surface hover:bg-obsidian-card text-obsidian-text-secondary hover:text-white border border-obsidian-border transition-all flex items-center space-x-1.5 shadow-sm"
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-zinc-950 hover:bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800 transition-all flex items-center space-x-1.5 shadow-sm"
                   title="Atualizar métricas em tempo real"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${vercelRefreshing ? 'animate-spin' : ''}`} />
@@ -1151,14 +1201,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
             {/* Painel Expansível de Configuração das Chaves Vercel */}
             {(showVercelConfig || !vercelMetrics?.configured) && (
-              <div className="p-5 rounded-2xl bg-obsidian-card/80 border border-indigo-500/30 shadow-xl space-y-4 animate-in fade-in duration-200">
+              <div className="p-5 rounded-2xl bg-zinc-900/80 border border-indigo-500/30 shadow-xl space-y-4 animate-in fade-in duration-200">
                 <div className="flex items-start justify-between">
                   <div>
                     <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-1.5">
                       <KeyRound className="w-4 h-4 text-indigo-400" />
                       <span>Configuração da Integração Vercel</span>
                     </h4>
-                    <p className="text-[11px] text-obsidian-text-muted mt-1 leading-relaxed">
+                    <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed">
                       Insira o seu <strong>Personal Access Token</strong> da Vercel e o <strong>Project ID</strong> para sincronizar métricas de deploy, erros e requisições. As chaves são armazenadas com segurança no servidor.
                     </p>
                   </div>
@@ -1171,7 +1221,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-semibold text-obsidian-text-secondary">
+                    <label className="text-[11px] font-semibold text-zinc-400">
                       Vercel API Token (Bearer)
                     </label>
                     <input
@@ -1179,12 +1229,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       placeholder={vercelStatus?.hasToken ? '••••••••••••••••••••••••' : 'Cole seu Token da Vercel'}
                       value={vercelTokenInput}
                       onChange={(e) => setVercelTokenInput(e.target.value)}
-                      className="w-full px-3 py-2 bg-obsidian-surface border border-obsidian-border rounded-xl text-xs text-white placeholder-obsidian-text-muted focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-800 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-semibold text-obsidian-text-secondary">
+                    <label className="text-[11px] font-semibold text-zinc-400">
                       Project ID (ex: prj_...)
                     </label>
                     <input
@@ -1192,12 +1242,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       placeholder="prj_..."
                       value={vercelProjectIdInput}
                       onChange={(e) => setVercelProjectIdInput(e.target.value)}
-                      className="w-full px-3 py-2 bg-obsidian-surface border border-obsidian-border rounded-xl text-xs text-white placeholder-obsidian-text-muted focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-800 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
                     />
                   </div>
 
                   <div className="space-y-1.5 sm:col-span-2 md:col-span-1">
-                    <label className="text-[11px] font-semibold text-obsidian-text-secondary">
+                    <label className="text-[11px] font-semibold text-zinc-400">
                       Team ID (Opcional)
                     </label>
                     <input
@@ -1205,13 +1255,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       placeholder="team_... (opcional)"
                       value={vercelTeamIdInput}
                       onChange={(e) => setVercelTeamIdInput(e.target.value)}
-                      className="w-full px-3 py-2 bg-obsidian-surface border border-obsidian-border rounded-xl text-xs text-white placeholder-obsidian-text-muted focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                      className="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-white placeholder-zinc-800 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
                     />
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-obsidian-border/50">
-                  <span className="text-[10px] text-obsidian-text-muted">
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-800/50">
+                  <span className="text-[10px] text-zinc-500">
                     Obtenha seu token em{' '}
                     <a
                       href="https://vercel.com/account/tokens"
@@ -1229,7 +1279,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       type="button"
                       onClick={handleTestVercel}
                       disabled={vercelTesting}
-                      className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-obsidian-surface hover:bg-obsidian-border/40 text-obsidian-text-primary border border-obsidian-border transition-all flex items-center space-x-1.5"
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-zinc-950 hover:bg-zinc-800/40 text-zinc-100 border border-zinc-800 transition-all flex items-center space-x-1.5"
                     >
                       {vercelTesting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                       <span>Testar Conexão</span>
@@ -1261,7 +1311,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     Dual Host
                   </span>
                 </h4>
-                <p className="text-[11px] text-obsidian-text-secondary leading-relaxed">
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
                   As rotas HTTP da API e o frontend SPA são executados na Vercel com CDN global de alta performance. As conexões persistentes de tempo real (Socket.IO, chat e canais de voz WebRTC) operam com segurança através do host WebSocket dedicado (<strong>{vercelMetrics?.websocketCompatibilityNotice?.recommendedSocketHost || 'xolas-server.onrender.com'}</strong>).
                 </p>
               </div>
@@ -1270,12 +1320,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             {/* Loading Skeleton */}
             {vercelLoading && !vercelMetrics && (
               <div className="space-y-4 animate-pulse">
-                <div className="h-28 bg-obsidian-card rounded-2xl border border-obsidian-border" />
+                <div className="h-28 bg-zinc-900 rounded-2xl border border-zinc-800" />
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="h-24 bg-obsidian-card rounded-2xl border border-obsidian-border" />
-                  <div className="h-24 bg-obsidian-card rounded-2xl border border-obsidian-border" />
-                  <div className="h-24 bg-obsidian-card rounded-2xl border border-obsidian-border" />
-                  <div className="h-24 bg-obsidian-card rounded-2xl border border-obsidian-border" />
+                  <div className="h-24 bg-zinc-900 rounded-2xl border border-zinc-800" />
+                  <div className="h-24 bg-zinc-900 rounded-2xl border border-zinc-800" />
+                  <div className="h-24 bg-zinc-900 rounded-2xl border border-zinc-800" />
+                  <div className="h-24 bg-zinc-900 rounded-2xl border border-zinc-800" />
                 </div>
               </div>
             )}
@@ -1284,8 +1334,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             {vercelMetrics && (
               <>
                 {/* Card de Deploy em Produção */}
-                <div className="p-5 rounded-2xl bg-obsidian-card border border-obsidian-border shadow-lg space-y-4">
-                  <div className="flex items-center justify-between border-b border-obsidian-border/50 pb-3">
+                <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-lg space-y-4">
+                  <div className="flex items-center justify-between border-b border-zinc-800/50 pb-3">
                     <div className="flex items-center space-x-2.5">
                       <Layers className="w-4 h-4 text-indigo-400" />
                       <h4 className="text-xs font-bold text-white uppercase tracking-wider">
@@ -1308,8 +1358,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                   {vercelMetrics.productionDeployment ? (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border/60">
-                        <span className="text-[10px] font-semibold text-obsidian-text-muted uppercase">Status</span>
+                      <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-800/60">
+                        <span className="text-[10px] font-semibold text-zinc-500 uppercase">Status</span>
                         <div className="flex items-center space-x-1.5 mt-1">
                           <span
                             className={`w-2 h-2 rounded-full ${
@@ -1326,16 +1376,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         </div>
                       </div>
 
-                      <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border/60">
-                        <span className="text-[10px] font-semibold text-obsidian-text-muted uppercase">Branch / Ref</span>
+                      <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-800/60">
+                        <span className="text-[10px] font-semibold text-zinc-500 uppercase">Branch / Ref</span>
                         <p className="text-xs font-bold text-white font-mono mt-1 truncate">
                           {vercelMetrics.productionDeployment.branch || 'main'}
                           {vercelMetrics.productionDeployment.commitSha && ` (${vercelMetrics.productionDeployment.commitSha})`}
                         </p>
                       </div>
 
-                      <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border/60">
-                        <span className="text-[10px] font-semibold text-obsidian-text-muted uppercase">Tempo de Build</span>
+                      <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-800/60">
+                        <span className="text-[10px] font-semibold text-zinc-500 uppercase">Tempo de Build</span>
                         <p className="text-xs font-bold text-white font-mono mt-1">
                           {vercelMetrics.productionDeployment.buildDurationSeconds !== undefined
                             ? `${vercelMetrics.productionDeployment.buildDurationSeconds}s`
@@ -1343,8 +1393,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         </p>
                       </div>
 
-                      <div className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border/60">
-                        <span className="text-[10px] font-semibold text-obsidian-text-muted uppercase">Data do Deploy</span>
+                      <div className="p-3 bg-zinc-950 rounded-xl border border-zinc-800/60">
+                        <span className="text-[10px] font-semibold text-zinc-500 uppercase">Data do Deploy</span>
                         <p className="text-xs font-bold text-white font-mono mt-1 truncate">
                           {new Date(vercelMetrics.productionDeployment.createdAt).toLocaleDateString('pt-BR', {
                             day: '2-digit',
@@ -1356,13 +1406,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs text-obsidian-text-muted italic">
+                    <p className="text-xs text-zinc-500 italic">
                       Nenhum deploy ativo registrado no momento para este projeto.
                     </p>
                   )}
 
                   {vercelMetrics.productionDeployment?.commitMessage && (
-                    <div className="p-2.5 bg-obsidian-surface/60 rounded-xl border border-obsidian-border/40 text-[11px] text-obsidian-text-secondary font-mono truncate">
+                    <div className="p-2.5 bg-zinc-950/60 rounded-xl border border-zinc-800/40 text-[11px] text-zinc-400 font-mono truncate">
                       Commit: <span className="text-white">{vercelMetrics.productionDeployment.commitMessage}</span>
                     </div>
                   )}
@@ -1371,9 +1421,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 {/* Grid das 4 Métricas Principais da Vercel */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {/* Métrica 1: Requisições & Invocações */}
-                  <div className="p-4 rounded-2xl bg-gradient-to-br from-obsidian-card to-obsidian-surface border border-obsidian-border shadow-md space-y-2">
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-800 border border-zinc-800 shadow-md space-y-2">
                     <div className="flex items-center justify-between text-cyan-400">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
                         Requisições
                       </span>
                       <div className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
@@ -1383,15 +1433,15 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     <div className="text-xl font-extrabold text-white font-mono">
                       {vercelMetrics.metrics.totalRequestsEstimate.toLocaleString('pt-BR')}
                     </div>
-                    <p className="text-[10px] text-obsidian-text-muted">
+                    <p className="text-[10px] text-zinc-500">
                       Invocações Edge & Serverless
                     </p>
                   </div>
 
                   {/* Métrica 2: Latência Média */}
-                  <div className="p-4 rounded-2xl bg-gradient-to-br from-obsidian-card to-obsidian-surface border border-obsidian-border shadow-md space-y-2">
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-800 border border-zinc-800 shadow-md space-y-2">
                     <div className="flex items-center justify-between text-emerald-400">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
                         Latência Média
                       </span>
                       <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
@@ -1399,7 +1449,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </div>
                     </div>
                     <div className="text-xl font-extrabold text-white font-mono">
-                      {vercelMetrics.metrics.latencyMs} <span className="text-xs font-normal text-obsidian-text-muted">ms</span>
+                      {vercelMetrics.metrics.latencyMs} <span className="text-xs font-normal text-zinc-500">ms</span>
                     </div>
                     <p className="text-[10px] text-emerald-400 font-medium">
                       Ultra-baixa latência Edge
@@ -1407,9 +1457,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   </div>
 
                   {/* Métrica 3: Taxa de Erros 4xx/5xx */}
-                  <div className="p-4 rounded-2xl bg-gradient-to-br from-obsidian-card to-obsidian-surface border border-obsidian-border shadow-md space-y-2">
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-800 border border-zinc-800 shadow-md space-y-2">
                     <div className="flex items-center justify-between text-indigo-400">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
                         Taxa de Erros
                       </span>
                       <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
@@ -1425,9 +1475,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   </div>
 
                   {/* Métrica 4: Bandwidth / Transferência */}
-                  <div className="p-4 rounded-2xl bg-gradient-to-br from-obsidian-card to-obsidian-surface border border-obsidian-border shadow-md space-y-2">
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-zinc-800 to-zinc-800 border border-zinc-800 shadow-md space-y-2">
                     <div className="flex items-center justify-between text-purple-400">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-obsidian-text-muted">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
                         Largura de Banda
                       </span>
                       <div className="p-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20">
@@ -1436,9 +1486,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     </div>
                     <div className="text-xl font-extrabold text-white font-mono">
                       {(vercelMetrics.metrics.bandwidthBytesEstimate / (1024 * 1024)).toFixed(1)}{' '}
-                      <span className="text-xs font-normal text-obsidian-text-muted">MB</span>
+                      <span className="text-xs font-normal text-zinc-500">MB</span>
                     </div>
-                    <p className="text-[10px] text-obsidian-text-muted">
+                    <p className="text-[10px] text-zinc-500">
                       Tráfego Outbound CDN
                     </p>
                   </div>
@@ -1446,7 +1496,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                 {/* Domínios e Infraestrutura */}
                 {vercelMetrics.domains && vercelMetrics.domains.length > 0 && (
-                  <div className="p-5 rounded-2xl bg-obsidian-card border border-obsidian-border shadow-lg space-y-3">
+                  <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-lg space-y-3">
                     <div className="flex items-center space-x-2">
                       <Globe className="w-4 h-4 text-cyan-400" />
                       <h4 className="text-xs font-bold text-white uppercase tracking-wider">
@@ -1458,13 +1508,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       {vercelMetrics.domains.map((dom) => (
                         <div
                           key={dom.name}
-                          className="p-3 bg-obsidian-surface rounded-xl border border-obsidian-border flex items-center justify-between"
+                          className="p-3 bg-zinc-950 rounded-xl border border-zinc-800 flex items-center justify-between"
                         >
                           <div className="truncate pr-2">
                             <span className="text-xs font-mono font-bold text-white truncate block">
                               {dom.name}
                             </span>
-                            <span className="text-[10px] text-obsidian-text-muted">
+                            <span className="text-[10px] text-zinc-500">
                               SSL Ativo • Vercel Edge
                             </span>
                           </div>
@@ -1479,7 +1529,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
                 {/* Histórico dos Últimos Deploys */}
                 {vercelMetrics.recentDeployments && vercelMetrics.recentDeployments.length > 0 && (
-                  <div className="p-5 rounded-2xl bg-obsidian-card border border-obsidian-border shadow-lg space-y-3">
+                  <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-lg space-y-3">
                     <div className="flex items-center space-x-2">
                       <Clock className="w-4 h-4 text-indigo-400" />
                       <h4 className="text-xs font-bold text-white uppercase tracking-wider">
@@ -1487,11 +1537,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                       </h4>
                     </div>
 
-                    <div className="divide-y divide-obsidian-border/60">
+                    <div className="divide-y divide-zinc-800/60">
                       {vercelMetrics.recentDeployments.map((dep) => (
                         <div
                           key={dep.id}
-                          className="py-2.5 flex items-center justify-between text-xs transition-colors hover:bg-obsidian-surface/40 px-2 rounded-lg"
+                          className="py-2.5 flex items-center justify-between text-xs transition-colors hover:bg-zinc-950/40 px-2 rounded-lg"
                         >
                           <div className="flex items-center space-x-3 truncate pr-3">
                             <span
@@ -1507,7 +1557,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               <span className="font-semibold text-white truncate block">
                                 {dep.commitMessage}
                               </span>
-                              <span className="text-[10px] text-obsidian-text-muted font-mono">
+                              <span className="text-[10px] text-zinc-500 font-mono">
                                 por {dep.creator} • {new Date(dep.createdAt).toLocaleString('pt-BR')}
                               </span>
                             </div>

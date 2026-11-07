@@ -36,7 +36,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
     if (resolution === '1080p') {
       if (fps === 60) {
         return maxBitrateKbps === 10000
-          ? '10.0 Mbps (Ultra Fibra)'
+          ? '10.0 Mbps (Alta Fidelidade)'
           : maxBitrateKbps === 6000
           ? '6.0 Mbps (Equilibrado)'
           : '8.5 Mbps (Pro Gaming)';
@@ -163,29 +163,29 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in select-none">
-      <div className="bg-obsidian-surface rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl border border-obsidian-border flex flex-col max-h-[90vh]">
+      <div className="bg-zinc-950 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl border border-zinc-800 flex flex-col max-h-[90vh]">
         {/* Cabeçalho */}
-        <div className="p-4 px-6 border-b border-obsidian-border flex items-center justify-between">
+        <div className="p-4 px-6 border-b border-zinc-800 flex items-center justify-between">
           <div className="flex items-center space-x-2 text-white">
-            <div className="p-1.5 rounded-lg bg-obsidian-accent/20 border border-obsidian-accent/40 text-indigo-400">
+            <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
               <Monitor className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="font-bold text-sm tracking-tight text-white">Transmitir Tela ou Janela</h2>
-              <p className="text-[11px] text-obsidian-text-muted">Selecione o monitor ou janela de aplicativo que deseja compartilhar</p>
+              <h2 className="font-bold text-sm tracking-tight text-zinc-100">Transmitir Tela ou Janela</h2>
+              <p className="text-[11px] text-zinc-400">Selecione o monitor ou janela de aplicativo que deseja compartilhar</p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
             <button
               onClick={fetchSources}
-              className="p-1.5 rounded-lg text-obsidian-text-muted hover:text-white hover:bg-obsidian-card transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
               title="Recarregar Janelas"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={onClose}
-              className="text-obsidian-text-muted hover:text-white transition-colors p-1.5 rounded-lg hover:bg-obsidian-card"
+              className="text-zinc-400 hover:text-zinc-100 transition-colors p-1.5 rounded-lg hover:bg-zinc-800"
             >
               <X className="w-4 h-4" />
             </button>
@@ -193,22 +193,22 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
         </div>
 
         {/* Abas e Controles de Qualidade */}
-        <div className="px-6 py-3 bg-obsidian-bg border-b border-obsidian-border flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="px-6 py-3 bg-zinc-900/60 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
           {/* Abas com Pílulas e Contadores */}
           <div className="flex space-x-2 font-semibold">
             <button
               onClick={() => handleTabChange('screens')}
               className={`px-3.5 py-1.5 rounded-xl transition-all flex items-center space-x-2 text-xs font-medium border ${
                 activeTab === 'screens'
-                  ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
-                  : 'text-obsidian-text-secondary border-obsidian-border/50 hover:text-white hover:bg-obsidian-card/60'
+                  ? 'bg-zinc-800 text-white border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 border-transparent hover:text-white hover:bg-zinc-800/60'
               }`}
             >
               <Monitor className="w-4 h-4 text-indigo-400" />
               <span>Telas Inteiras</span>
               <span
                 className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold ${
-                  activeTab === 'screens' ? 'bg-indigo-600 text-white' : 'bg-obsidian-surface text-obsidian-text-muted'
+                  activeTab === 'screens' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400'
                 }`}
               >
                 {screens.length}
@@ -219,15 +219,15 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
               onClick={() => handleTabChange('windows')}
               className={`px-3.5 py-1.5 rounded-xl transition-all flex items-center space-x-2 text-xs font-medium border ${
                 activeTab === 'windows'
-                  ? 'bg-obsidian-card text-white border-obsidian-accent shadow-sm shadow-indigo-500/25 ring-1 ring-obsidian-accent/30'
-                  : 'text-obsidian-text-secondary border-obsidian-border/50 hover:text-white hover:bg-obsidian-card/60'
+                  ? 'bg-zinc-800 text-white border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 border-transparent hover:text-white hover:bg-zinc-800/60'
               }`}
             >
               <AppWindow className="w-4 h-4 text-indigo-400" />
               <span>Janelas de Apps</span>
               <span
                 className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-semibold ${
-                  activeTab === 'windows' ? 'bg-indigo-600 text-white' : 'bg-obsidian-surface text-obsidian-text-muted'
+                  activeTab === 'windows' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400'
                 }`}
               >
                 {windows.length}
@@ -238,7 +238,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
           {/* Seletores de Perfil, Resolução e FPS */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Seletor de Perfil de Transmissão */}
-            <div className="flex items-center bg-obsidian-card p-1 rounded-xl border border-obsidian-border shadow-sm">
+            <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-zinc-800 shadow-sm">
               <button
                 type="button"
                 onClick={() => handleModeChange('fluidity')}
@@ -246,7 +246,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center space-x-1.5 ${
                   streamMode === 'fluidity'
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                    : 'text-obsidian-text-secondary hover:text-white'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 <Gamepad2 className="w-3.5 h-3.5" />
@@ -259,7 +259,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center space-x-1.5 ${
                   streamMode === 'balanced'
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                    : 'text-obsidian-text-secondary hover:text-white'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 <Zap className="w-3.5 h-3.5" />
@@ -272,7 +272,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all flex items-center space-x-1.5 ${
                   streamMode === 'detail'
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                    : 'text-obsidian-text-secondary hover:text-white'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 <FileText className="w-3.5 h-3.5" />
@@ -280,13 +280,13 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
               </button>
             </div>
 
-            <div className="flex items-center bg-obsidian-card p-1 rounded-xl border border-obsidian-border shadow-sm">
+            <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-zinc-800 shadow-sm">
               <button
                 onClick={() => handleResolutionChange('720p')}
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
                   resolution === '720p'
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                    : 'text-obsidian-text-secondary hover:text-white'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 720p
@@ -296,20 +296,20 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
                   resolution === '1080p'
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                    : 'text-obsidian-text-secondary hover:text-white'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 1080p
               </button>
             </div>
 
-            <div className="flex items-center bg-obsidian-card p-1 rounded-xl border border-obsidian-border shadow-sm">
+            <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-zinc-800 shadow-sm">
               <button
                 onClick={() => handleFpsChange(30)}
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
                   fps === 30
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                    : 'text-obsidian-text-secondary hover:text-white'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 30 FPS
@@ -319,7 +319,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
                   fps === 60
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                    : 'text-obsidian-text-secondary hover:text-white'
+                    : 'text-zinc-400 hover:text-white'
                 }`}
               >
                 60 FPS
@@ -328,7 +328,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
 
             {/* Seletor de Teto de Bitrate para 1080p 60FPS */}
             {resolution === '1080p' && fps === 60 && streamMode !== 'detail' && (
-              <div className="flex items-center bg-obsidian-card p-1 rounded-xl border border-obsidian-border shadow-sm">
+              <div className="flex items-center bg-zinc-900 p-1 rounded-xl border border-zinc-800 shadow-sm">
                 <button
                   type="button"
                   onClick={() => handleBitrateChange(8500)}
@@ -336,7 +336,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
                     maxBitrateKbps === 8500
                       ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                      : 'text-obsidian-text-secondary hover:text-white'
+                      : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   8.5M
@@ -344,11 +344,11 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleBitrateChange(10000)}
-                  title="10.0 Mbps: Teto ultra para conexões de alta velocidade (fibra) sem compressão"
+                  title="10.0 Mbps: Teto de alta fidelidade sem compressão"
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
                     maxBitrateKbps === 10000
                       ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                      : 'text-obsidian-text-secondary hover:text-white'
+                      : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   10M
@@ -360,7 +360,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-semibold transition-all ${
                     maxBitrateKbps === 6000
                       ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/30'
-                      : 'text-obsidian-text-secondary hover:text-white'
+                      : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   6.0M
@@ -374,7 +374,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
               className={`px-3 py-1.5 rounded-xl border flex items-center space-x-1.5 text-[11px] font-semibold transition-all shadow-sm ${
                 includeAudio
                   ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40 shadow-emerald-500/10'
-                  : 'bg-obsidian-card text-obsidian-text-muted border-obsidian-border hover:text-white'
+                  : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
               }`}
               title={
                 includeAudio
@@ -385,7 +385,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
               {includeAudio ? (
                 <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
               ) : (
-                <VolumeX className="w-3.5 h-3.5 text-obsidian-text-muted" />
+                <VolumeX className="w-3.5 h-3.5 text-zinc-400" />
               )}
               <span>{includeAudio ? 'Áudio da Tela Ativo' : 'Sem Áudio'}</span>
             </button>
@@ -405,7 +405,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                   <p className="font-semibold text-indigo-200">
                     Transmitindo jogos com anti-cheat (Valorant, CS2, LoL)?
                   </p>
-                  <p className="text-[11px] text-obsidian-text-secondary mt-0.5 leading-relaxed">
+                  <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
                     Para transmitir apenas a janela do jogo sem tela preta, coloque o jogo em{' '}
                     <strong className="text-white">"Tela Cheia em Janela / Sem Bordas"</strong> nas opções de vídeo dele, ou transmita diretamente pela aba{' '}
                     <strong className="text-white">"Telas Inteiras"</strong> (captura nativa da GPU a 60 FPS com áudio isolado).
@@ -426,31 +426,31 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
           )}
 
           {loading ? (
-            <div className="text-center py-16 text-obsidian-text-muted text-xs font-mono space-y-2">
-              <div className="w-6 h-6 border-2 border-obsidian-accent border-t-transparent rounded-full animate-spin mx-auto" />
+            <div className="text-center py-16 text-zinc-500 text-xs font-mono space-y-2">
+              <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
               <p>Capturando telas e janelas disponíveis...</p>
             </div>
           ) : sources.length === 0 ? (
             <div className="text-center py-12 px-6 flex flex-col items-center justify-center space-y-4 max-w-md mx-auto">
-              <div className="p-3 bg-obsidian-accent/10 border border-obsidian-accent/30 rounded-2xl text-indigo-400">
+              <div className="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl text-indigo-400">
                 <Monitor className="w-8 h-8 stroke-[1.5]" />
               </div>
               <div>
                 <h3 className="text-white text-sm font-semibold mb-1">Compartilhar Tela do Sistema</h3>
-                <p className="text-obsidian-text-muted text-xs leading-relaxed">
+                <p className="text-zinc-400 text-xs leading-relaxed">
                   Você pode selecionar qualquer tela inteira, janela de aplicativo ou guia com transmissão de áudio de alta fidelidade.
                 </p>
               </div>
               <button
                 onClick={handleStartShare}
-                className="px-6 py-2.5 bg-obsidian-accent hover:bg-obsidian-accent-hover text-white rounded-xl text-xs font-semibold transition-all shadow-lg shadow-indigo-500/25 flex items-center space-x-2"
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition-all shadow-lg shadow-indigo-500/25 flex items-center space-x-2"
               >
                 <span>Selecionar Tela Agora</span>
               </button>
             </div>
           ) : currentTabItems.length === 0 ? (
             <div className="text-center py-12 px-6 flex flex-col items-center justify-center space-y-3">
-              <p className="text-obsidian-text-muted text-xs">
+              <p className="text-zinc-500 text-xs">
                 {activeTab === 'windows'
                   ? 'Nenhuma janela de app individual encontrada. Você pode compartilhar seu monitor inteiro na aba Telas Inteiras.'
                   : 'Nenhum monitor secundário detectado. Verifique suas conexões de vídeo.'}
@@ -458,7 +458,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
               {activeTab === 'windows' && screens.length > 0 && (
                 <button
                   onClick={() => handleTabChange('screens')}
-                  className="px-4 py-1.5 bg-obsidian-card hover:bg-obsidian-card-hover border border-obsidian-border text-white rounded-lg text-xs font-medium transition-colors"
+                  className="px-4 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-white rounded-lg text-xs font-medium transition-colors"
                 >
                   Ir para Telas Inteiras ({screens.length})
                 </button>
@@ -475,19 +475,19 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                     onDoubleClick={handleStartShare}
                     className={`relative rounded-xl p-2 cursor-pointer transition-all border flex flex-col group ${
                       isSelected
-                        ? 'bg-obsidian-card border-obsidian-accent shadow-lg shadow-indigo-500/20 ring-1 ring-obsidian-accent'
-                        : 'bg-obsidian-card/40 hover:bg-obsidian-card border-obsidian-border hover:border-obsidian-border-light'
+                        ? 'bg-zinc-900 border-indigo-500 shadow-lg shadow-indigo-500/20 ring-1 ring-indigo-500'
+                        : 'bg-zinc-900/50 hover:bg-zinc-900 border-zinc-800 hover:border-zinc-700'
                     }`}
                   >
                     {/* Badge de Selecionado */}
                     {isSelected && (
-                      <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-obsidian-accent text-white flex items-center justify-center shadow-md shadow-indigo-500/40 z-10">
+                      <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/40 z-10">
                         <Check className="w-3 h-3 stroke-[3]" />
                       </div>
                     )}
 
                     {/* Miniatura em Alta Resolução */}
-                    <div className="aspect-video bg-black/60 rounded-lg overflow-hidden mb-2 flex items-center justify-center border border-obsidian-border relative group-hover:opacity-95">
+                    <div className="aspect-video bg-black/60 rounded-lg overflow-hidden mb-2 flex items-center justify-center border border-zinc-800 relative group-hover:opacity-95">
                       {source.thumbnail ? (
                         <img
                           src={source.thumbnail}
@@ -495,7 +495,7 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                           className="w-full h-full object-contain"
                         />
                       ) : (
-                        <div className="flex flex-col items-center justify-center text-obsidian-text-muted space-y-1">
+                        <div className="flex flex-col items-center justify-center text-zinc-500 space-y-1">
                           <Monitor className="w-6 h-6 opacity-40" />
                           <span className="text-[10px]">Sem prévia</span>
                         </div>
@@ -507,9 +507,9 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                       {source.appIcon ? (
                         <img src={source.appIcon} alt="" className="w-3.5 h-3.5 shrink-0" />
                       ) : (
-                        <Monitor className="w-3.5 h-3.5 text-obsidian-text-muted shrink-0" />
+                        <Monitor className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                       )}
-                      <span className="text-obsidian-text-primary text-[11px] font-medium truncate flex-1">
+                      <span className="text-zinc-200 text-[11px] font-medium truncate flex-1">
                         {source.name}
                       </span>
                     </div>
@@ -521,8 +521,8 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
         </div>
 
         {/* Rodapé com Botão de Ação */}
-        <div className="p-4 px-6 bg-obsidian-bg border-t border-obsidian-border flex items-center justify-between">
-          <div className="flex items-center space-x-2 text-xs text-obsidian-text-muted">
+        <div className="p-4 px-6 bg-zinc-900/60 border-t border-zinc-800 flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-xs text-zinc-500">
             <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
             <span>
               Transmitindo em <strong>{resolution}</strong> a <strong>{fps} FPS</strong> •{' '}
@@ -533,14 +533,14 @@ export const ScreenShareModal: React.FC<ScreenShareModalProps> = ({
                   ? 'Equilibrado'
                   : 'Nitidez'}
               </span>{' '}
-              <span className="font-mono text-obsidian-text-secondary">({estimatedBitrateLabel})</span>
+              <span className="font-mono text-zinc-400">({estimatedBitrateLabel})</span>
             </span>
           </div>
 
           <div className="flex items-center space-x-3">
             <button
               onClick={onClose}
-              className="px-4 py-2.5 text-obsidian-text-secondary hover:text-white hover:bg-obsidian-card text-xs font-semibold transition-all rounded-xl border border-obsidian-border/50 hover:border-obsidian-border"
+              className="px-4 py-2.5 text-zinc-400 hover:text-white hover:bg-zinc-900 text-xs font-semibold transition-all rounded-xl border border-zinc-800 hover:border-zinc-700"
             >
               Cancelar
             </button>

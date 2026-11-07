@@ -10,6 +10,7 @@ export interface SocketContextType {
   isReconnecting: boolean;
   connectionError: string | null;
   reconnectAttempts: number;
+  ping: number | null;
 }
 
 const SocketContext = createContext<SocketContextType>({
@@ -18,6 +19,7 @@ const SocketContext = createContext<SocketContextType>({
   isReconnecting: false,
   connectionError: null,
   reconnectAttempts: 0,
+  ping: null,
 });
 
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -27,7 +29,35 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [ping, setPing] = useState<number | null>(null);
   const socketRef = useRef<Socket | null>(null);
+
+  // Medição contínua de ping (RTT em ms) a cada 5 segundos com engenharia defensiva no unmount
+  useEffect(() => {
+    if (!socket || !isConnected) {
+      setPing(null);
+      return;
+    }
+
+    let isMounted = true;
+
+    const measurePing = () => {
+      if (!socket.connected) return;
+      const start = Date.now();
+      socket.emit('app:ping', start, () => {
+        if (!isMounted) return;
+        const rtt = Math.max(1, Date.now() - start);
+        setPing(rtt);
+      });
+    };
+
+    measurePing();
+    const interval = setInterval(measurePing, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [socket, isConnected]);
 
   useEffect(() => {
     if (!token || !user) {
@@ -132,6 +162,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isReconnecting,
         connectionError,
         reconnectAttempts,
+        ping,
       }}
     >
       {children}

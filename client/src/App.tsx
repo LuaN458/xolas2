@@ -833,6 +833,20 @@ export const App: React.FC = () => {
 
             {/* 2. Área Principal: Sidebar Unificada + Palco Central + Drawer de Membros */}
             <div className="flex flex-1 overflow-hidden relative">
+              {/* Backdrops responsivos para mobile (< md / 768px) */}
+              {sidebarOpen && (
+                <div
+                  className="fixed inset-0 bg-black/60 z-30 md:hidden backdrop-blur-xs animate-in fade-in duration-150"
+                  onClick={() => setSidebarOpen(false)}
+                />
+              )}
+              {membersDrawerOpen && (
+                <div
+                  className="fixed inset-0 bg-black/60 z-30 md:hidden backdrop-blur-xs animate-in fade-in duration-150"
+                  onClick={() => setMembersDrawerOpen(false)}
+                />
+              )}
+
               {sidebarOpen && (
                 <ChannelSidebar
                   server={activeServerDetails}
@@ -851,6 +865,7 @@ export const App: React.FC = () => {
                   onOpenCreateServerModal={() => setIsCreateServerOpen(true)}
                   onOpenSettings={() => setIsSettingsOpen(true)}
                   onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+                  onClose={() => setSidebarOpen(false)}
                 />
               )}
 
